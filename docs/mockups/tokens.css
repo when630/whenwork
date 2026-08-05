@@ -1,0 +1,92 @@
+/* WHENWORK 디자인 토큰 v0.1 — 목업 공용
+   다크 단일 테마 (페르소나: 하루 종일 IDE·터미널, 다크 환경) */
+:root {
+  /* 색 — 표면 */
+  --bg-app: #16171c;        /* 앱 바탕 */
+  --bg-raised: #1e2027;     /* 카드·팝업 */
+  --bg-inset: #131419;      /* 입력창·코드 */
+  --bg-hover: #262933;
+  --border: #2e323d;
+  --border-focus: #7aa2f7;
+
+  /* 색 — 텍스트 (bg-raised 기준 대비: primary 13.9:1, secondary 7.2:1, muted 4.7:1) */
+  --text-primary: #e6e8ee;
+  --text-secondary: #a8afbd;
+  --text-muted: #7b8294;
+
+  /* 색 — 의미 */
+  --accent: #7aa2f7;        /* 포커스·액션 */
+  --accent-dim: rgba(122,162,247,.14);
+  --success: #9ece6a;
+  --warning: #e0af68;
+  --danger:  #f7768e;
+  --ai: #bb9af7;            /* AI 생성물 표식 */
+  --ai-dim: rgba(187,154,247,.13);
+
+  /* 색 — 프로젝트 칩 (채도 낮게, 텍스트 대비 AA) */
+  --proj-sj: #f7768e;  /* 시재건설 */
+  --proj-fg: #9ece6a;  /* 서식갤러리 */
+  --proj-gw: #7aa2f7;  /* GoWrite */
+  --proj-ef: #e0af68;  /* eformsign */
+  --proj-ww: #bb9af7;  /* whenwork */
+
+  /* 타이포 */
+  --font-sans: "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "D2Coding", Consolas, monospace;
+  --fs-lg: 16px;
+  --fs-md: 14px;
+  --fs-sm: 13px;
+  --fs-xs: 12px;
+
+  /* 간격 · 라운드 · 그림자 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px;
+  --shadow-pop: 0 8px 32px rgba(0,0,0,.55), 0 0 0 1px var(--border);
+}
+
+/* ---- 목업 프레임 공통 ---- */
+* { box-sizing: border-box; margin: 0; }
+body {
+  background: #0d0e12;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  padding: 40px 24px 80px;
+}
+.stage { max-width: 1100px; margin: 0 auto; }
+.stage > h1 { font-size: 20px; margin-bottom: 4px; }
+.stage > .desc { color: var(--text-secondary); margin-bottom: 32px; }
+.frames { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+.frame > .label {
+  font-size: var(--fs-sm); color: var(--text-muted);
+  margin-bottom: 10px; font-family: var(--font-mono);
+}
+.note {
+  max-width: 420px; margin-top: 10px; padding: 10px 12px;
+  background: var(--accent-dim); border-left: 3px solid var(--accent);
+  border-radius: var(--r-sm); font-size: var(--fs-sm); color: var(--text-secondary);
+}
+a.back { color: var(--accent); font-size: var(--fs-sm); text-decoration: none; }
+a.back:hover { text-decoration: underline; }
+
+/* ---- 공용 컴포넌트 ---- */
+kbd {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--bg-inset); border: 1px solid var(--border);
+  border-bottom-width: 2px; border-radius: 4px;
+  padding: 1px 5px; color: var(--text-secondary);
+}
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-xs); color: var(--text-secondary);
+  padding: 1px 8px; border-radius: 99px;
+  background: var(--bg-inset); border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.chip .dot { width: 7px; height: 7px; border-radius: 99px; flex: none; }
+.badge-ai {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--fs-xs); color: var(--ai);
+  background: var(--ai-dim); border-radius: 4px; padding: 1px 6px;
+}

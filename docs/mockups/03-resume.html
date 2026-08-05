@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>WHENWORK 목업 — 재개 카드</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  .tray {
+    width: 480px; height: 660px; background: var(--bg-app);
+    border-radius: var(--r-lg); box-shadow: var(--shadow-pop);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .tray header {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--border);
+  }
+  .back-btn { color: var(--text-muted); font-size: var(--fs-md); cursor: pointer; }
+  .proj-name { font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .proj-name .dot { width: 9px; height: 9px; border-radius: 99px; }
+  .gen-at { margin-left: auto; font-size: var(--fs-xs); color: var(--text-muted); }
+
+  .body { flex: 1; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+
+  .card {
+    background: var(--bg-raised); border: 1px solid var(--border);
+    border-radius: var(--r-md); padding: var(--sp-4);
+    display: flex; flex-direction: column; gap: var(--sp-3);
+  }
+  .card .sec .h {
+    font-size: var(--fs-xs); color: var(--text-muted);
+    letter-spacing: .06em; margin-bottom: 3px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .card .sec .v { font-size: var(--fs-md); color: var(--text-primary); }
+  .next {
+    background: var(--accent-dim); border: 1px solid transparent;
+    border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3);
+    display: flex; gap: var(--sp-2); align-items: baseline;
+  }
+  .next .arrow { color: var(--accent); font-weight: 700; flex: none; }
+  .next .v { font-size: var(--fs-md); }
+  .next .todo-link { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 2px; }
+
+  .acts { display: flex; gap: var(--sp-2); }
+  .btn {
+    font-size: var(--fs-sm); color: var(--text-secondary);
+    background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: var(--r-sm); padding: 4px 10px; cursor: pointer;
+  }
+  .btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  .git-h { font-size: var(--fs-xs); color: var(--text-muted); letter-spacing: .06em; margin-bottom: var(--sp-2); }
+  .commit {
+    display: flex; gap: var(--sp-2); align-items: baseline;
+    font-family: var(--font-mono); font-size: var(--fs-xs);
+    padding: 3px 0; color: var(--text-secondary);
+  }
+  .commit .sha { color: var(--warning); flex: none; }
+  .commit .when { color: var(--text-muted); margin-left: auto; flex: none; }
+
+  /* 로딩 상태 */
+  .skeleton { display: flex; flex-direction: column; gap: 10px; }
+  .sk {
+    height: 12px; border-radius: 4px;
+    background: linear-gradient(90deg, var(--bg-inset) 25%, var(--bg-hover) 50%, var(--bg-inset) 75%);
+    background-size: 200% 100%; animation: shim 1.4s infinite;
+  }
+  @keyframes shim { to { background-position: -200% 0; } }
+  .gen-status { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--ai); }
+  .spin {
+    width: 12px; height: 12px; border: 2px solid var(--ai-dim);
+    border-top-color: var(--ai); border-radius: 99px;
+    animation: rot .8s linear infinite;
+  }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* 에러 상태 */
+  .err {
+    background: rgba(247,118,142,.08); border: 1px solid rgba(247,118,142,.35);
+    border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-sm); color: var(--text-secondary);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .err .t { color: var(--danger); font-weight: 600; }
+
+  .tray footer {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--border);
+    font-size: var(--fs-xs); color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <a class="back" href="index.html">← 목업 인덱스</a>
+  <h1>재개 카드 — 프로젝트 상세</h1>
+  <p class="desc">오늘 뷰에서 항목 선택 후 Enter, 또는 프로젝트 칩 클릭으로 진입. "카드만 보고 작업 재개"가 M2 완료 판정.</p>
+
+  <div class="frames">
+
+    <div class="frame">
+      <div class="label">A. 정상 — AI 생성 카드 + git 활동</div>
+      <div class="tray">
+        <header>
+          <span class="back-btn">‹</span>
+          <span class="proj-name"><span class="dot" style="background:var(--proj-gw)"></span>GoWrite</span>
+          <span class="gen-at">✦ 오늘 07:30 생성</span>
+        </header>
+        <div class="body">
+          <div class="card">
+            <div class="sec">
+              <div class="h"><span class="badge-ai">✦ AI</span> 마지막 작업</div>
+              <div class="v">에디터 붙여넣기 시 외부 서식 제거 로직 작업. sanitizer 단위 테스트 8건 추가까지 완료.</div>
+            </div>
+            <div class="sec">
+              <div class="h">멈춘 지점</div>
+              <div class="v">표(table) 붙여넣기에서 셀 병합이 깨지는 케이스 재현만 해두고 원인 미확인 상태.</div>
+            </div>
+            <div class="sec">
+              <div class="h">다음 액션</div>
+              <div class="next">
+                <span class="arrow">→</span>
+                <div>
+                  <div class="v">colspan 처리 분기(sanitizer.ts:214)부터 디버거로 확인</div>
+                  <div class="todo-link">연관 todo: "에디터 붙여넣기 서식 버그 재현 스텝 정리" (D+2)</div>
+                </div>
+              </div>
+            </div>
+            <div class="acts">
+              <span class="btn">↻ 다시 생성 <kbd>R</kbd></span>
+              <span class="btn">이 프로젝트 todo 보기 <kbd>T</kbd></span>
+            </div>
+          </div>
+          <div>
+            <div class="git-h">최근 활동 (git · 자동 수집)</div>
+            <div class="commit"><span class="sha">a3f92c1</span><span>test: sanitizer 표 병합 케이스 추가</span><span class="when">어제 18:42</span></div>
+            <div class="commit"><span class="sha">7b01d4e</span><span>feat: 붙여넣기 서식 제거 1차</span><span class="when">어제 15:10</span></div>
+            <div class="commit"><span class="sha">c9e88a0</span><span>chore: eslint 룰 정리</span><span class="when">8/3</span></div>
+          </div>
+        </div>
+        <footer><span>✦ 표시 = AI 생성, 언제든 재생성 가능</span><span><kbd>Esc</kbd> 뒤로</span></footer>
+      </div>
+      <div class="note">3문항 고정 구조(마지막 작업/멈춘 지점/다음 액션 <b>1개</b>). 다음 액션은 항상 하나만 — 목록이면 다시 고민하게 되므로.</div>
+    </div>
+
+    <div class="frame">
+      <div class="label">B. 생성 중 — claude -p 호출 (수 초~수십 초)</div>
+      <div class="tray" style="height:480px">
+        <header>
+          <span class="back-btn">‹</span>
+          <span class="proj-name"><span class="dot" style="background:var(--proj-ef)"></span>eformsign</span>
+        </header>
+        <div class="body">
+          <div class="card">
+            <div class="gen-status"><span class="spin"></span>재개 카드 생성 중… (claude -p)</div>
+            <div class="skeleton">
+              <div class="sk" style="width:85%"></div>
+              <div class="sk" style="width:70%"></div>
+              <div class="sk" style="width:78%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="git-h">최근 활동 (git · 자동 수집)</div>
+            <div class="commit"><span class="sha">f21ab30</span><span>fix: webhook retry backoff</span><span class="when">오늘 10:02</span></div>
+            <div class="commit"><span class="sha">88c0d17</span><span>docs: API 에러코드 표 갱신</span><span class="when">8/4</span></div>
+          </div>
+        </div>
+        <footer><span>이전 카드: 8/1 (만료됨)</span><span><kbd>Esc</kbd> 뒤로</span></footer>
+      </div>
+      <div class="note">git 활동은 로컬 데이터라 <b>즉시</b> 먼저 그린다. AI 부분만 스켈레톤 — 기다리는 동안에도 커밋 로그로 재개 가능.</div>
+    </div>
+
+    <div class="frame">
+      <div class="label">C. AI 실패 — 카드 없이도 기능해야 함</div>
+      <div class="tray" style="height:480px">
+        <header>
+          <span class="back-btn">‹</span>
+          <span class="proj-name"><span class="dot" style="background:var(--proj-sj)"></span>시재건설</span>
+        </header>
+        <div class="body">
+          <div class="err">
+            <span class="t">카드 생성 실패</span>
+            <span>claude -p 응답 없음 (구독 한도 또는 네트워크). 아래 git 활동은 정상 표시됩니다.</span>
+            <div class="acts"><span class="btn">↻ 재시도 <kbd>R</kbd></span><span class="btn">8/1 카드 보기</span></div>
+          </div>
+          <div>
+            <div class="git-h">최근 활동 (git · 자동 수집)</div>
+            <div class="commit"><span class="sha">0d4e9b2</span><span>feat: 메인 배너 슬라이더 시안 B</span><span class="when">8/4</span></div>
+            <div class="commit"><span class="sha">5a77c03</span><span>fix: 모바일 헤더 겹침</span><span class="when">8/3</span></div>
+          </div>
+        </div>
+        <footer><span>오픈이슈 #4: 한도 초과 시 빈도 조정</span><span><kbd>Esc</kbd> 뒤로</span></footer>
+      </div>
+      <div class="note">AI는 부가 레이어. 실패해도 원본(git 활동·todo)은 그대로 — 설계 원칙 "AI 생성물은 버려도 됨"의 UI 표현.</div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

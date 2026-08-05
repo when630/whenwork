@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>WHENWORK 목업 — 오늘 뷰 (트레이 창)</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* 트레이 창: 400×560, 우하단 트레이 근처에 뜨는 크기 감각 */
+  .tray {
+    width: 480px; height: 660px; background: var(--bg-app);
+    border-radius: var(--r-lg); box-shadow: var(--shadow-pop);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .tray header {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4) 0;
+  }
+  .tray header .title { font-weight: 700; font-size: var(--fs-md); }
+  .tray header .date { color: var(--text-muted); font-size: var(--fs-xs); margin-left: auto; }
+
+  .tabs {
+    display: flex; gap: var(--sp-1);
+    padding: var(--sp-2) var(--sp-3) 0; border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 6px 10px 8px; font-size: var(--fs-sm); color: var(--text-secondary);
+    border-radius: var(--r-sm) var(--r-sm) 0 0; cursor: pointer;
+    border-bottom: 2px solid transparent; display: flex; gap: 6px; align-items: center;
+  }
+  .tab .n {
+    font-size: 10px; font-family: var(--font-mono);
+    background: var(--bg-inset); border-radius: 99px; padding: 0 6px;
+  }
+  .tab.on { color: var(--text-primary); border-bottom-color: var(--accent); }
+  .tab:hover:not(.on) { background: var(--bg-hover); }
+  .tab kbd { margin-left: 2px; }
+
+  .body { flex: 1; overflow-y: auto; padding: var(--sp-2) 0; }
+
+  .group-h {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-4) var(--sp-1);
+    font-size: var(--fs-xs); color: var(--text-muted);
+  }
+  .item {
+    display: flex; align-items: flex-start; gap: var(--sp-2);
+    padding: 7px var(--sp-4); cursor: pointer;
+  }
+  .item:hover { background: var(--bg-hover); }
+  .item.selected { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
+  .cb {
+    width: 15px; height: 15px; flex: none; margin-top: 3px;
+    border: 1.5px solid var(--text-muted); border-radius: 4px;
+  }
+  .item.done .cb { background: var(--success); border-color: var(--success); position: relative; }
+  .item.done .cb::after { content: "✓"; position: absolute; inset: -3px 0 0 2px; font-size: 11px; color: #16171c; }
+  .item.done .t { color: var(--text-muted); text-decoration: line-through; }
+  .item .t { flex: 1; font-size: var(--fs-md); }
+  .item .meta { display: flex; gap: 6px; align-items: center; flex: none; margin-top: 1px; }
+  .due { font-size: var(--fs-xs); font-family: var(--font-mono); color: var(--text-muted); }
+  .due.today { color: var(--warning); }
+  .due.over { color: var(--danger); }
+
+  /* 인박스 탭: AI 분류 제안 */
+  .ctx { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; }
+  .numlegend {
+    margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-4);
+    border-top: 1px dashed var(--border);
+    font-size: var(--fs-xs); color: var(--text-muted);
+    display: flex; gap: 10px; flex-wrap: wrap;
+  }
+  .numlegend b { font-family: var(--font-mono); color: var(--text-secondary); }
+  .suggest {
+    display: flex; gap: 6px; align-items: center;
+    margin: 2px 0 0 23px; font-size: var(--fs-xs);
+  }
+  .suggest .act { color: var(--text-muted); }
+  .suggest kbd { font-size: 9px; }
+
+  /* 대기 탭 */
+  .wait-meta { font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; }
+  .elapsed { font-family: var(--font-mono); }
+  .elapsed.hot { color: var(--danger); }
+
+  /* 빈 상태 */
+  .empty {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: var(--sp-2);
+    color: var(--text-muted); font-size: var(--fs-sm); text-align: center;
+  }
+  .empty .big { font-size: 28px; opacity: .5; }
+
+  .tray footer {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: var(--sp-2) var(--sp-4);
+    border-top: 1px solid var(--border);
+    font-size: var(--fs-xs); color: var(--text-muted);
+  }
+  .sync { display: flex; align-items: center; gap: 5px; }
+  .sync .led { width: 7px; height: 7px; border-radius: 99px; background: var(--success); }
+  .sync.off .led { background: var(--warning); }
+  .foot-hints { display: flex; gap: var(--sp-3); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <a class="back" href="index.html">← 목업 인덱스</a>
+  <h1>오늘 뷰 — 트레이 창 (480×660)</h1>
+  <p class="desc">트레이 클릭 또는 단축키로 토글. 탭 3개(오늘·인박스·대기)는 <kbd>Tab</kbd> 순환 전환 — 숫자키는 프로젝트 지정에 사용. 마우스 없이 전 조작 가능.</p>
+
+  <div class="frames">
+
+    <div class="frame">
+      <div class="label">A. 오늘 탭 — 프로젝트 횡단, 그룹핑</div>
+      <div class="tray">
+        <header><span class="title">WHENWORK</span><span class="date">8/5 (수)</span></header>
+        <div class="tabs">
+          <div class="tab on">오늘 <span class="n">5</span></div>
+          <div class="tab">인박스 <span class="n">3</span></div>
+          <div class="tab">대기 <span class="n">2</span></div>
+        </div>
+        <div class="body">
+          <div class="group-h"><span class="chip"><span class="dot" style="background:var(--proj-ef)"></span>eformsign</span></div>
+          <div class="item selected">
+            <div class="cb"></div>
+            <div class="t">웹훅 재시도 정책 문의 답장</div>
+            <div class="meta"><span class="due today">오늘</span></div>
+          </div>
+          <div class="item">
+            <div class="cb"></div>
+            <div class="t">샌드박스 토큰 만료 확인</div>
+          </div>
+          <div class="group-h"><span class="chip"><span class="dot" style="background:var(--proj-gw)"></span>GoWrite</span></div>
+          <div class="item">
+            <div class="cb"></div>
+            <div class="t">에디터 붙여넣기 서식 버그 재현 스텝 정리</div>
+            <div class="meta"><span class="due over">D+2</span></div>
+          </div>
+          <div class="item done">
+            <div class="cb"></div>
+            <div class="t">릴리즈 노트 초안</div>
+          </div>
+          <div class="group-h"><span class="chip"><span class="dot" style="background:var(--proj-sj)"></span>시재건설</span></div>
+          <div class="item">
+            <div class="cb"></div>
+            <div class="t">메인 배너 시안 2안 비교표 전달</div>
+          </div>
+        </div>
+        <footer>
+          <span class="sync"><span class="led"></span>동기화됨</span>
+          <span class="foot-hints"><span><kbd>Tab</kbd> 탭</span><span><kbd>Space</kbd> 완료</span><span><kbd>Enter</kbd> 재개 카드</span><span><kbd>Esc</kbd> 닫기</span></span>
+        </footer>
+      </div>
+      <div class="note">정렬: 마감 임박 우선 → 프로젝트 그룹. 선택 항목에서 <b>Enter</b>를 치면 그 프로젝트의 재개 카드로 진입(03 목업).</div>
+    </div>
+
+    <div class="frame">
+      <div class="label">B. 인박스 탭 — AI 분류 제안, 확정은 사용자</div>
+      <div class="tray">
+        <header><span class="title">WHENWORK</span><span class="date">8/5 (수)</span></header>
+        <div class="tabs">
+          <div class="tab">오늘 <span class="n">5</span></div>
+          <div class="tab on">인박스 <span class="n">3</span></div>
+          <div class="tab">대기 <span class="n">2</span></div>
+        </div>
+        <div class="body">
+          <div class="item selected" style="flex-wrap:wrap">
+            <div class="cb"></div>
+            <div class="t">eformsign 웹훅 재시도 정책 문의 답장하기</div>
+            <div class="ctx">📎 캡처 당시: eformsign 리포에서 작업 중</div>
+            <div class="suggest">
+              <span class="badge-ai">✦ AI</span>
+              <span class="chip"><span class="dot" style="background:var(--proj-ef)"></span>eformsign</span>
+              <span class="act"><kbd>Enter</kbd> 확정 · <kbd>1</kbd>~<kbd>9</kbd> 변경 · <kbd>W</kbd> 대기로</span>
+            </div>
+          </div>
+          <div class="item" style="flex-wrap:wrap">
+            <div class="cb"></div>
+            <div class="t">서식갤러리 검색 로그 이상치 살펴보기</div>
+            <div class="suggest">
+              <span class="badge-ai">✦ AI</span>
+              <span class="chip"><span class="dot" style="background:var(--proj-fg)"></span>서식갤러리</span>
+            </div>
+          </div>
+          <div class="item" style="flex-wrap:wrap">
+            <div class="cb"></div>
+            <div class="t">모니터암 나사 규격 찾기</div>
+            <div class="suggest">
+              <span class="badge-ai" style="color:var(--text-muted);background:var(--bg-inset)">✦ 제안 없음</span>
+              <span class="act">개인 항목인 듯 — 숫자키로 직접 지정</span>
+            </div>
+            <div class="ctx">📎 캡처 당시: 브라우저 — 근거 약해 제안 안 함</div>
+          </div>
+          <div class="numlegend"><span><b>1</b> 시재건설</span><span><b>2</b> 서식갤러리</span><span><b>3</b> GoWrite</span><span><b>4</b> eformsign</span><span><b>5</b> whenwork</span></div>
+        </div>
+        <footer>
+          <span class="sync"><span class="led"></span>동기화됨</span>
+          <span class="foot-hints"><span><kbd>Tab</kbd> 탭</span><span><kbd>Enter</kbd> 제안 확정</span><span><kbd>A</kbd> 전체 재분류</span></span>
+        </footer>
+      </div>
+      <div class="note">AI 제안은 보라(✦), 캡처 컨텍스트 근거는 📎로 표시. <b>Enter</b> 한 번이면 제안대로 이동, 숫자키(하단 범례)로 다른 프로젝트 즉시 지정. 자신 없으면 제안을 안 낸다.</div>
+    </div>
+
+    <div class="frame">
+      <div class="label">C. 대기 탭 — waiting-for, 경과일 강조</div>
+      <div class="tray">
+        <header><span class="title">WHENWORK</span><span class="date">8/5 (수)</span></header>
+        <div class="tabs">
+          <div class="tab">오늘 <span class="n">5</span></div>
+          <div class="tab">인박스 <span class="n">3</span></div>
+          <div class="tab on">대기 <span class="n">2</span></div>
+        </div>
+        <div class="body">
+          <div class="item selected" style="flex-wrap:wrap">
+            <div class="cb"></div>
+            <div class="t">스테이징 서버 방화벽 오픈</div>
+            <div class="wait-meta" style="width:100%">→ 인프라팀 · 요청 7/29 · <span class="elapsed hot">경과 7일</span></div>
+          </div>
+          <div class="item" style="flex-wrap:wrap">
+            <div class="cb"></div>
+            <div class="t">배너 카피 컨펌</div>
+            <div class="wait-meta" style="width:100%">→ 시재건설 담당자 · 요청 8/4 · <span class="elapsed">경과 1일</span></div>
+          </div>
+        </div>
+        <footer>
+          <span class="sync"><span class="led"></span>동기화됨</span>
+          <span class="foot-hints"><span><kbd>Space</kbd> 회신 옴(완료)</span><span><kbd>N</kbd> 재촉 메모</span></span>
+        </footer>
+      </div>
+      <div class="note">경과 5일 이상은 적색. "누구에게 → 무엇을"이 한 줄에 다 보이는 게 목적.</div>
+    </div>
+
+    <div class="frame">
+      <div class="label">D. 빈 상태 + DB 오프라인 푸터</div>
+      <div class="tray" style="height:460px">
+        <header><span class="title">WHENWORK</span><span class="date">8/5 (수)</span></header>
+        <div class="tabs">
+          <div class="tab on">오늘 <span class="n">0</span></div>
+          <div class="tab">인박스 <span class="n">0</span></div>
+          <div class="tab">대기 <span class="n">2</span></div>
+        </div>
+        <div class="body">
+          <div class="empty">
+            <div class="big">◎</div>
+            <div>오늘 항목이 없습니다</div>
+            <div>생각나면 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> 로 던져두세요</div>
+          </div>
+        </div>
+        <footer>
+          <span class="sync off"><span class="led"></span>DB 대기 — 큐 3건</span>
+          <span class="foot-hints"><span><kbd>Esc</kbd> 닫기</span></span>
+        </footer>
+      </div>
+      <div class="note">빈 상태가 퀵캡처 단축키를 학습시키는 자리. DB 오프라인은 푸터 LED 색 하나로만 — 조용한 실패.</div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

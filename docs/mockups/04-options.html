@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>WHENWORK 목업 — 결정 후보군 (프로젝트 인지 · 단축키 · 색)</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  section { margin-top: 48px; }
+  section > h2 { font-size: 17px; margin-bottom: 4px; }
+  section > .sub { color: var(--text-secondary); font-size: var(--fs-sm); margin-bottom: 20px; }
+  .pick { color: var(--success); font-size: var(--fs-xs); font-weight: 700; margin-left: 8px; }
+
+  /* ---- A. 프로젝트 인지 미니 목업 ---- */
+  .mini-cap {
+    width: 460px; background: var(--bg-raised); border-radius: var(--r-md);
+    box-shadow: var(--shadow-pop); padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-md);
+  }
+  .mini-cap .line { display: flex; gap: 10px; align-items: center; }
+  .mini-cap .logo {
+    width: 22px; height: 22px; flex: none; border-radius: var(--r-sm);
+    background: var(--accent-dim); color: var(--accent);
+    display: grid; place-items: center; font-family: var(--font-mono); font-weight: 700; font-size: 12px;
+  }
+  .tok { color: var(--accent); background: var(--accent-dim); border-radius: 4px; padding: 0 3px; }
+  .mini-cap .detect {
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+    font-size: var(--fs-xs); color: var(--text-muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .mini-item {
+    width: 460px; background: var(--bg-app); border: 1px solid var(--border);
+    border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); font-size: var(--fs-md);
+  }
+  .mini-item .hint { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 4px; }
+  .opt { margin-bottom: 28px; }
+  .opt h3 { font-size: var(--fs-md); margin-bottom: 8px; }
+  .opt .pros { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: 8px; max-width: 560px; }
+  .opt .pros b.bad { color: var(--warning); }
+
+  /* ---- B. 단축키 표 ---- */
+  table { border-collapse: collapse; font-size: var(--fs-sm); }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: var(--bg-raised); color: var(--text-secondary); font-weight: 600; }
+  td { color: var(--text-secondary); }
+  td.k { white-space: nowrap; }
+  td b { color: var(--text-primary); }
+  .warn { color: var(--warning); }
+  .good { color: var(--success); }
+
+  /* ---- C. 악센트 색 후보 ---- */
+  .swatches { display: flex; flex-wrap: wrap; gap: 24px; }
+  .sw {
+    width: 300px; background: var(--bg-app); border: 1px solid var(--border);
+    border-radius: var(--r-md); overflow: hidden;
+  }
+  .sw .head { padding: 10px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
+  .sw .head .c { width: 16px; height: 16px; border-radius: 4px; background: var(--accent); }
+  .sw .head .name { font-size: var(--fs-sm); font-weight: 700; }
+  .sw .head .hex { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); margin-left: auto; }
+  .sw .demo { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .sw .tabs2 { display: flex; gap: 10px; font-size: var(--fs-sm); }
+  .sw .tabs2 .on2 { color: var(--text-primary); border-bottom: 2px solid var(--accent); padding-bottom: 3px; }
+  .sw .tabs2 span:not(.on2) { color: var(--text-muted); }
+  .sw .row2 {
+    background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent);
+    border-radius: var(--r-sm); padding: 6px 10px; font-size: var(--fs-sm);
+  }
+  .sw .next2 { display: flex; gap: 8px; font-size: var(--fs-sm); background: var(--accent-dim); border-radius: var(--r-sm); padding: 6px 10px; }
+  .sw .next2 .a { color: var(--accent); font-weight: 700; }
+  .sw .btn2 {
+    align-self: flex-start; font-size: var(--fs-xs); color: var(--accent);
+    border: 1px solid var(--accent); border-radius: var(--r-sm); padding: 3px 10px;
+  }
+  .sw .caveat { font-size: var(--fs-xs); color: var(--text-muted); padding: 0 14px 12px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <a class="back" href="index.html">← 목업 인덱스</a>
+  <h1>결정 후보군</h1>
+  <p class="desc">v0.1 피드백 ②③⑤에 대한 선택지 — <b style="color:var(--success)">결정 완료(기록용)</b>: A = ①+③ 기본 + ② 옵션 · B-1 = Ctrl+Alt+Space(Claude 바인딩 해제) · B-2 = 2안 잠정 · C = 블루.</p>
+
+  <!-- ============ A ============ -->
+  <section>
+    <h2>A. 캡처한 항목이 어느 프로젝트인지 아는 방법</h2>
+    <p class="sub">셋은 배타적이지 않음 — 추천은 <b>①+③ 기본 탑재, ②는 파워유저 옵션</b>. 어느 경우든 퀵캡처에 선택 UI는 추가하지 않는다(게이트 유지).</p>
+
+    <div class="opt">
+      <h3>① 자동 컨텍스트 기록 <span class="pick">✓ 추천 (기본)</span></h3>
+      <div class="mini-item">
+        <div>에디터 붙여넣기 버그 스텝 정리</div>
+        <div class="hint">📎 캡처 당시: <b>GoWrite</b> 리포에서 작업 중 (11:02, IDE 포그라운드) → AI 분류 근거로 사용</div>
+      </div>
+      <div class="pros">캡처 순간 <b>포그라운드 창 제목 + 최근 커밋 리포</b>를 조용히 메타데이터로 저장. 입력 비용 0, 인박스에서 힌트로 노출되고 AI 분류 정확도의 재료가 됨. <b class="bad">한계:</b> 브라우저에서 캡처하면 추정 약함 — 그래서 ③과 병행.</div>
+    </div>
+
+    <div class="opt">
+      <h3>② 인라인 토큰 (선택 입력)</h3>
+      <div class="mini-cap">
+        <div class="line"><div class="logo">W</div><div>웹훅 재시도 정책 답장 <span class="tok">#ef</span></div></div>
+        <div class="detect">✓ <b>eformsign</b>으로 인식 — 인박스 건너뛰고 바로 todo로</div>
+      </div>
+      <div class="pros">입력 끝에 <b>#약어</b>(#ef, #gw, #sj…)를 치면 파싱해 즉시 분류. 쓰면 빠르고 안 쓰면 그만 — 강요 없음. <b class="bad">한계:</b> 약어를 외워야 함. 프로젝트별 약어는 설정에서 지정.</div>
+    </div>
+
+    <div class="opt">
+      <h3>③ AI 분류 제안 (설계 v1.0 그대로)</h3>
+      <div class="mini-item">
+        <div>서식갤러리 검색 로그 이상치 살펴보기</div>
+        <div class="hint"><span class="badge-ai">✦ AI</span> 제목 키워드 + ①의 컨텍스트로 <b>서식갤러리</b> 제안 → <b>Y</b>로 확정</div>
+      </div>
+      <div class="pros">인박스 정리 시점에 일괄 제안. ①의 메타데이터가 입력으로 들어가면 제목만 볼 때보다 정확도가 오름.</div>
+    </div>
+  </section>
+
+  <!-- ============ B ============ -->
+  <section>
+    <h2>B. 단축키 후보</h2>
+    <p class="sub">충돌 여부는 추정 — 확정 전 실사용 환경(JetBrains·터미널·브라우저)에서 확인 필요.</p>
+
+    <h3 style="font-size:var(--fs-md); margin-bottom:8px">B-1. 전역 캡처 핫키</h3>
+    <table>
+      <tr><th>후보</th><th>장점</th><th>충돌 리스크 (추정)</th></tr>
+      <tr>
+        <td class="k"><b><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd></b> <span class="pick">✓ 추천</span></td>
+        <td>주요 앱 바인딩 거의 없음, 왼손 한 뼘</td>
+        <td class="good">낮음</td>
+      </tr>
+      <tr>
+        <td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd></td>
+        <td>누르기 가장 편함</td>
+        <td class="warn">JetBrains 스마트 자동완성과 충돌 (.idea 사용 중이라 치명적)</td>
+      </tr>
+      <tr>
+        <td class="k"><kbd>Alt</kbd>+<kbd>`</kbd></td>
+        <td>한 손 최소 동작</td>
+        <td class="warn">JetBrains VCS 팝업과 충돌</td>
+      </tr>
+      <tr>
+        <td class="k"><kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd></td>
+        <td>앱 충돌은 없음</td>
+        <td class="warn">Win 조합은 OS가 선점 확장 중 — 향후 깨질 위험</td>
+      </tr>
+    </table>
+
+    <h3 style="font-size:var(--fs-md); margin:24px 0 8px">B-2. 인박스 분류 키 세트</h3>
+    <table>
+      <tr><th>안</th><th>키 배치</th><th>장점</th><th>단점</th></tr>
+      <tr>
+        <td><b>1안 니모닉</b></td>
+        <td class="k"><kbd>Y</kbd> 제안 확정 · <kbd>P</kbd> 프로젝트 피커 · <kbd>W</kbd> 대기로 · <kbd>D</kbd> 마감 · <kbd>X</kbd> 삭제</td>
+        <td>영문 연상으로 외우기 쉬움</td>
+        <td>피커 열리는 만큼 손이 한 번 더 감</td>
+      </tr>
+      <tr>
+        <td><b>2안 숫자 다이렉트</b> <span class="pick">✓ 추천</span></td>
+        <td class="k"><kbd>Enter</kbd> 제안 확정 · <kbd>1</kbd>~<kbd>9</kbd> 프로젝트 즉시 지정 · <kbd>W</kbd> 대기 · <kbd>X</kbd> 삭제</td>
+        <td>피커 없이 한 키로 끝 — 가장 빠름. 프로젝트 5개 내외인 현 상황에 최적</td>
+        <td>순번 기억 필요 → 화면에 번호 상시 노출로 보완</td>
+      </tr>
+      <tr>
+        <td><b>3안 Vim 스타일</b></td>
+        <td class="k"><kbd>j</kbd>/<kbd>k</kbd> 이동 · <kbd>Enter</kbd> 확정 · <kbd>p</kbd> 피커 · <kbd>w</kbd> 대기 · <kbd>d</kbd><kbd>d</kbd> 삭제</td>
+        <td>터미널 근육기억 재활용</td>
+        <td>2키 조합(dd)은 과함. j/k 이동만 다른 안에 얹는 게 나음</td>
+      </tr>
+    </table>
+    <p class="sub" style="margin-top:10px">공통(모든 안): <kbd>↑</kbd><kbd>↓</kbd> 또는 <kbd>j</kbd><kbd>k</kbd> 이동 · <kbd>Space</kbd> 완료 · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 탭 전환<b class="warn"> ← 2안 채택 시 탭 전환은 <kbd>Tab</kbd> 순환으로 변경 필요(숫자키 충돌)</b></p>
+  </section>
+
+  <!-- ============ C ============ -->
+  <section>
+    <h2>C. 악센트 색 후보</h2>
+    <p class="sub">악센트 = 포커스·선택·다음 액션·활성 탭. 의미색(성공 초록/경고 앰버/위험 적색/AI 보라)과 겹치지 않아야 함. 4안 모두 다크 배경 대비 AA 이상.</p>
+    <div class="swatches">
+
+      <div class="sw">
+        <div class="head"><span class="c"></span><span class="name">1. 블루 (현재) </span><span class="pick">✓ 추천</span><span class="hex">#7aa2f7</span></div>
+        <div class="demo">
+          <div class="tabs2"><span class="on2">오늘</span><span>인박스</span><span>대기</span></div>
+          <div class="row2">선택된 항목</div>
+          <div class="next2"><span class="a">→</span>다음 액션</div>
+          <div class="btn2">↻ 다시 생성</div>
+        </div>
+        <div class="caveat">중립·차분. 어떤 의미색과도 안 겹침. IDE 다크 테마와 이질감 없음.</div>
+      </div>
+
+      <div class="sw" style="--accent:#4fd6be; --accent-dim:rgba(79,214,190,.13)">
+        <div class="head"><span class="c"></span><span class="name">2. 틸</span><span class="hex">#4fd6be</span></div>
+        <div class="demo">
+          <div class="tabs2"><span class="on2">오늘</span><span>인박스</span><span>대기</span></div>
+          <div class="row2">선택된 항목</div>
+          <div class="next2"><span class="a">→</span>다음 액션</div>
+          <div class="btn2">↻ 다시 생성</div>
+        </div>
+        <div class="caveat">신선하고 또렷. 성공 초록(#9ece6a)과 다소 근접 — 체크 표시와 나란히 있을 때 구분 약해질 수 있음.</div>
+      </div>
+
+      <div class="sw" style="--accent:#ff9e64; --accent-dim:rgba(255,158,100,.13)">
+        <div class="head"><span class="c"></span><span class="name">3. 오렌지</span><span class="hex">#ff9e64</span></div>
+        <div class="demo">
+          <div class="tabs2"><span class="on2">오늘</span><span>인박스</span><span>대기</span></div>
+          <div class="row2">선택된 항목</div>
+          <div class="next2"><span class="a">→</span>다음 액션</div>
+          <div class="btn2">↻ 다시 생성</div>
+        </div>
+        <div class="caveat">따뜻하고 개성 있음. 경고 앰버(#e0af68)와 계열이 겹침 — 채택 시 경고색을 다른 톤으로 조정 필요.</div>
+      </div>
+
+      <div class="sw" style="--accent:#9d7cd8; --accent-dim:rgba(157,124,216,.14)">
+        <div class="head"><span class="c"></span><span class="name">4. 바이올렛</span><span class="hex">#9d7cd8</span></div>
+        <div class="demo">
+          <div class="tabs2"><span class="on2">오늘</span><span>인박스</span><span>대기</span></div>
+          <div class="row2">선택된 항목</div>
+          <div class="next2"><span class="a">→</span>다음 액션</div>
+          <div class="btn2">↻ 다시 생성</div>
+        </div>
+        <div class="caveat">고급스러움. 단, AI 표식 보라(✦ #bb9af7)와 겹침 — 채택 시 AI 표식을 시안 등으로 바꿔야 "AI = 별도 색" 원칙 유지.</div>
+      </div>
+
+    </div>
+  </section>
+</div>
+</body>
+</html>

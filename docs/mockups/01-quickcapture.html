@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>WHENWORK 목업 — 퀵캡처 팝업</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* 퀵캡처 창: 화면 중앙 부유, 560px. Raycast/Spotlight 패턴 */
+  .capture {
+    width: 560px; background: var(--bg-raised);
+    border-radius: var(--r-lg); box-shadow: var(--shadow-pop);
+    overflow: hidden;
+  }
+  .capture .row {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: var(--sp-4);
+  }
+  .capture .logo {
+    width: 26px; height: 26px; flex: none; border-radius: var(--r-sm);
+    background: var(--accent-dim); color: var(--accent);
+    display: grid; place-items: center;
+    font-family: var(--font-mono); font-weight: 700; font-size: 13px;
+  }
+  .capture input, .capture .fake-input {
+    flex: 1; background: none; border: none; outline: none;
+    color: var(--text-primary); font-family: var(--font-sans);
+    font-size: var(--fs-lg);
+  }
+  .fake-input .ph { color: var(--text-muted); }
+  .fake-input .caret {
+    display: inline-block; width: 1px; height: 18px;
+    background: var(--accent); vertical-align: text-bottom;
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .capture .foot {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: var(--sp-2) var(--sp-4);
+    border-top: 1px solid var(--border);
+    font-size: var(--fs-xs); color: var(--text-muted);
+  }
+  .capture .foot .hints { display: flex; gap: var(--sp-3); }
+  .capture.focus { outline: 1.5px solid var(--border-focus); }
+
+  /* 저장 성공 상태 */
+  .capture.saved .row { color: var(--success); }
+  .saved-line {
+    display: flex; align-items: center; gap: var(--sp-2);
+    font-size: var(--fs-lg); color: var(--text-primary);
+  }
+  .saved-line .check { color: var(--success); font-weight: 700; }
+
+  /* 인라인 토큰(선택 기능) */
+  .tok { color: var(--accent); background: var(--accent-dim); border-radius: 4px; padding: 0 3px; }
+  .detect { color: var(--success); font-size: var(--fs-xs); }
+
+  /* 오프라인(큐 대기) 배지 — D1: DB 죽어도 캡처는 성공 */
+  .queue-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--warning); font-size: var(--fs-xs);
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <a class="back" href="index.html">← 목업 인덱스</a>
+  <h1>퀵캡처 팝업</h1>
+  <p class="desc">글로벌 단축키 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd>로 호출. 한 줄 입력 + Enter → 즉시 닫힘. 게이트: 저장까지 어떤 선택지도 띄우지 않는다. 캡처 순간 포그라운드 컨텍스트를 조용히 기록(분류 근거).</p>
+
+  <div class="frames">
+
+    <div class="frame">
+      <div class="label">A. 호출 직후 (빈 상태) — 포커스는 항상 입력창</div>
+      <div class="capture focus">
+        <div class="row">
+          <div class="logo">W</div>
+          <div class="fake-input"><span class="caret"></span><span class="ph">할 일을 한 줄로… (분류는 나중에)</span></div>
+        </div>
+        <div class="foot">
+          <div class="hints"><span><kbd>Enter</kbd> 저장</span><span><kbd>Esc</kbd> 닫기</span></div>
+          <span>인박스로 저장 · 📎 컨텍스트 자동 기록</span>
+        </div>
+      </div>
+      <div class="note">프로젝트 선택·마감일·태그 UI가 <b>없음</b>이 핵심. 마이크로카피가 "나중에 분류"를 안심시킨다.</div>
+    </div>
+
+    <div class="frame">
+      <div class="label">B. 입력 중</div>
+      <div class="capture focus">
+        <div class="row">
+          <div class="logo">W</div>
+          <div class="fake-input">eformsign 웹훅 재시도 정책 문의 답장하기<span class="caret"></span></div>
+        </div>
+        <div class="foot">
+          <div class="hints"><span><kbd>Enter</kbd> 저장</span><span><kbd>Esc</kbd> 닫기</span></div>
+          <span>인박스로 저장 · 📎 컨텍스트 자동 기록</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="label">C. 저장 완료 — 400ms 표시 후 자동 닫힘</div>
+      <div class="capture saved">
+        <div class="row">
+          <div class="logo">W</div>
+          <div class="saved-line"><span class="check">✓</span> 인박스에 저장됨</div>
+        </div>
+      </div>
+      <div class="note">별도 토스트 없음. 팝업 자체가 피드백을 보여주고 닫히는 게 가장 빠르다.</div>
+    </div>
+
+    <div class="frame">
+      <div class="label">D. DB 미기동 시 — 캡처는 그래도 성공 (D1)</div>
+      <div class="capture saved">
+        <div class="row">
+          <div class="logo">W</div>
+          <div class="saved-line"><span class="check">✓</span> 인박스에 저장됨</div>
+        </div>
+        <div class="foot">
+          <span class="queue-badge">⏳ DB 대기 중 — 로컬 큐 3건 (연결되면 자동 동기화)</span>
+        </div>
+      </div>
+      <div class="note">에러로 보여주지 않는다. 사용자 행동이 필요 없는 정보라 경고 톤(황색) 한 줄로만.</div>
+    </div>
+
+    <div class="frame">
+      <div class="label">E. 인라인 토큰 (선택 기능) — #약어 치면 인박스 건너뛰고 바로 todo</div>
+      <div class="capture focus">
+        <div class="row">
+          <div class="logo">W</div>
+          <div class="fake-input">웹훅 재시도 정책 답장 <span class="tok">#ef</span><span class="caret"></span></div>
+        </div>
+        <div class="foot">
+          <span class="detect">✓ eformsign으로 인식됨</span>
+          <div class="hints"><span><kbd>Enter</kbd> 저장</span><span><kbd>Esc</kbd> 닫기</span></div>
+        </div>
+      </div>
+      <div class="note">안 쓰면 그만인 파워유저 옵션. 약어(#sj #fg #gw #ef #ww)는 프로젝트 설정에서 지정. 인식 실패 시 그냥 본문으로 취급 — 실패해도 손해 없음.</div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

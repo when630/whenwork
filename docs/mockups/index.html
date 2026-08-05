@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>WHENWORK UI 목업 v0.1 — 검토용</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--sp-4); margin: var(--sp-5) 0; }
+  .mcard {
+    display: block; background: var(--bg-raised); border: 1px solid var(--border);
+    border-radius: var(--r-md); padding: var(--sp-4); text-decoration: none; color: inherit;
+  }
+  .mcard:hover { border-color: var(--border-focus); }
+  .mcard .no { font-family: var(--font-mono); color: var(--accent); font-size: var(--fs-sm); }
+  .mcard h2 { font-size: var(--fs-lg); margin: 4px 0 6px; }
+  .mcard p { font-size: var(--fs-sm); color: var(--text-secondary); }
+  section { margin-top: var(--sp-5); max-width: 720px; }
+  section h2 { font-size: var(--fs-lg); margin-bottom: var(--sp-2); }
+  section ul { padding-left: 20px; color: var(--text-secondary); font-size: var(--fs-md); }
+  section li { margin: 6px 0; }
+  b { color: var(--text-primary); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <h1>WHENWORK UI 목업 v0.1</h1>
+  <p class="desc">설계 v1.0 기준 검토용 정적 목업. 다크 단일 테마 · 키보드 중심 · 정보 밀도 높음 (페르소나 역산).</p>
+
+  <div class="cards">
+    <a class="mcard" href="01-quickcapture.html">
+      <span class="no">01</span>
+      <h2>퀵캡처 팝업</h2>
+      <p>빈 상태 · 입력 중 · 저장 완료 · DB 오프라인(큐 대기) 4개 상태</p>
+    </a>
+    <a class="mcard" href="02-today.html">
+      <span class="no">02</span>
+      <h2>오늘 뷰 (트레이 창)</h2>
+      <p>오늘 · 인박스(AI 분류 제안) · 대기 탭 + 빈 상태/오프라인 푸터</p>
+    </a>
+    <a class="mcard" href="03-resume.html">
+      <span class="no">03</span>
+      <h2>재개 카드</h2>
+      <p>정상 · 생성 중(스켈레톤) · AI 실패 3개 상태</p>
+    </a>
+    <a class="mcard" href="04-options.html">
+      <span class="no">04</span>
+      <h2>결정 후보군 (기록용)</h2>
+      <p>프로젝트 인지 · 단축키 · 악센트 색 — 선택 완료, 근거 기록으로 보존</p>
+    </a>
+  </div>
+
+  <section>
+    <h2>이 목업이 주장하는 것 (동의하면 확정)</h2>
+    <ul>
+      <li><b>다크 단일 테마</b> — 라이트 모드 없음. IDE 다크 환경 옆에 뜨는 창이라는 전제</li>
+      <li><b>탭 3개 고정</b> (오늘/인박스/대기) + 숫자키 전환. 프로젝트 목록 화면은 따로 없음 — 재개 카드는 항목에서 Enter로 진입</li>
+      <li><b>AI 생성물은 전부 ✦ 보라 표식</b> — 사람 입력과 항상 시각 구분</li>
+      <li><b>DB 오프라인은 에러가 아니라 상태</b> — 푸터 LED·황색 한 줄로만 표현 (D1)</li>
+      <li><b>다음 액션은 항상 1개</b> — 재개 카드에 목록 금지</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>검토 반영 이력 (v0.2)</h2>
+    <ul>
+      <li>✅ 트레이 창 480×660으로 확대, 본문 글자 13→14px</li>
+      <li>✅ 오늘 탭은 프로젝트별 그룹핑으로 확정</li>
+      <li>✅ 퀵캡처 저장 피드백(✓ 400ms) 유지 확정</li>
+      <li>✅ 프로젝트 인지: <b>자동 컨텍스트 기록(📎) + AI 분류 기본, #토큰은 옵션</b></li>
+      <li>✅ 전역 핫키 <b>Ctrl+Alt+Space</b> — 기존 Claude 바인딩은 사용자가 해제하고 사용</li>
+      <li>✅ 악센트 <b>블루 #7aa2f7</b> 확정</li>
+      <li>⏳ 인박스 분류 키: <b>2안 숫자 다이렉트 잠정 적용</b> (Enter 확정 · 1~9 지정 · Tab 탭 전환) — 02 목업 보고 확정</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>

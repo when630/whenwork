@@ -399,7 +399,9 @@ function selectedItem() {
   return currentList()[sel] ?? null;
 }
 
-// 한 줄 텍스트 입력 — null이면 취소
+// 한 줄 텍스트 입력 — null이면 취소.
+// 호출부는 반드시 keydown을 preventDefault한 뒤에 부른다. 안 그러면 다이얼로그를 연 그 키의
+// 기본 동작(문자 입력)이 방금 포커스된 입력창으로 들어간다 — 아래 rAF 리셋은 그 2차 방어.
 function promptText(label, initial = '') {
   return new Promise((resolve) => {
     dlgResolve = resolve;
@@ -407,6 +409,12 @@ function promptText(label, initial = '') {
     $('dlgIn').value = initial;
     $('dlg').classList.add('show');
     $('dlgIn').focus();
+    requestAnimationFrame(() => {
+      if (dlgResolve === resolve && $('dlgIn').value !== initial) {
+        $('dlgIn').value = initial;
+        $('dlgIn').select();
+      }
+    });
   });
 }
 
@@ -489,6 +497,8 @@ document.addEventListener('keydown', async (e) => {
   // 프로젝트 탭 — 프로젝트 자체를 관리한다 (시드·하드코딩 없음)
   if (tab === 'projects') {
     const p = currentList()[sel] ?? null;
+    // 다이얼로그를 여는 키는 기본 동작을 먼저 끊는다 (안 그러면 그 글자가 입력창에 찍힌다)
+    if (['n', 'e', 'a', 'r', 'x'].includes(e.key.toLowerCase())) e.preventDefault();
     switch (e.key) {
       case 'n':
       case 'N': {
@@ -562,6 +572,7 @@ document.addEventListener('keydown', async (e) => {
     case 'w':
     case 'W': {
       if (!it || tab === 'waiting') return;
+      e.preventDefault(); // 'w'가 다이얼로그 입력창에 찍히지 않게
       const who = await promptText('누구를 기다리나요? (비워도 됨)');
       if (who !== null) {
         await window.whenwork.toWaiting(it.id, who || null);

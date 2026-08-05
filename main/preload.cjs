@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('whenwork', {
   projectUpdate: (id, fields) => ipcRenderer.invoke('project:update', id, fields),
   projectRepos: (id, paths) => ipcRenderer.invoke('project:repos', id, paths),
   projectArchive: (id) => ipcRenderer.invoke('project:archive', id),
+  projectMove: (id, dir) => ipcRenderer.invoke('project:move', id, dir),
 
   // ── 재개 카드 (M2)
   resumeGet: (projectId) => ipcRenderer.invoke('resume:get', projectId),

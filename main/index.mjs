@@ -198,6 +198,7 @@ const itemOps = {
   'project:update': (id, fields) => db.updateProject(id, fields),
   'project:repos': (id, paths) => db.setRepoPaths(id, paths),
   'project:archive': (id) => db.archiveProject(id),
+  'project:move': (id, dir) => db.moveProject(id, dir),
 };
 for (const [ch, fn] of Object.entries(itemOps)) {
   ipcMain.handle(ch, async (_e, ...args) => {

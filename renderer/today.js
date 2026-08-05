@@ -366,6 +366,7 @@ function renderFooter() {
     add('E', '이름');
     add('A', '약어');
     add('R', '리포');
+    add('Shift+↕', '순서');
     add('X', '보관');
     return;
   }
@@ -407,6 +408,15 @@ function promptText(label, initial = '') {
     $('dlg').classList.add('show');
     $('dlgIn').focus();
   });
+}
+
+// 프로젝트 순서 이동 — 선택 표시도 함께 따라간다
+async function moveProject(dir) {
+  const p = currentList()[sel];
+  if (!p) return;
+  await window.whenwork.projectMove(p.id, dir);
+  sel = Math.max(0, Math.min(sel + (dir === 'up' ? -1 : 1), currentList().length - 1));
+  await refresh();
 }
 
 function closeDlg(commit) {
@@ -464,10 +474,14 @@ document.addEventListener('keydown', async (e) => {
     }
     case 'ArrowDown':
     case 'j':
+    case 'J':
+      if (tab === 'projects' && e.shiftKey) return moveProject('down');
       sel = Math.min(sel + 1, currentList().length - 1);
       return render();
     case 'ArrowUp':
     case 'k':
+    case 'K':
+      if (tab === 'projects' && e.shiftKey) return moveProject('up');
       sel = Math.max(sel - 1, 0);
       return render();
   }

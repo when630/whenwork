@@ -134,6 +134,18 @@ export function createDb(config = {}) {
     await pool.query("UPDATE project SET status = 'archived' WHERE id = $1", [id]);
   }
 
+  // 순서 변경 — 이웃과 자리를 바꾸고 sort를 0..n으로 정규화해 충돌을 없앤다
+  async function moveProject(id, dir) {
+    const projects = await getProjects();
+    const i = projects.findIndex((p) => p.id === id);
+    const j = i + (dir === 'up' ? -1 : 1);
+    if (i < 0 || j < 0 || j >= projects.length) return;
+    [projects[i], projects[j]] = [projects[j], projects[i]];
+    for (let k = 0; k < projects.length; k++) {
+      await pool.query('UPDATE project SET sort = $2 WHERE id = $1', [projects[k].id, k]);
+    }
+  }
+
   // ── M2: 수집기·재개 카드
   async function insertActivities(projectId, rows) {
     await ensureSchema();
@@ -264,6 +276,7 @@ export function createDb(config = {}) {
     updateProject,
     setRepoPaths,
     archiveProject,
+    moveProject,
     insertActivities,
     getActivities,
     upsertIssues,

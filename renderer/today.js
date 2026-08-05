@@ -244,7 +244,9 @@ function itemRow(it, idx) {
     row.append(meta);
   }
   if (tab === 'inbox' && it.context?.fg) {
-    row.append(el('div', 'ctx', `📎 캡처 당시: ${it.context.fg}`));
+    const ctx = el('div', 'ctx');
+    ctx.append(window.ICONS.context(), document.createTextNode(` 캡처 당시: ${it.context.fg}`));
+    row.append(ctx);
   }
   if (tab === 'waiting') {
     const days = elapsedDays(it.captured_at);

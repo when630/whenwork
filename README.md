@@ -30,6 +30,8 @@ npm start
 
 이슈 동기화는 `gh`/`glab` CLI 인증을 재사용한다. 프로젝트별 리포 경로는 DB `project.repo_paths`에 있다.
 
+본문 글꼴로 [Pretendard](https://github.com/orioncactus/pretendard)(OFL)를 `renderer/fonts`에 동봉한다 — 라이선스 전문은 `PretendardOFL.txt`.
+
 ## 상태
 
 | 단계 | 내용 | 상태 |

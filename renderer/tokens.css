@@ -1,4 +1,19 @@
 /* WHENWORK 디자인 토큰 — docs/mockups/tokens.css와 동일 팔레트 (단일 원본은 목업 쪽 문서) */
+
+/* 본문 글꼴은 번들한 Pretendard(가변). CSP가 외부 로딩을 막으므로 파일을 함께 담는다.
+   "Pretendard KR"이라는 별도 패밀리는 공식 배포에 없다 — 기본 Pretendard가 한글판이고
+   변형은 JP·Std·GOV뿐이다. 설치본이 있으면 local()로 그쪽을 먼저 쓴다. */
+@font-face {
+  font-family: 'Pretendard Variable';
+  src:
+    local('Pretendard Variable'),
+    local('Pretendard'),
+    url('./fonts/PretendardVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg-app: #16171c;
   --bg-raised: #1e2027;
@@ -19,7 +34,7 @@
   --ai: #bb9af7;
   --ai-dim: rgba(187,154,247,.13);
 
-  --font-sans: "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+  --font-sans: "Pretendard Variable", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
   --font-mono: "Cascadia Code", "D2Coding", Consolas, monospace;
   --fs-lg: 16px;
   --fs-md: 14px;
@@ -60,3 +75,5 @@ kbd {
   white-space: nowrap;
 }
 .chip .dot { width: 7px; height: 7px; border-radius: 99px; flex: none; }
+/* 인라인 SVG 아이콘 — 글줄 안에서 글자와 눈높이를 맞춘다 */
+.ico { flex: none; vertical-align: -1.5px; opacity: .75; }

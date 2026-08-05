@@ -2,8 +2,6 @@
 // 저장해도 창은 닫지 않는다: 연달아 던지거나 Tab으로 앱을 열 수 있게. 닫기는 Esc(또는 단축키 재입력).
 const input = document.getElementById('in');
 const msg = document.getElementById('msg');
-const DEFAULT_MSG = '인박스로 저장 · 📎 컨텍스트 자동 기록';
-
 let saving = false;
 let sessionCount = 0; // 이번에 연달아 던진 개수
 let msgTimer = null;
@@ -12,23 +10,30 @@ window.whenwork.onReset(() => {
   saving = false;
   sessionCount = 0;
   input.value = '';
-  showMsg(null, DEFAULT_MSG);
+  showDefaultMsg();
   input.focus();
 });
+
+// 기본 안내 — 컨텍스트가 함께 저장된다는 표시로 창 아이콘을 앞에 둔다
+function showDefaultMsg() {
+  msg.className = 'msg';
+  msg.replaceChildren(
+    document.createTextNode('인박스로 저장 · '),
+    window.ICONS.context(),
+    document.createTextNode(' 컨텍스트 자동 기록')
+  );
+  document.body.classList.remove('flash');
+}
 
 function showMsg(kind, text, holdMs = 0) {
   clearTimeout(msgTimer);
   msg.className = 'msg' + (kind ? ' ' + kind : '');
   msg.textContent = text;
   document.body.classList.toggle('flash', kind === 'ok');
-  if (holdMs) {
-    msgTimer = setTimeout(() => {
-      msg.className = 'msg';
-      msg.textContent = DEFAULT_MSG;
-      document.body.classList.remove('flash');
-    }, holdMs);
-  }
+  if (holdMs) msgTimer = setTimeout(showDefaultMsg, holdMs);
 }
+
+showDefaultMsg();
 
 // 전역 단축키(Ctrl+Alt+Space)의 Space가 갓 포커스된 입력창으로 새어 들어온다.
 // 타이밍으로 거르면 놓치는 경우가 생기므로 **선두 공백 입력 자체를 금지**한다 —

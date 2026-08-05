@@ -9,11 +9,11 @@
   html, body { background: transparent; overflow: hidden; }
   .capture {
     width: 560px; background: var(--bg-raised);
-    border-radius: var(--r-lg);
-    box-shadow: 0 8px 32px rgba(0,0,0,.55), 0 0 0 1px var(--border);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-pop), 0 0 0 1px var(--border);
     overflow: hidden;
   }
-  .row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4); }
+  .row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4) 18px; }
   .logo {
     width: 26px; height: 26px; flex: none; border-radius: var(--r-sm);
     background: var(--accent-dim); color: var(--accent);
@@ -27,8 +27,9 @@
   input::placeholder { color: var(--text-muted); }
   .foot {
     display: flex; justify-content: space-between; align-items: center;
-    padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--border);
+    padding: var(--sp-2) 18px; border-top: 1px solid var(--border);
     font-size: var(--fs-xs); color: var(--text-muted);
+    background: var(--bg-app);
   }
   .foot .hints { display: flex; gap: var(--sp-3); }
   .saved-line {

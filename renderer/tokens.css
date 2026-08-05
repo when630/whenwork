@@ -27,8 +27,14 @@
   --fs-xs: 12px;
 
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
-  --r-sm: 6px; --r-md: 10px; --r-lg: 14px;
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 16px;
+  --shadow-pop: 0 12px 40px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35);
 }
+
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
 
 * { box-sizing: border-box; margin: 0; }
 body {
@@ -40,10 +46,11 @@ body {
 }
 
 kbd {
-  font-family: var(--font-mono); font-size: 11px;
+  font-family: var(--font-mono); font-size: 10.5px;
   background: var(--bg-inset); border: 1px solid var(--border);
-  border-bottom-width: 2px; border-radius: 4px;
-  padding: 1px 5px; color: var(--text-secondary);
+  border-bottom-width: 2px; border-radius: 5px;
+  padding: 1px 6px; color: var(--text-secondary);
+  line-height: 1.4;
 }
 .chip {
   display: inline-flex; align-items: center; gap: 5px;

@@ -25,8 +25,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const HOTKEY = 'Control+Alt+Space'; // 설계 11절 — Claude 쪽 바인딩은 사용자가 해제함
 const FLUSH_MS = 30_000;
-const TODAY_W = 880; // 오늘 뷰 — 화면 중앙, 가로 넓게
-const TODAY_H = 680;
+const TODAY_W = 900; // 오늘 뷰 — 화면 중앙, 가로 넓게 (투명 창이라 10px 그림자 여백 포함)
+const TODAY_H = 700;
 const SMOKE = process.argv.includes('--smoke');
 
 let tray = null;
@@ -102,7 +102,7 @@ function showCapture() {
 
 function getTodayWin() {
   if (todayWin && !todayWin.isDestroyed()) return todayWin;
-  todayWin = new BrowserWindow({ ...baseWinOpts(TODAY_W, TODAY_H), alwaysOnTop: true });
+  todayWin = new BrowserWindow({ ...baseWinOpts(TODAY_W, TODAY_H), transparent: true, alwaysOnTop: true });
   todayWin.loadFile(path.join(ROOT, 'renderer', 'today.html'));
   todayWin.on('blur', () => todayWin.hide());
   todayWin.on('close', (e) => {

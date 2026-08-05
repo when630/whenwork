@@ -12,6 +12,10 @@ window.whenwork.onReset(() => {
 
 document.addEventListener('keydown', async (e) => {
   if (e.key === 'Escape') return window.whenwork.hide();
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    return window.whenwork.openApp();
+  }
   if (e.key !== 'Enter' || saving) return;
   const title = input.value.trim();
   if (!title) return;

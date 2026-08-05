@@ -17,4 +17,5 @@ contextBridge.exposeInMainWorld('whenwork', {
 
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),
+  openApp: () => ipcRenderer.send('app:open'),
 });

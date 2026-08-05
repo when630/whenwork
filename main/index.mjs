@@ -111,6 +111,11 @@ function getTodayWin() {
 function toggleToday() {
   const win = getTodayWin();
   if (win.isVisible()) return win.hide();
+  showToday();
+}
+
+function showToday() {
+  const win = getTodayWin();
   const { workArea } = screen.getPrimaryDisplay();
   // 트레이 근처(우하단)에 붙인다
   win.setPosition(workArea.x + workArea.width - 480 - 12, workArea.y + workArea.height - 660 - 12);
@@ -193,6 +198,12 @@ for (const [ch, fn] of Object.entries(itemOps)) {
 
 ipcMain.on('win:hide', (e) => {
   BrowserWindow.fromWebContents(e.sender)?.hide();
+});
+
+// 퀵캡처에서 Tab — 캡처를 접고 오늘 뷰를 연다
+ipcMain.on('app:open', (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.hide();
+  showToday();
 });
 
 // ── 앱 수명

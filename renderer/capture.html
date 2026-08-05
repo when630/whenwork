@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>퀵캡처</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html, body { background: transparent; overflow: hidden; }
+  .capture {
+    width: 560px; background: var(--bg-raised);
+    border-radius: var(--r-lg);
+    box-shadow: 0 8px 32px rgba(0,0,0,.55), 0 0 0 1px var(--border);
+    overflow: hidden;
+  }
+  .row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4); }
+  .logo {
+    width: 26px; height: 26px; flex: none; border-radius: var(--r-sm);
+    background: var(--accent-dim); color: var(--accent);
+    display: grid; place-items: center;
+    font-family: var(--font-mono); font-weight: 700; font-size: 13px;
+  }
+  input {
+    flex: 1; background: none; border: none; outline: none;
+    color: var(--text-primary); font-family: var(--font-sans); font-size: var(--fs-lg);
+  }
+  input::placeholder { color: var(--text-muted); }
+  .foot {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--border);
+    font-size: var(--fs-xs); color: var(--text-muted);
+  }
+  .foot .hints { display: flex; gap: var(--sp-3); }
+  .saved-line {
+    display: none; align-items: center; gap: var(--sp-2);
+    font-size: var(--fs-lg); color: var(--text-primary);
+  }
+  .saved-line .check { color: var(--success); font-weight: 700; }
+  .queue-badge { display: none; color: var(--warning); }
+
+  body.saved input { display: none; }
+  body.saved .saved-line { display: flex; }
+  body.saved .hints { visibility: hidden; }
+  body.saved.offline .queue-badge { display: inline; }
+  body.saved.offline .default-msg { display: none; }
+</style>
+</head>
+<body>
+  <div class="capture">
+    <div class="row">
+      <div class="logo">W</div>
+      <input id="in" type="text" placeholder="할 일을 한 줄로… (분류는 나중에)" maxlength="500">
+      <div class="saved-line"><span class="check">✓</span> 인박스에 저장됨</div>
+    </div>
+    <div class="foot">
+      <div class="hints"><span><kbd>Enter</kbd> 저장</span><span><kbd>Esc</kbd> 닫기</span></div>
+      <span class="default-msg">인박스로 저장 · 📎 컨텍스트 자동 기록</span>
+      <span class="queue-badge" id="queue"></span>
+    </div>
+  </div>
+<script src="capture.js"></script>
+</body>
+</html>

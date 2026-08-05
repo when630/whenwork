@@ -15,12 +15,22 @@
 - [설계 v1.1](docs/01_설계.md) — 배경·아키텍처·설계 결정(D1~D6)·데이터 모델·마일스톤
 - [UI 목업 v0.2](docs/mockups/index.html) — 퀵캡처·오늘 뷰·재개 카드 정적 목업 (브라우저로 열기)
 
+## 실행
+
+```bash
+npm install        # postinstall이 트레이 아이콘을 굽는다
+docker compose up -d   # PostgreSQL (localhost:5433) — 없어도 캡처는 동작 (로컬 큐)
+npm start
+```
+
+- `Ctrl+Alt+Space` — 퀵캡처
+- 트레이 클릭 — 오늘 뷰 (Tab 탭 전환 · ↑↓ 이동 · Space 완료 · 1~9 프로젝트 지정 · W 대기 · X 삭제)
+- `npm test` — 큐 단위 테스트, `npm run smoke` — 부팅 스모크
+
 ## 상태
 
-설계·UI 목업 확정 단계. 구현 마일스톤:
-
-| 단계 | 내용 |
-|---|---|
-| M1 | 트레이 + 퀵캡처 + 로컬 큐 + PostgreSQL + 오늘 뷰 |
-| M2 | git 수집기 + 재개 카드 (`claude -p`) |
-| M3 | 인박스 AI 분류 + waiting-for + 주간 리뷰 |
+| 단계 | 내용 | 상태 |
+|---|---|---|
+| M1 | 트레이 + 퀵캡처 + 로컬 큐 + PostgreSQL + 오늘 뷰 | ✅ 구현 (도그푸딩 중) |
+| M2 | git 수집기 + 재개 카드 (`claude -p`) + GH/GL 이슈 | 예정 |
+| M3 | 인박스 AI 분류 + 주간 리뷰 | 예정 |

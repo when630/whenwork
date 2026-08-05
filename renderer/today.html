@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>WHENWORK</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg-app);
+    display: flex; flex-direction: column;
+    border: 1px solid var(--border); border-radius: var(--r-lg);
+  }
+  header { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; -webkit-app-region: drag; }
+  header .title { font-weight: 700; font-size: var(--fs-md); }
+  header .date { color: var(--text-muted); font-size: var(--fs-xs); margin-left: auto; }
+
+  .tabs { display: flex; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3) 0; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 6px 10px 8px; font-size: var(--fs-sm); color: var(--text-secondary);
+    border-radius: var(--r-sm) var(--r-sm) 0 0; cursor: pointer;
+    border-bottom: 2px solid transparent; display: flex; gap: 6px; align-items: center;
+  }
+  .tab .n { font-size: 10px; font-family: var(--font-mono); background: var(--bg-inset); border-radius: 99px; padding: 0 6px; }
+  .tab.on { color: var(--text-primary); border-bottom-color: var(--accent); }
+  .tab:hover:not(.on) { background: var(--bg-hover); }
+
+  .body { flex: 1; overflow-y: auto; padding: var(--sp-2) 0; outline: none; }
+
+  .group-h { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4) var(--sp-1); font-size: var(--fs-xs); color: var(--text-muted); }
+  .item { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-2); padding: 7px var(--sp-4); cursor: pointer; }
+  .item:hover { background: var(--bg-hover); }
+  .item.selected { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
+  .cb { width: 15px; height: 15px; flex: none; margin-top: 3px; border: 1.5px solid var(--text-muted); border-radius: 4px; position: relative; }
+  .item.done .cb { background: var(--success); border-color: var(--success); }
+  .item.done .cb::after { content: "✓"; position: absolute; inset: -3px 0 0 2px; font-size: 11px; color: #16171c; }
+  .item.done .t { color: var(--text-muted); text-decoration: line-through; }
+  .item .t { flex: 1; font-size: var(--fs-md); }
+  .item .meta { display: flex; gap: 6px; align-items: center; flex: none; margin-top: 1px; }
+  .due { font-size: var(--fs-xs); font-family: var(--font-mono); color: var(--text-muted); }
+  .due.today { color: var(--warning); }
+  .due.over { color: var(--danger); }
+  .ctx { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; }
+  .wait-meta { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; }
+  .elapsed { font-family: var(--font-mono); }
+  .elapsed.hot { color: var(--danger); }
+
+  .numlegend {
+    margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-4);
+    border-top: 1px dashed var(--border);
+    font-size: var(--fs-xs); color: var(--text-muted);
+    display: flex; gap: 10px; flex-wrap: wrap;
+  }
+  .numlegend b { font-family: var(--font-mono); color: var(--text-secondary); }
+
+  .empty {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: var(--sp-2);
+    color: var(--text-muted); font-size: var(--fs-sm); text-align: center;
+  }
+  .empty .big { font-size: 28px; opacity: .5; }
+
+  footer {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--border);
+    font-size: var(--fs-xs); color: var(--text-muted);
+  }
+  .sync { display: flex; align-items: center; gap: 5px; }
+  .sync .led { width: 7px; height: 7px; border-radius: 99px; background: var(--success); }
+  .sync.off .led { background: var(--warning); }
+  .foot-hints { display: flex; gap: var(--sp-3); }
+
+  /* W(대기로) 눌렀을 때 "누구를 기다리나" 한 줄 입력 */
+  #whoDlg {
+    display: none; position: fixed; left: 50%; top: 40%; transform: translateX(-50%);
+    width: 360px; background: var(--bg-raised); border: 1px solid var(--border-focus);
+    border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4);
+    box-shadow: 0 8px 32px rgba(0,0,0,.55);
+  }
+  #whoDlg.show { display: block; }
+  #whoDlg label { font-size: var(--fs-xs); color: var(--text-muted); display: block; margin-bottom: 4px; }
+  #whoDlg input {
+    width: 100%; background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: var(--r-sm); padding: 6px 10px; color: var(--text-primary);
+    font-family: var(--font-sans); font-size: var(--fs-md); outline: none;
+  }
+</style>
+</head>
+<body>
+  <header><span class="title">WHENWORK</span><span class="date" id="date"></span></header>
+  <div class="tabs" id="tabs"></div>
+  <div class="body" id="body" tabindex="-1"></div>
+  <footer>
+    <span class="sync" id="sync"><span class="led"></span><span id="syncText">동기화됨</span></span>
+    <span class="foot-hints" id="hints"></span>
+  </footer>
+  <div id="whoDlg">
+    <label>누구를 기다리나요? (비워도 됨)</label>
+    <input id="whoIn" type="text" maxlength="100">
+  </div>
+<script src="today.js"></script>
+</body>
+</html>

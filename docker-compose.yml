@@ -1,0 +1,17 @@
+# WHENWORK 로컬 저장소 (D2). 5432는 다른 프로젝트 PG와 겹칠 수 있어 5433을 쓴다.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: whenwork-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: whenwork
+      POSTGRES_PASSWORD: whenwork
+      POSTGRES_DB: whenwork
+    ports:
+      - "5433:5432"
+    volumes:
+      - whenwork-data:/var/lib/postgresql/data
+
+volumes:
+  whenwork-data:

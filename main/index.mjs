@@ -1,0 +1,225 @@
+// WHENWORK — 트레이 상주. 퀵캡처(전역 단축키) → 로컬 큐 → PostgreSQL 동기화(D1).
+import {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  nativeImage,
+  ipcMain,
+  globalShortcut,
+  screen,
+} from 'electron';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { createQueue } from './queue.mjs';
+import { createDb } from './db.mjs';
+import { foregroundTitle } from './context.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, '..');
+const HOTKEY = 'Control+Alt+Space'; // 설계 11절 — Claude 쪽 바인딩은 사용자가 해제함
+const FLUSH_MS = 30_000;
+const SMOKE = process.argv.includes('--smoke');
+
+let tray = null;
+let captureWin = null;
+let todayWin = null;
+let quitting = false;
+let hotkeyOk = false;
+let dbOnline = false;
+// 단축키를 누른 "그 순간"의 포그라운드 창 — 팝업이 뜨면 포그라운드가 우리가 되므로 먼저 잡는다
+let pendingContext = Promise.resolve(null);
+
+if (!app.requestSingleInstanceLock()) app.quit();
+
+const queue = createQueue(path.join(app.getPath('userData'), 'queue.jsonl'));
+const db = createDb();
+
+// ── 큐 → DB. 실패는 조용히 — 큐가 원본을 들고 있으니 다음 기회에 다시 흘린다.
+async function flush() {
+  try {
+    dbOnline = await db.online();
+    if (!dbOnline) return;
+    await queue.drain((entries) => db.insertCaptures(entries));
+  } catch {
+    dbOnline = false;
+  }
+  refreshTrayMenu();
+}
+
+// ── 창
+function baseWinOpts(w, h) {
+  return {
+    width: w,
+    height: h,
+    frame: false,
+    show: false,
+    resizable: false,
+    skipTaskbar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs') },
+  };
+}
+
+function getCaptureWin() {
+  if (captureWin && !captureWin.isDestroyed()) return captureWin;
+  captureWin = new BrowserWindow({
+    ...baseWinOpts(560, 128),
+    transparent: true,
+    alwaysOnTop: true,
+  });
+  captureWin.loadFile(path.join(ROOT, 'renderer', 'capture.html'));
+  captureWin.on('blur', () => captureWin.hide()); // 다른 데 클릭하면 캡처는 접는다
+  captureWin.on('close', (e) => {
+    if (!quitting) {
+      e.preventDefault();
+      captureWin.hide();
+    }
+  });
+  return captureWin;
+}
+
+function showCapture() {
+  pendingContext = foregroundTitle(); // 팝업이 포커스를 뺏기 전에 먼저
+  const win = getCaptureWin();
+  const cursor = screen.getCursorScreenPoint();
+  const { workArea } = screen.getDisplayNearestPoint(cursor);
+  win.setPosition(
+    Math.round(workArea.x + (workArea.width - 560) / 2),
+    Math.round(workArea.y + workArea.height * 0.28)
+  );
+  win.webContents.send('capture:reset');
+  win.show();
+  win.focus();
+}
+
+function getTodayWin() {
+  if (todayWin && !todayWin.isDestroyed()) return todayWin;
+  todayWin = new BrowserWindow({ ...baseWinOpts(480, 660), alwaysOnTop: true });
+  todayWin.loadFile(path.join(ROOT, 'renderer', 'today.html'));
+  todayWin.on('blur', () => todayWin.hide());
+  todayWin.on('close', (e) => {
+    if (!quitting) {
+      e.preventDefault();
+      todayWin.hide();
+    }
+  });
+  return todayWin;
+}
+
+function toggleToday() {
+  const win = getTodayWin();
+  if (win.isVisible()) return win.hide();
+  const { workArea } = screen.getPrimaryDisplay();
+  // 트레이 근처(우하단)에 붙인다
+  win.setPosition(workArea.x + workArea.width - 480 - 12, workArea.y + workArea.height - 660 - 12);
+  flush(); // 열 때 밀린 큐부터
+  win.webContents.send('today:refresh');
+  win.show();
+  win.focus();
+}
+
+// ── 트레이
+function trayImage() {
+  const p = path.join(ROOT, 'build', 'tray.png');
+  return fs.existsSync(p)
+    ? nativeImage.createFromBuffer(fs.readFileSync(p))
+    : nativeImage.createEmpty();
+}
+
+function refreshTrayMenu() {
+  if (!tray) return;
+  const pending = queue.count();
+  tray.setToolTip(
+    `WHENWORK${dbOnline ? '' : ' — DB 대기'}${pending ? ` · 큐 ${pending}건` : ''}`
+  );
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '오늘 뷰', click: toggleToday },
+      { label: `퀵캡처 (${hotkeyOk ? 'Ctrl+Alt+Space' : '단축키 등록 실패!'})`, click: showCapture },
+      { type: 'separator' },
+      {
+        label: dbOnline ? 'DB 연결됨' : `DB 대기 중 — 큐 ${pending}건`,
+        enabled: false,
+      },
+      { type: 'separator' },
+      { label: '종료', click: () => app.quit() },
+    ])
+  );
+}
+
+// ── IPC
+ipcMain.handle('capture:save', async (_e, title) => {
+  const text = String(title ?? '').trim();
+  if (!text) return { ok: false };
+  const fg = await Promise.race([pendingContext, new Promise((r) => setTimeout(() => r(null), 300))]);
+  queue.append({
+    id: crypto.randomUUID(),
+    title: text,
+    captured_at: new Date().toISOString(),
+    context: fg ? { fg } : null,
+  });
+  flush(); // 기다리지 않는다 — 저장 완결은 큐가 이미 보장
+  refreshTrayMenu();
+  return { ok: true, dbOnline, pending: queue.count() };
+});
+
+ipcMain.handle('today:getState', async () => {
+  dbOnline = await db.online().catch(() => false);
+  if (!dbOnline) return { online: false, pending: queue.count() };
+  await flush();
+  const state = await db.getViewState();
+  return { online: true, pending: queue.count(), ...state };
+});
+
+const itemOps = {
+  'item:complete': (id) => db.completeItem(id),
+  'item:uncomplete': (id) => db.uncompleteItem(id),
+  'item:assign': (id, projectId) => db.assignProject(id, projectId),
+  'item:toWaiting': (id, who) => db.toWaiting(id, who),
+  'item:remove': (id) => db.removeItem(id),
+};
+for (const [ch, fn] of Object.entries(itemOps)) {
+  ipcMain.handle(ch, async (_e, ...args) => {
+    try {
+      await fn(...args);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+}
+
+ipcMain.on('win:hide', (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.hide();
+});
+
+// ── 앱 수명
+app.setAppUserModelId('com.when630.whenwork');
+
+app.whenReady().then(async () => {
+  tray = new Tray(trayImage());
+  tray.on('click', toggleToday);
+  // register()는 이미 남이 쓰는 조합이면 조용히 false만 낸다 — 메뉴에 실패를 드러낸다
+  hotkeyOk = globalShortcut.register(HOTKEY, showCapture);
+  refreshTrayMenu();
+  setInterval(flush, FLUSH_MS);
+  flush();
+
+  if (SMOKE) {
+    setTimeout(() => {
+      console.log(`SMOKE_OK hotkey=${hotkeyOk} pending=${queue.count()}`);
+      app.quit();
+    }, 1500);
+  }
+});
+
+app.on('before-quit', () => {
+  quitting = true;
+});
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+// 창을 모두 닫아도 트레이로 산다
+app.on('window-all-closed', () => {});

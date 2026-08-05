@@ -1,0 +1,45 @@
+{
+  "name": "whenwork",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "개인용 프로젝트별 업무 관리 트레이 앱 — 퀵캡처·오늘 뷰·재개 카드",
+  "author": "when630 <70129021+when630@users.noreply.github.com>",
+  "main": "main/index.mjs",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron . --smoke",
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "icons": "node tools/make-icon.mjs",
+    "db": "docker compose up -d",
+    "build": "electron-builder --win",
+    "postinstall": "node tools/make-icon.mjs"
+  },
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "build": {
+    "appId": "com.when630.whenwork",
+    "productName": "WHENWORK",
+    "files": [
+      "main/**/*",
+      "renderer/**/*",
+      "build/*.png"
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "WHENWORK"
+    }
+  }
+}

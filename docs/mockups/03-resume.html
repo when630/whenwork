@@ -51,6 +51,25 @@
   .btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   .git-h { font-size: var(--fs-xs); color: var(--text-muted); letter-spacing: .06em; margin-bottom: var(--sp-2); }
+  .issue {
+    display: flex; gap: var(--sp-2); align-items: baseline;
+    font-size: var(--fs-sm); padding: 4px 0; color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .issue:hover .tt { color: var(--accent); text-decoration: underline; }
+  .issue .st { width: 8px; height: 8px; border-radius: 99px; flex: none; align-self: center; }
+  .issue .st.open { background: var(--success); }
+  .issue .st.closed { background: var(--text-muted); }
+  .issue .prov {
+    font-family: var(--font-mono); font-size: 10px; flex: none;
+    border: 1px solid var(--border); border-radius: 4px; padding: 0 4px;
+    color: var(--text-muted);
+  }
+  .issue .num { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); flex: none; }
+  .issue .tt { flex: 1; color: var(--text-primary); }
+  .issue .when { color: var(--text-muted); font-size: var(--fs-xs); flex: none; }
+  .sync-note { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 4px; }
+  .sync-note.stale { color: var(--warning); }
   .commit {
     display: flex; gap: var(--sp-2); align-items: baseline;
     font-family: var(--font-mono); font-size: var(--fs-xs);
@@ -95,7 +114,7 @@
 <div class="stage">
   <a class="back" href="index.html">← 목업 인덱스</a>
   <h1>재개 카드 — 프로젝트 상세</h1>
-  <p class="desc">오늘 뷰에서 항목 선택 후 Enter, 또는 프로젝트 칩 클릭으로 진입. "카드만 보고 작업 재개"가 M2 완료 판정.</p>
+  <p class="desc">오늘 뷰에서 항목 선택 후 Enter, 또는 프로젝트 칩 클릭으로 진입. "카드만 보고 작업 재개"가 M2 완료 판정. AI 카드 + git 활동 + <b>내가 쓴 GitHub·GitLab 이슈</b>(읽기 전용 캐시) 3단 구성.</p>
 
   <div class="frames">
 
@@ -138,10 +157,17 @@
             <div class="commit"><span class="sha">7b01d4e</span><span>feat: 붙여넣기 서식 제거 1차</span><span class="when">어제 15:10</span></div>
             <div class="commit"><span class="sha">c9e88a0</span><span>chore: eslint 룰 정리</span><span class="when">8/3</span></div>
           </div>
+          <div>
+            <div class="git-h">내가 쓴 이슈 (열림 우선 · 클릭 시 브라우저)</div>
+            <div class="issue"><span class="st open"></span><span class="prov">GH</span><span class="num">#142</span><span class="tt">표 붙여넣기 시 셀 병합 깨짐</span><span class="when">어제</span></div>
+            <div class="issue"><span class="st open"></span><span class="prov">GL</span><span class="num">#87</span><span class="tt">이미지 업로드 프록시 경로 정리</span><span class="when">8/1</span></div>
+            <div class="issue"><span class="st closed"></span><span class="prov">GH</span><span class="num">#139</span><span class="tt">릴리즈 노트 자동 생성 스크립트</span><span class="when">7/30</span></div>
+            <div class="sync-note">GitHub·GitLab 동기화 10분 전</div>
+          </div>
         </div>
-        <footer><span>✦ 표시 = AI 생성, 언제든 재생성 가능</span><span><kbd>Esc</kbd> 뒤로</span></footer>
+        <footer><span>✦ 표시 = AI 생성, 언제든 재생성 가능</span><span><kbd>O</kbd> 이슈 열기 · <kbd>Esc</kbd> 뒤로</span></footer>
       </div>
-      <div class="note">3문항 고정 구조(마지막 작업/멈춘 지점/다음 액션 <b>1개</b>). 다음 액션은 항상 하나만 — 목록이면 다시 고민하게 되므로.</div>
+      <div class="note">3문항 고정 구조(마지막 작업/멈춘 지점/다음 액션 <b>1개</b>). 다음 액션은 항상 하나만 — 목록이면 다시 고민하게 되므로. 이슈는 <b>내가 작성한 것만</b>, 열림 우선 정렬, 닫힘은 최근 것만 흐리게. 앱에서 쓰기 없음 — 클릭하면 브라우저.</div>
     </div>
 
     <div class="frame">
@@ -189,10 +215,15 @@
             <div class="commit"><span class="sha">0d4e9b2</span><span>feat: 메인 배너 슬라이더 시안 B</span><span class="when">8/4</span></div>
             <div class="commit"><span class="sha">5a77c03</span><span>fix: 모바일 헤더 겹침</span><span class="when">8/3</span></div>
           </div>
+          <div>
+            <div class="git-h">내가 쓴 이슈</div>
+            <div class="issue"><span class="st open"></span><span class="prov">GL</span><span class="num">#23</span><span class="tt">메인 배너 시안 A/B 결정 요청</span><span class="when">8/2</span></div>
+            <div class="sync-note stale">⚠ 오프라인 — 8/4 21:00 캐시 표시 중</div>
+          </div>
         </div>
         <footer><span>오픈이슈 #4: 한도 초과 시 빈도 조정</span><span><kbd>Esc</kbd> 뒤로</span></footer>
       </div>
-      <div class="note">AI는 부가 레이어. 실패해도 원본(git 활동·todo)은 그대로 — 설계 원칙 "AI 생성물은 버려도 됨"의 UI 표현.</div>
+      <div class="note">AI는 부가 레이어. 실패해도 원본(git 활동·todo)은 그대로. 이슈도 마찬가지 — 네트워크 실패 시 마지막 동기화 캐시를 황색 표시와 함께 보여준다.</div>
     </div>
 
   </div>

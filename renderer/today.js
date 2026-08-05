@@ -11,6 +11,8 @@ let state = null; // 마지막으로 받은 서버 상태
 let tab = 'inbox'; // 캡처 직후 열면 인박스부터 보는 게 자연스럽다
 let sel = 0; // 현재 탭에서 선택된 행
 let whoTarget = null; // W 입력 대기 중인 item id
+let view = 'list'; // 'list' | 'resume'
+let resume = null; // { projectId, data, loading, generating, error, sel }
 
 const $ = (id) => document.getElementById(id);
 
@@ -54,9 +56,151 @@ function currentList() {
 // ── 렌더
 function render() {
   $('date').textContent = fmtDate();
+  if (view === 'resume') {
+    $('tabs').replaceChildren();
+    renderResume();
+    renderFooter();
+    return;
+  }
   renderTabs();
   renderBody();
   renderFooter();
+}
+
+// ── 재개 카드 (M2, 목업 03) — AI 카드 + git 활동 + 내 이슈 3단
+function fmtWhen(ts) {
+  const d = new Date(ts);
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return sameDay ? `오늘 ${hm}` : `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function renderResume() {
+  const body = $('body');
+  body.replaceChildren();
+  const p = state?.projects?.find((x) => x.id === resume.projectId);
+  if (!p) return;
+
+  const head = el('div', 'rhead');
+  const back = el('span', 'back', '‹');
+  back.onclick = closeResume;
+  const pname = el('span', 'pname');
+  const dot = el('span', 'dot');
+  dot.style.background = projColor(p.id);
+  pname.append(dot, document.createTextNode(p.name));
+  head.append(back, pname);
+  const card = resume.data?.card;
+  if (card) head.append(el('span', 'gen-at', `✦ ${fmtWhen(card.generated_at)} 생성`));
+  body.append(head);
+
+  const rbody = el('div', 'rbody');
+  body.append(rbody);
+
+  // 1단: AI 카드 — 생성 중이면 스켈레톤, 실패해도 아래 원본(git·이슈)은 그대로
+  const cardBox = el('div', 'card');
+  if (resume.generating) {
+    const st = el('div', 'gen-status');
+    st.append(el('span', 'spin'), document.createTextNode('재개 카드 생성 중… (claude -p)'));
+    const sk = el('div', 'skeleton');
+    for (const w of ['85%', '70%', '78%']) {
+      const s = el('div', 'sk');
+      s.style.width = w;
+      sk.append(s);
+    }
+    cardBox.append(st, sk);
+  } else if (resume.error) {
+    const err = el('div', 'err');
+    err.append(el('div', 't', '카드 생성 실패'), el('div', null, resume.error));
+    cardBox.append(err);
+  } else if (card) {
+    const sec = (label, text, ai) => {
+      const s = el('div', 'sec');
+      const h = el('div', 'h');
+      if (ai) h.append(el('span', 'badge-ai', '✦ AI'));
+      h.append(document.createTextNode(label));
+      s.append(h, el('div', 'v', text || '—'));
+      return s;
+    };
+    cardBox.append(sec('마지막 작업', card.last_work, true), sec('멈춘 지점', card.stuck_point));
+    const nsec = el('div', 'sec');
+    nsec.append(el('div', 'h', '다음 액션'));
+    const next = el('div', 'next');
+    next.append(el('span', 'arrow', '→'), el('div', 'v', card.next_action || '—'));
+    nsec.append(next);
+    cardBox.append(nsec);
+  } else {
+    cardBox.append(el('div', 'v', resume.loading ? '불러오는 중…' : '카드 없음 — R로 생성'));
+  }
+  rbody.append(cardBox);
+
+  const data = resume.data;
+  // 2단: git 활동 — 로컬 데이터라 항상 먼저 그린다
+  const gitSec = el('div');
+  gitSec.append(el('div', 'sec-h', '최근 활동 (git · 자동 수집)'));
+  const acts = data?.activities ?? [];
+  if (acts.length === 0) gitSec.append(el('div', 'sync-note', '수집된 커밋 없음 — repo_paths 미설정이거나 최근 14일 커밋 없음'));
+  for (const a of acts) {
+    const c = el('div', 'commit');
+    c.append(el('span', 'sha', a.ref?.slice(0, 7) ?? ''), el('span', null, a.summary), el('span', 'when', fmtWhen(a.occurred_at)));
+    gitSec.append(c);
+  }
+  rbody.append(gitSec);
+
+  // 3단: 내 이슈 (작성·할당)
+  const issSec = el('div');
+  issSec.append(el('div', 'sec-h', '내 이슈 — 작성·할당 (Enter/O 브라우저)'));
+  const issues = data?.issues ?? [];
+  if (issues.length === 0) issSec.append(el('div', 'sync-note', '이슈 없음 또는 동기화 전'));
+  issues.forEach((i, idx) => {
+    const row = el('div', 'issue' + (idx === resume.sel ? ' selected' : ''));
+    row.append(el('span', 'st ' + i.state), el('span', 'prov', i.provider === 'github' ? 'GH' : 'GL'), el('span', 'num', `#${i.number}`), el('span', 'tt', i.title));
+    if (i.relation === 'assignee') row.append(el('span', 'asg', '할당'));
+    row.append(el('span', 'when', fmtWhen(i.updated_at)));
+    row.onclick = () => window.whenwork.openUrl(i.url);
+    issSec.append(row);
+  });
+  if (issues[0]?.synced_at) issSec.append(el('div', 'sync-note', `동기화 ${fmtWhen(issues[0].synced_at)}`));
+  rbody.append(issSec);
+}
+
+async function openResume(projectId) {
+  view = 'resume';
+  resume = { projectId, data: null, loading: true, generating: false, error: null, sel: 0 };
+  render();
+  const first = await window.whenwork.resumeGet(projectId);
+  if (view !== 'resume' || resume.projectId !== projectId) return;
+  resume.data = first.ok ? first : null;
+  resume.loading = false;
+  resume.generating = !!first.generating;
+  render();
+  // 백그라운드로 git·이슈를 새로 긁는다 — 끝나면 갱신
+  const synced = await window.whenwork.resumeSync(projectId);
+  if (view !== 'resume' || resume.projectId !== projectId) return;
+  if (synced.ok) resume.data = synced;
+  render();
+  // 카드가 없거나 24시간 넘게 묵었으면 자동 재생성 (일 1회 정책)
+  const card = resume.data?.card;
+  const stale = !card || Date.now() - new Date(card.generated_at).getTime() > 24 * 3600 * 1000;
+  if (stale && !resume.generating) await regenerate(projectId);
+}
+
+async function regenerate(projectId) {
+  resume.generating = true;
+  resume.error = null;
+  render();
+  const res = await window.whenwork.resumeGenerate(projectId);
+  if (view !== 'resume' || resume.projectId !== projectId) return;
+  resume.generating = false;
+  if (res.ok) resume.data = res;
+  else if (!res.busy) resume.error = res.error ?? 'claude -p 응답 없음 (구독 한도 또는 네트워크)';
+  render();
+}
+
+function closeResume() {
+  view = 'list';
+  resume = null;
+  refresh();
 }
 
 function renderTabs() {
@@ -179,6 +323,12 @@ function renderFooter() {
     s.append(el('kbd', null, key), document.createTextNode(' ' + label));
     hints.append(s);
   };
+  if (view === 'resume') {
+    add('R', '다시 생성');
+    add('Enter', '이슈 열기');
+    add('Esc', '뒤로');
+    return;
+  }
   add('Tab', '탭');
   if (tab === 'inbox') {
     add('1~9', '프로젝트');
@@ -189,6 +339,7 @@ function renderFooter() {
     add('Space', '완료');
   }
   add('X', '삭제');
+  add('Enter', '재개 카드');
   add('Esc', '닫기');
 }
 
@@ -234,6 +385,34 @@ document.addEventListener('keydown', async (e) => {
     return;
   }
 
+  // 재개 카드 화면
+  if (view === 'resume') {
+    const issues = resume?.data?.issues ?? [];
+    switch (e.key) {
+      case 'Escape':
+      case 'Backspace':
+        return closeResume();
+      case 'r':
+      case 'R':
+        if (!resume.generating) regenerate(resume.projectId);
+        return;
+      case 'ArrowDown':
+      case 'j':
+        resume.sel = Math.min(resume.sel + 1, Math.max(0, issues.length - 1));
+        return render();
+      case 'ArrowUp':
+      case 'k':
+        resume.sel = Math.max(resume.sel - 1, 0);
+        return render();
+      case 'Enter':
+      case 'o':
+      case 'O':
+        if (issues[resume.sel]) window.whenwork.openUrl(issues[resume.sel].url);
+        return;
+    }
+    return;
+  }
+
   const it = selectedItem();
   switch (e.key) {
     case 'Escape':
@@ -251,6 +430,9 @@ document.addEventListener('keydown', async (e) => {
     case 'k':
       sel = Math.max(sel - 1, 0);
       return render();
+    case 'Enter':
+      if (it?.project_id) openResume(it.project_id);
+      return;
     case ' ':
       e.preventDefault();
       if (!it) return;

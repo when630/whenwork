@@ -23,14 +23,17 @@ docker compose up -d   # PostgreSQL (localhost:5433) — 없어도 캡처는 동
 npm start
 ```
 
-- `Ctrl+Alt+Space` — 퀵캡처
-- 트레이 클릭 — 오늘 뷰 (Tab 탭 전환 · ↑↓ 이동 · Space 완료 · 1~9 프로젝트 지정 · W 대기 · X 삭제)
+- `Ctrl+Alt+Space` — 퀵캡처 (Tab이면 오늘 뷰로)
+- 트레이 클릭 — 오늘 뷰 (Tab 탭 전환 · ↑↓ 이동 · Space 완료 · 1~9 프로젝트 지정 · W 대기 · X 삭제 · Enter 재개 카드)
+- 재개 카드 — AI 3문항(`claude -p`) + git 활동 + 내 GH/GL 이슈. R 재생성, Enter/O 이슈 열기
 - `npm test` — 큐 단위 테스트, `npm run smoke` — 부팅 스모크
+
+이슈 동기화는 `gh`/`glab` CLI 인증을 재사용한다. 프로젝트별 리포 경로는 DB `project.repo_paths`에 있다.
 
 ## 상태
 
 | 단계 | 내용 | 상태 |
 |---|---|---|
 | M1 | 트레이 + 퀵캡처 + 로컬 큐 + PostgreSQL + 오늘 뷰 | ✅ 구현 (도그푸딩 중) |
-| M2 | git 수집기 + 재개 카드 (`claude -p`) + GH/GL 이슈 | 예정 |
+| M2 | git 수집기 + 재개 카드 (`claude -p`) + GH/GL 이슈 | ✅ 구현 |
 | M3 | 인박스 AI 분류 + 주간 리뷰 | 예정 |

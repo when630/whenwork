@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('whenwork', {
   toWaiting: (id, who) => ipcRenderer.invoke('item:toWaiting', id, who),
   remove: (id) => ipcRenderer.invoke('item:remove', id),
 
+  // ── 재개 카드 (M2)
+  resumeGet: (projectId) => ipcRenderer.invoke('resume:get', projectId),
+  resumeSync: (projectId) => ipcRenderer.invoke('resume:sync', projectId),
+  resumeGenerate: (projectId) => ipcRenderer.invoke('resume:generate', projectId),
+  openUrl: (url) => ipcRenderer.send('open:url', url),
+
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),
   openApp: () => ipcRenderer.send('app:open'),

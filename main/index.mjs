@@ -8,6 +8,7 @@ import {
   ipcMain,
   globalShortcut,
   screen,
+  shell,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +17,9 @@ import { fileURLToPath } from 'node:url';
 import { createQueue } from './queue.mjs';
 import { createDb } from './db.mjs';
 import { foregroundTitle } from './context.mjs';
+import { collectProject } from './collect.mjs';
+import { syncProjectIssues } from './issues.mjs';
+import { generateResumeCard } from './ai.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -195,6 +199,71 @@ for (const [ch, fn] of Object.entries(itemOps)) {
     }
   });
 }
+
+// ── M2: 재개 카드
+const generatingCards = new Set(); // 프로젝트별 claude -p 중복 호출 방지
+
+async function findProject(projectId) {
+  return (await db.getProjects()).find((p) => p.id === projectId) ?? null;
+}
+
+async function resumePayload(projectId) {
+  return {
+    ok: true,
+    card: await db.getResumeCard(projectId),
+    activities: await db.getActivities(projectId, 10),
+    issues: await db.getIssues(projectId, 8),
+    generating: generatingCards.has(projectId),
+  };
+}
+
+ipcMain.handle('resume:get', async (_e, projectId) => {
+  try {
+    return await resumePayload(projectId);
+  } catch {
+    return { ok: false };
+  }
+});
+
+// git·이슈를 새로 긁고 최신 상태를 돌려준다 — 열 때마다 백그라운드로 부른다
+ipcMain.handle('resume:sync', async (_e, projectId) => {
+  try {
+    const p = await findProject(projectId);
+    if (p) {
+      await collectProject(db, p);
+      await syncProjectIssues(db, p);
+    }
+    return await resumePayload(projectId);
+  } catch {
+    return { ok: false };
+  }
+});
+
+ipcMain.handle('resume:generate', async (_e, projectId) => {
+  if (generatingCards.has(projectId)) return { ok: false, busy: true };
+  generatingCards.add(projectId);
+  try {
+    const p = await findProject(projectId);
+    if (!p) return { ok: false };
+    const view = await db.getViewState();
+    const card = await generateResumeCard(p, {
+      activities: await db.getActivities(projectId, 15),
+      doneItems: await db.getDoneItems(projectId, 7),
+      issues: await db.getIssues(projectId, 10),
+      todos: view.today.filter((t) => t.project_id === projectId && !t.done_at),
+    });
+    await db.saveResumeCard(projectId, card);
+    return await resumePayload(projectId);
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  } finally {
+    generatingCards.delete(projectId);
+  }
+});
+
+ipcMain.on('open:url', (_e, url) => {
+  if (/^https:\/\//.test(String(url))) shell.openExternal(String(url));
+});
 
 ipcMain.on('win:hide', (e) => {
   BrowserWindow.fromWebContents(e.sender)?.hide();

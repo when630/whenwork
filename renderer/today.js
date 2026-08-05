@@ -49,10 +49,25 @@ function el(tag, cls, text) {
   return n;
 }
 
+// 화면에 그려지는 순서 그대로를 돌려준다.
+// 오늘 탭은 프로젝트별로 묶어 그리므로 그 정렬을 여기서 해야 한다 —
+// 안 그러면 선택 강조(그리는 순서)와 실제 대상(원본 순서)이 어긋나 엉뚱한 항목이 지워진다.
 function currentList() {
   if (!state?.online) return [];
   if (tab === 'projects') return state.projects ?? [];
-  return state[tab] ?? [];
+  const list = state[tab] ?? [];
+  if (tab !== 'today') return list;
+  const groupOrder = new Map(); // 프로젝트별 첫 등장 순서 = 그룹 순서
+  for (const it of list) {
+    const pid = it.project_id ?? 0;
+    if (!groupOrder.has(pid)) groupOrder.set(pid, groupOrder.size);
+  }
+  return list
+    .map((it, i) => ({ it, i }))
+    .sort((a, b) =>
+      groupOrder.get(a.it.project_id ?? 0) - groupOrder.get(b.it.project_id ?? 0) || a.i - b.i
+    )
+    .map((x) => x.it);
 }
 
 // ── 렌더
@@ -306,24 +321,22 @@ function renderBody() {
   }
 
   if (tab === 'today') {
-    // 프로젝트별 그룹핑 — 그룹 안에서는 서버 정렬(마감 임박 우선) 유지
-    const groups = new Map();
-    for (const it of list) {
-      const key = it.project_id ?? 0;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(it);
-    }
-    let idx = 0;
-    for (const [pid, items] of groups) {
-      const h = el('div', 'group-h');
-      const chip = el('span', 'chip');
-      const dot = el('span', 'dot');
-      dot.style.background = projColor(pid);
-      chip.append(dot, document.createTextNode(items[0].project_name ?? '미지정'));
-      h.append(chip);
-      body.append(h);
-      for (const it of items) body.append(itemRow(it, idx++));
-    }
+    // list는 이미 프로젝트별로 묶인 순서(currentList) — 그대로 훑으며 그룹이 바뀔 때 머리글을 넣는다
+    let lastPid;
+    list.forEach((it, idx) => {
+      const pid = it.project_id ?? 0;
+      if (pid !== lastPid) {
+        lastPid = pid;
+        const h = el('div', 'group-h');
+        const chip = el('span', 'chip');
+        const dot = el('span', 'dot');
+        dot.style.background = projColor(pid);
+        chip.append(dot, document.createTextNode(it.project_name ?? '미지정'));
+        h.append(chip);
+        body.append(h);
+      }
+      body.append(itemRow(it, idx));
+    });
   } else {
     list.forEach((it, idx) => body.append(itemRow(it, idx)));
   }

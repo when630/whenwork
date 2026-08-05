@@ -27,6 +27,7 @@ const HOTKEY = 'Control+Alt+Space'; // 설계 11절 — Claude 쪽 바인딩은 
 const FLUSH_MS = 30_000;
 const TODAY_W = 880; // 오늘 뷰 — 화면 중앙, 가로 넓게
 const TODAY_H = 680;
+const CAPTURE_H = 88; // 퀵캡처 — 한 줄 입력 + 힌트 푸터에 딱 맞는 높이
 const SMOKE = process.argv.includes('--smoke');
 
 let tray = null;
@@ -82,12 +83,12 @@ function pinOnTop(win) {
 function getCaptureWin() {
   if (captureWin && !captureWin.isDestroyed()) return captureWin;
   captureWin = new BrowserWindow({
-    ...baseWinOpts(560, 128),
+    ...baseWinOpts(560, CAPTURE_H),
     // 크기 고정 — resizable은 켜두되 min=max로 실제 리사이즈는 막는다
     minWidth: 560,
     maxWidth: 560,
-    minHeight: 128,
-    maxHeight: 128,
+    minHeight: CAPTURE_H,
+    maxHeight: CAPTURE_H,
     backgroundColor: '#1e2027',
   });
   pinOnTop(captureWin);

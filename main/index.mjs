@@ -56,27 +56,41 @@ async function flush() {
 }
 
 // ── 창
+//
+// 그림자·라운드 코너는 CSS가 아니라 Windows가 그린다. 다만 프레임리스 창은
+// **resizable을 끄면 WS_THICKFRAME이 빠져** 그 둘이 함께 사라진다
+// (Electron native_window_views.cc: `if (CanResize()) frame_style |= WS_THICKFRAME`).
+// 그래서 창은 resizable로 두고, 크기를 고정하고 싶으면 min=max로 묶는다.
 function baseWinOpts(w, h) {
   return {
     width: w,
     height: h,
     frame: false,
     show: false,
-    resizable: false,
     skipTaskbar: true,
+    roundedCorners: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs') },
   };
 }
 
+// alwaysOnTop 기본 레벨(floating)은 Windows에서 창을 작업 표시줄 뒤로 보내
+// 다른 창을 누르면 가라앉는다 — pop-up-menu부터가 그 위다 (claude-office에서 확인된 패턴).
+function pinOnTop(win) {
+  win.setAlwaysOnTop(true, 'pop-up-menu');
+}
+
 function getCaptureWin() {
   if (captureWin && !captureWin.isDestroyed()) return captureWin;
-  // 투명 창 + CSS 섀도는 Windows에서 지저분하게 렌더된다 — 불투명 창에
-  // Win11 네이티브 라운드 코너·그림자(프레임리스 기본)를 쓴다.
   captureWin = new BrowserWindow({
     ...baseWinOpts(560, 128),
+    // 크기 고정 — resizable은 켜두되 min=max로 실제 리사이즈는 막는다
+    minWidth: 560,
+    maxWidth: 560,
+    minHeight: 128,
+    maxHeight: 128,
     backgroundColor: '#1e2027',
-    alwaysOnTop: true,
   });
+  pinOnTop(captureWin);
   captureWin.loadFile(path.join(ROOT, 'renderer', 'capture.html'));
   captureWin.on('blur', () => captureWin.hide()); // 다른 데 클릭하면 캡처는 접는다
   captureWin.on('close', (e) => {
@@ -104,7 +118,14 @@ function showCapture() {
 
 function getTodayWin() {
   if (todayWin && !todayWin.isDestroyed()) return todayWin;
-  todayWin = new BrowserWindow({ ...baseWinOpts(TODAY_W, TODAY_H), backgroundColor: '#16171c', alwaysOnTop: true });
+  // 오늘 뷰는 실제로 리사이즈해도 되는 창 — 최소 크기만 잡는다
+  todayWin = new BrowserWindow({
+    ...baseWinOpts(TODAY_W, TODAY_H),
+    minWidth: 560,
+    minHeight: 420,
+    backgroundColor: '#16171c',
+  });
+  pinOnTop(todayWin);
   todayWin.loadFile(path.join(ROOT, 'renderer', 'today.html'));
   todayWin.on('blur', () => todayWin.hide());
   todayWin.on('close', (e) => {
@@ -124,12 +145,13 @@ function toggleToday() {
 
 function showToday() {
   const win = getTodayWin();
-  // 커서가 있는 디스플레이의 중앙에 띄운다
+  // 커서가 있는 디스플레이의 중앙에 띄운다 (사용자가 리사이즈했다면 그 크기 기준)
   const cursor = screen.getCursorScreenPoint();
   const { workArea } = screen.getDisplayNearestPoint(cursor);
+  const [w, h] = win.getSize();
   win.setPosition(
-    Math.round(workArea.x + (workArea.width - TODAY_W) / 2),
-    Math.round(workArea.y + (workArea.height - TODAY_H) / 2)
+    Math.round(workArea.x + (workArea.width - w) / 2),
+    Math.round(workArea.y + (workArea.height - h) / 2)
   );
   flush(); // 열 때 밀린 큐부터
   win.webContents.send('today:refresh');

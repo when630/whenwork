@@ -9,51 +9,45 @@
   /* 라운드·그림자는 Win11 네이티브에 맡긴다 */
   html, body { background: var(--bg-raised); overflow: hidden; height: 100%; }
   .capture { width: 100%; height: 100%; display: flex; flex-direction: column; }
-  .capture .row { flex: 1; }
-  .row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4) 18px; }
+  .row { flex: 1; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4) 18px; }
   .logo {
     width: 26px; height: 26px; flex: none; border-radius: var(--r-sm);
     background: var(--accent-dim); color: var(--accent);
     display: grid; place-items: center;
     font-family: var(--font-mono); font-weight: 700; font-size: 13px;
+    transition: background .15s, color .15s;
   }
+  body.flash .logo { background: rgba(158,206,106,.16); color: var(--success); }
   input {
     flex: 1; background: none; border: none; outline: none;
     color: var(--text-primary); font-family: var(--font-sans); font-size: var(--fs-lg);
   }
   input::placeholder { color: var(--text-muted); }
   .foot {
-    display: flex; justify-content: space-between; align-items: center;
+    display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3);
     padding: var(--sp-2) 18px; border-top: 1px solid var(--border);
     font-size: var(--fs-xs); color: var(--text-muted);
     background: var(--bg-app);
   }
-  .foot .hints { display: flex; gap: var(--sp-3); }
-  .saved-line {
-    display: none; align-items: center; gap: var(--sp-2);
-    font-size: var(--fs-lg); color: var(--text-primary);
-  }
-  .saved-line .check { color: var(--success); font-weight: 700; }
-  .queue-badge { display: none; color: var(--warning); }
-
-  body.saved input { display: none; }
-  body.saved .saved-line { display: flex; }
-  body.saved .hints { visibility: hidden; }
-  body.saved.offline .queue-badge { display: inline; }
-  body.saved.offline .default-msg { display: none; }
+  .hints { display: flex; gap: var(--sp-3); flex: none; }
+  .msg { text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg.ok { color: var(--success); }
+  .msg.warn { color: var(--warning); }
 </style>
 </head>
 <body>
   <div class="capture">
     <div class="row">
-      <div class="logo">W</div>
+      <div class="logo" id="logo">W</div>
       <input id="in" type="text" placeholder="할 일을 한 줄로… (분류는 나중에)" maxlength="500">
-      <div class="saved-line"><span class="check">✓</span> 인박스에 저장됨</div>
     </div>
     <div class="foot">
-      <div class="hints"><span><kbd>Enter</kbd> 저장</span><span><kbd>Tab</kbd> 앱 열기</span><span><kbd>Esc</kbd> 닫기</span></div>
-      <span class="default-msg">인박스로 저장 · 📎 컨텍스트 자동 기록</span>
-      <span class="queue-badge" id="queue"></span>
+      <div class="hints">
+        <span><kbd>Enter</kbd> 저장</span>
+        <span><kbd>Tab</kbd> 앱 열기</span>
+        <span><kbd>Esc</kbd> 닫기</span>
+      </div>
+      <span class="msg" id="msg">인박스로 저장 · 📎 컨텍스트 자동 기록</span>
     </div>
   </div>
 <script src="capture.js"></script>

@@ -1,21 +1,43 @@
-// 퀵캡처 — 입력→Enter→닫힘까지 어떤 선택지도 띄우지 않는다 (설계 7절 게이트)
+// 퀵캡처 — 입력→Enter→저장까지 어떤 선택지도 띄우지 않는다 (설계 7절 게이트).
+// 저장해도 창은 닫지 않는다: 연달아 던지거나 Tab으로 앱을 열 수 있게. 닫기는 Esc(또는 단축키 재입력).
 const input = document.getElementById('in');
-const queueEl = document.getElementById('queue');
+const msg = document.getElementById('msg');
+const DEFAULT_MSG = '인박스로 저장 · 📎 컨텍스트 자동 기록';
+
 let saving = false;
-let shownAt = 0;
+let sessionCount = 0; // 이번에 연달아 던진 개수
+let msgTimer = null;
 
 window.whenwork.onReset(() => {
   saving = false;
-  shownAt = Date.now();
-  document.body.classList.remove('saved', 'offline');
+  sessionCount = 0;
   input.value = '';
+  showMsg(null, DEFAULT_MSG);
   input.focus();
 });
 
-// 전역 단축키(Ctrl+Alt+Space)의 Space가 갓 포커스된 입력창으로 새어 들어온다 — 둘 다 막는다:
-// ① 수식키가 눌린 Space는 무시 ② 표시 직후 200ms 안의 공백-only 입력은 지운다
+function showMsg(kind, text, holdMs = 0) {
+  clearTimeout(msgTimer);
+  msg.className = 'msg' + (kind ? ' ' + kind : '');
+  msg.textContent = text;
+  document.body.classList.toggle('flash', kind === 'ok');
+  if (holdMs) {
+    msgTimer = setTimeout(() => {
+      msg.className = 'msg';
+      msg.textContent = DEFAULT_MSG;
+      document.body.classList.remove('flash');
+    }, holdMs);
+  }
+}
+
+// 전역 단축키(Ctrl+Alt+Space)의 Space가 갓 포커스된 입력창으로 새어 들어온다.
+// 타이밍으로 거르면 놓치는 경우가 생기므로 **선두 공백 입력 자체를 금지**한다 —
+// 할 일 제목이 공백으로 시작할 일은 없으니 잃는 것도 없다.
+input.addEventListener('beforeinput', (e) => {
+  if (e.data === ' ' && input.selectionStart === 0) e.preventDefault();
+});
 input.addEventListener('input', () => {
-  if (Date.now() - shownAt < 200 && input.value.trim() === '') input.value = '';
+  if (/^\s/.test(input.value)) input.value = input.value.replace(/^\s+/, '');
 });
 
 document.addEventListener('keydown', async (e) => {
@@ -26,21 +48,22 @@ document.addEventListener('keydown', async (e) => {
     return window.whenwork.openApp();
   }
   if (e.key !== 'Enter' || saving) return;
+
   const title = input.value.trim();
   if (!title) return;
   saving = true;
   const res = await window.whenwork.save(title);
-  if (!res.ok) {
-    saving = false;
-    return;
+  saving = false;
+  if (!res.ok) return;
+
+  sessionCount++;
+  input.value = ''; // 다음 입력을 바로 받는다 — 창은 그대로 열려 있다
+  input.focus();
+  if (res.dbOnline) {
+    showMsg('ok', sessionCount > 1 ? `✓ 저장됨 · 이번에 ${sessionCount}건` : '✓ 인박스에 저장됨', 2000);
+  } else {
+    showMsg('warn', `✓ 저장됨 · DB 대기 — 로컬 큐 ${res.pending}건`, 3000);
   }
-  document.body.classList.add('saved');
-  if (!res.dbOnline) {
-    document.body.classList.add('offline');
-    queueEl.textContent = `⏳ DB 대기 중 — 로컬 큐 ${res.pending}건 (연결되면 자동 동기화)`;
-  }
-  // 저장 피드백을 잠깐 보여주고 닫는다 — 오프라인 안내는 읽을 시간을 조금 더 준다
-  setTimeout(() => window.whenwork.hide(), res.dbOnline ? 400 : 1200);
 });
 
 window.addEventListener('focus', () => input.focus());

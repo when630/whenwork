@@ -25,6 +25,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const HOTKEY = 'Control+Alt+Space'; // 설계 11절 — Claude 쪽 바인딩은 사용자가 해제함
 const FLUSH_MS = 30_000;
+const TODAY_W = 880; // 오늘 뷰 — 화면 중앙, 가로 넓게
+const TODAY_H = 680;
 const SMOKE = process.argv.includes('--smoke');
 
 let tray = null;
@@ -100,7 +102,7 @@ function showCapture() {
 
 function getTodayWin() {
   if (todayWin && !todayWin.isDestroyed()) return todayWin;
-  todayWin = new BrowserWindow({ ...baseWinOpts(480, 660), alwaysOnTop: true });
+  todayWin = new BrowserWindow({ ...baseWinOpts(TODAY_W, TODAY_H), alwaysOnTop: true });
   todayWin.loadFile(path.join(ROOT, 'renderer', 'today.html'));
   todayWin.on('blur', () => todayWin.hide());
   todayWin.on('close', (e) => {
@@ -120,9 +122,13 @@ function toggleToday() {
 
 function showToday() {
   const win = getTodayWin();
-  const { workArea } = screen.getPrimaryDisplay();
-  // 트레이 근처(우하단)에 붙인다
-  win.setPosition(workArea.x + workArea.width - 480 - 12, workArea.y + workArea.height - 660 - 12);
+  // 커서가 있는 디스플레이의 중앙에 띄운다
+  const cursor = screen.getCursorScreenPoint();
+  const { workArea } = screen.getDisplayNearestPoint(cursor);
+  win.setPosition(
+    Math.round(workArea.x + (workArea.width - TODAY_W) / 2),
+    Math.round(workArea.y + (workArea.height - TODAY_H) / 2)
+  );
   flush(); // 열 때 밀린 큐부터
   win.webContents.send('today:refresh');
   win.show();
@@ -285,8 +291,14 @@ app.setAppUserModelId('com.when630.whenwork');
 app.whenReady().then(async () => {
   tray = new Tray(trayImage());
   tray.on('click', toggleToday);
+  // 단축키는 토글 — 열린 창(오늘 뷰든 캡처든)이 있으면 닫고, 없으면 캡처를 연다
+  const onHotkey = () => {
+    if (todayWin && !todayWin.isDestroyed() && todayWin.isVisible()) return todayWin.hide();
+    if (captureWin && !captureWin.isDestroyed() && captureWin.isVisible()) return captureWin.hide();
+    showCapture();
+  };
   // register()는 이미 남이 쓰는 조합이면 조용히 false만 낸다 — 메뉴에 실패를 드러낸다
-  hotkeyOk = globalShortcut.register(HOTKEY, showCapture);
+  hotkeyOk = globalShortcut.register(HOTKEY, onHotkey);
   refreshTrayMenu();
   setInterval(flush, FLUSH_MS);
   flush();

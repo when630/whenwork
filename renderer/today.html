@@ -115,20 +115,22 @@
   .err { background: rgba(247,118,142,.08); border: 1px solid rgba(247,118,142,.35); border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); color: var(--text-secondary); }
   .err .t { color: var(--danger); font-weight: 600; }
 
-  /* W(대기로) 눌렀을 때 "누구를 기다리나" 한 줄 입력 */
-  #whoDlg {
+  /* 한 줄 텍스트 입력 다이얼로그 (대기 대상·프로젝트 이름·리포 경로 등 공용) */
+  #dlg {
     display: none; position: fixed; left: 50%; top: 40%; transform: translateX(-50%);
-    width: 360px; background: var(--bg-raised); border: 1px solid var(--border-focus);
+    width: 420px; background: var(--bg-raised); border: 1px solid var(--border-focus);
     border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4);
     box-shadow: 0 8px 32px rgba(0,0,0,.55);
   }
-  #whoDlg.show { display: block; }
-  #whoDlg label { font-size: var(--fs-xs); color: var(--text-muted); display: block; margin-bottom: 4px; }
-  #whoDlg input {
+  #dlg.show { display: block; }
+  #dlg label { font-size: var(--fs-xs); color: var(--text-muted); display: block; margin-bottom: 4px; }
+  #dlg input {
     width: 100%; background: var(--bg-inset); border: 1px solid var(--border);
     border-radius: var(--r-sm); padding: 6px 10px; color: var(--text-primary);
     font-family: var(--font-sans); font-size: var(--fs-md); outline: none;
   }
+  .proj-repos { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; font-family: var(--font-mono); }
+  .proj-num { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-secondary); flex: none; width: 14px; text-align: right; margin-top: 3px; }
 </style>
 </head>
 <body>
@@ -139,9 +141,9 @@
     <span class="sync" id="sync"><span class="led"></span><span id="syncText">동기화됨</span></span>
     <span class="foot-hints" id="hints"></span>
   </footer>
-  <div id="whoDlg">
-    <label>누구를 기다리나요? (비워도 됨)</label>
-    <input id="whoIn" type="text" maxlength="100">
+  <div id="dlg">
+    <label id="dlgLabel"></label>
+    <input id="dlgIn" type="text" maxlength="500">
   </div>
 <script src="today.js"></script>
 </body>

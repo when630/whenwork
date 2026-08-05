@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('whenwork', {
   toWaiting: (id, who) => ipcRenderer.invoke('item:toWaiting', id, who),
   remove: (id) => ipcRenderer.invoke('item:remove', id),
 
+  // ── 프로젝트 관리
+  projectCreate: (name) => ipcRenderer.invoke('project:create', name),
+  projectUpdate: (id, fields) => ipcRenderer.invoke('project:update', id, fields),
+  projectRepos: (id, paths) => ipcRenderer.invoke('project:repos', id, paths),
+  projectArchive: (id) => ipcRenderer.invoke('project:archive', id),
+
   // ── 재개 카드 (M2)
   resumeGet: (projectId) => ipcRenderer.invoke('resume:get', projectId),
   resumeSync: (projectId) => ipcRenderer.invoke('resume:sync', projectId),

@@ -5,12 +5,13 @@ const TABS = [
   { key: 'today', label: '오늘' },
   { key: 'inbox', label: '인박스' },
   { key: 'waiting', label: '대기' },
+  { key: 'projects', label: '프로젝트' },
 ];
 
 let state = null; // 마지막으로 받은 서버 상태
 let tab = 'inbox'; // 캡처 직후 열면 인박스부터 보는 게 자연스럽다
 let sel = 0; // 현재 탭에서 선택된 행
-let whoTarget = null; // W 입력 대기 중인 item id
+let dlgResolve = null; // 텍스트 입력 다이얼로그가 기다리는 resolve
 let view = 'list'; // 'list' | 'resume'
 let resume = null; // { projectId, data, loading, generating, error, sel }
 
@@ -50,6 +51,7 @@ function el(tag, cls, text) {
 
 function currentList() {
   if (!state?.online) return [];
+  if (tab === 'projects') return state.projects ?? [];
   return state[tab] ?? [];
 }
 
@@ -207,7 +209,9 @@ function renderTabs() {
   const tabs = $('tabs');
   tabs.replaceChildren();
   for (const t of TABS) {
-    const n = state?.online ? (state[t.key]?.filter((i) => !i.done_at).length ?? 0) : 0;
+    const n = !state?.online ? 0
+      : t.key === 'projects' ? (state.projects?.length ?? 0)
+      : (state[t.key]?.filter((i) => !i.done_at).length ?? 0);
     const node = el('div', 'tab' + (tab === t.key ? ' on' : ''));
     node.append(el('span', null, t.label), el('span', 'n', String(n)));
     node.onclick = () => switchTab(t.key);
@@ -262,15 +266,42 @@ function renderBody() {
 
   if (list.length === 0) {
     const e = el('div', 'empty');
-    const hint = el('div');
-    hint.append(document.createTextNode('생각나면 '));
-    ['Ctrl', 'Alt', 'Space'].forEach((k, i) => {
-      if (i) hint.append(document.createTextNode('+'));
-      hint.append(el('kbd', null, k));
-    });
-    hint.append(document.createTextNode(' 로 던져두세요'));
-    e.append(el('div', 'big', '◎'), el('div', null, '항목이 없습니다'), hint);
+    if (tab === 'projects') {
+      const hint = el('div');
+      hint.append(el('kbd', null, 'N'), document.createTextNode(' 으로 프로젝트를 추가하세요'));
+      e.append(el('div', 'big', '◎'), el('div', null, '프로젝트가 없습니다'), hint);
+    } else {
+      const hint = el('div');
+      hint.append(document.createTextNode('생각나면 '));
+      ['Ctrl', 'Alt', 'Space'].forEach((k, i) => {
+        if (i) hint.append(document.createTextNode('+'));
+        hint.append(el('kbd', null, k));
+      });
+      hint.append(document.createTextNode(' 로 던져두세요'));
+      e.append(el('div', 'big', '◎'), el('div', null, '항목이 없습니다'), hint);
+    }
     body.append(e);
+    return;
+  }
+
+  if (tab === 'projects') {
+    list.forEach((p, idx) => {
+      const row = el('div', 'item' + (idx === sel ? ' selected' : ''));
+      row.append(el('span', 'proj-num', idx < 9 ? String(idx + 1) : ''));
+      const chip = el('span', 'chip');
+      const dot = el('span', 'dot');
+      dot.style.background = projColor(p.id);
+      chip.append(dot, document.createTextNode(p.abbr ? `#${p.abbr}` : '—'));
+      row.append(el('div', 't', p.name), chip);
+      const repos = el('div', 'proj-repos');
+      repos.textContent = p.repo_paths?.length ? p.repo_paths.join(' · ') : '연결된 리포 없음 (R로 추가)';
+      row.append(repos);
+      row.onclick = () => {
+        sel = idx;
+        render();
+      };
+      body.append(row);
+    });
     return;
   }
 
@@ -330,6 +361,14 @@ function renderFooter() {
     return;
   }
   add('Tab', '탭');
+  if (tab === 'projects') {
+    add('N', '추가');
+    add('E', '이름');
+    add('A', '약어');
+    add('R', '리포');
+    add('X', '보관');
+    return;
+  }
   if (tab === 'inbox') {
     add('1~9', '프로젝트');
     add('W', '대기');
@@ -359,28 +398,29 @@ function selectedItem() {
   return currentList()[sel] ?? null;
 }
 
-function openWhoDlg(id) {
-  whoTarget = id;
-  $('whoDlg').classList.add('show');
-  $('whoIn').value = '';
-  $('whoIn').focus();
+// 한 줄 텍스트 입력 — null이면 취소
+function promptText(label, initial = '') {
+  return new Promise((resolve) => {
+    dlgResolve = resolve;
+    $('dlgLabel').textContent = label;
+    $('dlgIn').value = initial;
+    $('dlg').classList.add('show');
+    $('dlgIn').focus();
+  });
 }
 
-async function closeWhoDlg(commit) {
-  const id = whoTarget;
-  whoTarget = null;
-  $('whoDlg').classList.remove('show');
-  if (commit && id) {
-    await window.whenwork.toWaiting(id, $('whoIn').value.trim() || null);
-    await refresh();
-  }
+function closeDlg(commit) {
+  const resolve = dlgResolve;
+  dlgResolve = null;
+  $('dlg').classList.remove('show');
+  resolve?.(commit ? $('dlgIn').value.trim() : null);
 }
 
 document.addEventListener('keydown', async (e) => {
-  // 대기 대상 입력 중에는 그 입력만 받는다
-  if (whoTarget) {
-    if (e.key === 'Enter') closeWhoDlg(true);
-    if (e.key === 'Escape') closeWhoDlg(false);
+  // 다이얼로그 입력 중에는 그 입력만 받는다
+  if (dlgResolve) {
+    if (e.key === 'Enter') closeDlg(true);
+    if (e.key === 'Escape') closeDlg(false);
     e.stopPropagation();
     return;
   }
@@ -413,7 +453,7 @@ document.addEventListener('keydown', async (e) => {
     return;
   }
 
-  const it = selectedItem();
+  // 공통: 닫기·탭 전환·이동
   switch (e.key) {
     case 'Escape':
       return window.whenwork.hide();
@@ -430,6 +470,72 @@ document.addEventListener('keydown', async (e) => {
     case 'k':
       sel = Math.max(sel - 1, 0);
       return render();
+  }
+
+  // 프로젝트 탭 — 프로젝트 자체를 관리한다 (시드·하드코딩 없음)
+  if (tab === 'projects') {
+    const p = currentList()[sel] ?? null;
+    switch (e.key) {
+      case 'n':
+      case 'N': {
+        const name = await promptText('새 프로젝트 이름');
+        if (name) {
+          await window.whenwork.projectCreate(name);
+          await refresh();
+        }
+        return;
+      }
+      case 'e':
+      case 'E': {
+        if (!p) return;
+        const name = await promptText('프로젝트 이름', p.name);
+        if (name) {
+          await window.whenwork.projectUpdate(p.id, { name });
+          await refresh();
+        }
+        return;
+      }
+      case 'a':
+      case 'A': {
+        if (!p) return;
+        const abbr = await promptText('약어 (#토큰용, 비우면 없음)', p.abbr ?? '');
+        if (abbr !== null) {
+          await window.whenwork.projectUpdate(p.id, { abbr });
+          await refresh();
+        }
+        return;
+      }
+      case 'r':
+      case 'R': {
+        if (!p) return;
+        const raw = await promptText('리포 경로 — 여러 개는 ; 로 구분', (p.repo_paths ?? []).join('; '));
+        if (raw !== null) {
+          const paths = raw.split(';').map((s) => s.trim()).filter(Boolean);
+          await window.whenwork.projectRepos(p.id, paths);
+          await refresh();
+        }
+        return;
+      }
+      case 'x':
+      case 'X': {
+        if (!p) return;
+        const yes = await promptText(`"${p.name}" 보관? 지우려면 y 입력`, '');
+        if (yes?.toLowerCase() === 'y') {
+          await window.whenwork.projectArchive(p.id);
+          await refresh();
+        }
+        return;
+      }
+      case 'Enter':
+        if (p) openResume(p.id);
+        return;
+    }
+    return;
+  }
+
+  // 항목 탭 (오늘·인박스·대기)
+  const it = selectedItem();
+  switch (e.key) {
     case 'Enter':
       if (it?.project_id) openResume(it.project_id);
       return;
@@ -440,9 +546,15 @@ document.addEventListener('keydown', async (e) => {
       else await window.whenwork.complete(it.id);
       return refresh();
     case 'w':
-    case 'W':
-      if (it && tab !== 'waiting') openWhoDlg(it.id);
+    case 'W': {
+      if (!it || tab === 'waiting') return;
+      const who = await promptText('누구를 기다리나요? (비워도 됨)');
+      if (who !== null) {
+        await window.whenwork.toWaiting(it.id, who || null);
+        await refresh();
+      }
       return;
+    }
     case 'x':
     case 'X':
       if (!it) return;

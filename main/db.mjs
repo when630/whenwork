@@ -56,15 +56,6 @@ CREATE TABLE IF NOT EXISTS resume_card (
 CREATE UNIQUE INDEX IF NOT EXISTS activity_uniq ON activity (project_id, ref) WHERE ref IS NOT NULL;
 `;
 
-// 초기 프로젝트 시드. repo는 리모트로 확실히 확인된 것만 — 나머지는 사용자가 채운다.
-const SEED = [
-  { name: '시재건설', abbr: 'sj', repos: [] },
-  { name: '서식갤러리', abbr: 'fg', repos: ['D:/AIProject/formgallery'] },
-  { name: 'GoWrite', abbr: 'gw', repos: ['D:/AIProject/gowrite'] },
-  { name: 'eformsign', abbr: 'ef', repos: [] },
-  { name: 'whenwork', abbr: 'ww', repos: ['D:/AIProject/whenwork'] },
-];
-
 export function createDb(config = {}) {
   const pool = new Pool({
     host: config.host ?? '127.0.0.1',
@@ -84,24 +75,7 @@ export function createDb(config = {}) {
   async function ensureSchema() {
     if (ready) return;
     await pool.query(SCHEMA);
-    const { rows } = await pool.query('SELECT count(*)::int AS n FROM project');
-    if (rows[0].n === 0) {
-      for (let i = 0; i < SEED.length; i++) {
-        await pool.query(
-          'INSERT INTO project (name, abbr, sort) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING',
-          [SEED[i].name, SEED[i].abbr, i]
-        );
-      }
-    }
-    // repo 경로 채우기 — 사용자가 손대지 않은(빈) 것만, 언제 켜도 멱등
-    for (const s of SEED) {
-      if (s.repos?.length) {
-        await pool.query(
-          "UPDATE project SET repo_paths = $2 WHERE name = $1 AND repo_paths = '{}'",
-          [s.name, s.repos]
-        );
-      }
-    }
+    // 프로젝트 시드 없음 — 프로젝트는 앱의 프로젝트 탭에서 사용자가 만든다 (DB가 유일 원본)
     ready = true;
   }
 
@@ -135,6 +109,29 @@ export function createDb(config = {}) {
       "SELECT id, name, abbr, repo_paths, sort FROM project WHERE status = 'active' ORDER BY sort, id"
     );
     return rows;
+  }
+
+  // ── 프로젝트 관리 — 시드·하드코딩 없이 전부 여기서
+  async function createProject(name) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      'INSERT INTO project (name, sort) VALUES ($1, (SELECT coalesce(max(sort), 0) + 1 FROM project)) ON CONFLICT (name) DO NOTHING RETURNING id',
+      [name]
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  async function updateProject(id, fields) {
+    if (fields.name != null) await pool.query('UPDATE project SET name = $2 WHERE id = $1', [id, fields.name]);
+    if (fields.abbr != null) await pool.query('UPDATE project SET abbr = $2 WHERE id = $1', [id, fields.abbr || null]);
+  }
+
+  async function setRepoPaths(id, paths) {
+    await pool.query('UPDATE project SET repo_paths = $2 WHERE id = $1', [id, paths]);
+  }
+
+  async function archiveProject(id) {
+    await pool.query("UPDATE project SET status = 'archived' WHERE id = $1", [id]);
   }
 
   // ── M2: 수집기·재개 카드
@@ -263,6 +260,10 @@ export function createDb(config = {}) {
     insertCaptures,
     getProjects,
     getViewState,
+    createProject,
+    updateProject,
+    setRepoPaths,
+    archiveProject,
     insertActivities,
     getActivities,
     upsertIssues,

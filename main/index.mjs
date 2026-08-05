@@ -84,34 +84,81 @@ async function collectAll() {
   }
 }
 
-// ── 주간 리뷰 초안 → 볼트 (D5·오픈이슈 #1)
+// ── 주간 리뷰 초안 (D5·오픈이슈 #1)
+//
+// DB에 저장하고 볼트 파일로도 내보낸다. 앱의 리뷰 탭은 DB 쪽을 읽으므로 볼트가 없어도 볼 수 있다.
 let reviewing = false;
-async function makeWeeklyReview() {
-  if (reviewing) return;
+
+// weekOffset: 0=이번 주, -1=지난 주
+function weekOf(weekOffset = 0) {
+  const base = new Date();
+  base.setDate(base.getDate() + weekOffset * 7);
+  const { from, to } = weekRange(base);
+  const last = new Date(to.getTime() - 86400000);
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { base, from, to, week: isoWeek(base), label: `${fmt(from)} ~ ${fmt(last)}` };
+}
+
+async function makeWeeklyReview(weekOffset = 0, { notify: useNotification = false } = {}) {
+  if (reviewing) return { ok: false, busy: true };
   reviewing = true;
-  const notify = (body) => new Notification({ title: 'WHENWORK 주간 리뷰', body }).show();
+  const notify = (body) => {
+    if (useNotification) new Notification({ title: 'WHENWORK 주간 리뷰', body }).show();
+  };
   try {
-    if (!(await db.online())) return notify('DB가 꺼져 있어 만들 수 없습니다.');
-    const now = new Date();
-    const { from, to } = weekRange(now);
-    const range = {
-      label: `${from.toISOString().slice(0, 10)} ~ ${new Date(to - 86400000).toISOString().slice(0, 10)}`,
-    };
+    if (!(await db.online())) {
+      notify('DB가 꺼져 있어 만들 수 없습니다.');
+      return { ok: false, error: 'DB가 꺼져 있습니다' };
+    }
+    const w = weekOf(weekOffset);
+    const range = { label: w.label };
     notify('초안 생성 중… (claude -p)');
-    const material = await db.weeklyMaterial(from, to);
+    const material = await db.weeklyMaterial(w.from, w.to);
     const body = await generateWeeklyReview(range, material);
-    const week = isoWeek(now);
-    const file = weeklyPath(settings.get('vaultRoot') ?? DEFAULT_VAULT, now, week);
-    writeWeekly(file, body, { week, range });
-    await db.logEvent('weekly_review', file);
-    notify(`저장됨 — ${path.basename(file)}`);
-    shell.openPath(file);
+    const file = weeklyPath(settings.get('vaultRoot') ?? DEFAULT_VAULT, w.base, w.week);
+    let saved = null;
+    try {
+      writeWeekly(file, body, { week: w.week, range });
+      saved = file;
+    } catch {
+      // 볼트에 못 써도 DB에는 남는다 — 앱에서는 그대로 볼 수 있다
+    }
+    await db.saveReview({ year: w.week.year, week: w.week.week, body, range_label: w.label, file: saved });
+    await db.logEvent('weekly_review', saved ?? `${w.week.year}-W${w.week.week}`);
+    notify(saved ? `저장됨 — ${path.basename(saved)}` : '생성됨 (볼트 저장 실패 — 앱에서 확인)');
+    return { ok: true, review: await db.getReview(w.week.year, w.week.week), ...w, label: w.label };
   } catch (err) {
-    notify(`실패: ${String(err?.message ?? err).slice(0, 120)}`);
+    const msg = String(err?.message ?? err).slice(0, 160);
+    notify(`실패: ${msg}`);
+    return { ok: false, error: msg };
   } finally {
     reviewing = false;
   }
 }
+
+ipcMain.handle('review:get', async (_e, weekOffset = 0) => {
+  try {
+    const w = weekOf(weekOffset);
+    return {
+      ok: true,
+      label: w.label,
+      year: w.week.year,
+      week: w.week.week,
+      generating: reviewing,
+      review: await db.getReview(w.week.year, w.week.week),
+    };
+  } catch {
+    return { ok: false };
+  }
+});
+
+ipcMain.handle('review:generate', (_e, weekOffset = 0) => makeWeeklyReview(weekOffset));
+
+ipcMain.handle('review:openFile', async (_e, file) => {
+  if (!file) return { ok: false };
+  const err = await shell.openPath(file);
+  return { ok: !err };
+});
 
 // ── 창
 //
@@ -260,7 +307,16 @@ function refreshTrayMenu() {
       { label: '오늘 뷰', click: toggleToday },
       { label: `퀵캡처 (${hotkeyOk ? 'Ctrl+Alt+Space' : '단축키 등록 실패!'})`, click: showCapture },
       { type: 'separator' },
-      { label: '주간 리뷰 초안 만들기', click: makeWeeklyReview },
+      {
+        label: '주간 리뷰 초안 만들기',
+        click: async () => {
+          const res = await makeWeeklyReview(0, { notify: true });
+          if (res?.ok) {
+            showToday();
+            todayWin?.webContents.send('today:openReview');
+          }
+        },
+      },
       { label: '지금 수집 (git · 이슈)', click: collectAll },
       { type: 'separator' },
       {

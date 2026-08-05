@@ -6,12 +6,14 @@ const TABS = [
   { key: 'inbox', label: '인박스' },
   { key: 'waiting', label: '대기' },
   { key: 'projects', label: '프로젝트' },
+  { key: 'review', label: '리뷰' },
 ];
 
 let state = null; // 마지막으로 받은 서버 상태
 let tab = 'inbox'; // 캡처 직후 열면 인박스부터 보는 게 자연스럽다
 let sel = 0; // 현재 탭에서 선택된 행
 let dlgResolve = null; // 텍스트 입력 다이얼로그가 기다리는 resolve
+let review = { offset: 0, data: null, generating: false, error: null }; // 리뷰 탭 상태
 let view = 'list'; // 'list' | 'resume'
 let resume = null; // { projectId, data, loading, generating, error, sel }
 
@@ -54,6 +56,7 @@ function el(tag, cls, text) {
 // 안 그러면 선택 강조(그리는 순서)와 실제 대상(원본 순서)이 어긋나 엉뚱한 항목이 지워진다.
 function currentList() {
   if (!state?.online) return [];
+  if (tab === 'review') return [];
   if (tab === 'projects') return state.projects ?? [];
   const list = state[tab] ?? [];
   if (tab !== 'today') return list;
@@ -226,9 +229,11 @@ function renderTabs() {
   for (const t of TABS) {
     const n = !state?.online ? 0
       : t.key === 'projects' ? (state.projects?.length ?? 0)
+      : t.key === 'review' ? null
       : (state[t.key]?.filter((i) => !i.done_at).length ?? 0);
     const node = el('div', 'tab' + (tab === t.key ? ' on' : ''));
-    node.append(el('span', null, t.label), el('span', 'n', String(n)));
+    node.append(el('span', null, t.label));
+    if (n !== null) node.append(el('span', 'n', String(n)));
     node.onclick = () => switchTab(t.key);
     tabs.append(node);
   }
@@ -275,8 +280,99 @@ function itemRow(it, idx) {
   return row;
 }
 
+// ── 주간 리뷰 탭 — DB에 저장된 초안을 보여주고, 없으면 생성하게 한다
+function renderReview() {
+  const body = $('body');
+  body.replaceChildren();
+  const d = review.data;
+
+  const head = el('div', 'rv-head');
+  const nav = el('div', 'rv-nav');
+  const prev = el('span', null, '‹');
+  prev.title = '지난 주';
+  prev.onclick = () => moveWeek(-1);
+  const next = el('span', null, '›');
+  next.title = '다음 주';
+  next.onclick = () => moveWeek(1);
+  nav.append(prev, next);
+  const title = el('div');
+  title.append(
+    el('div', 'wk', d ? `${d.year}년 ${d.week}주차${review.offset === 0 ? ' (이번 주)' : ''}` : '주간 리뷰'),
+    el('div', 'range', d?.label ?? '')
+  );
+  head.append(nav, title);
+  if (d?.review?.generated_at) {
+    head.append(el('span', 'gen-at', `✦ ${fmtWhen(d.review.generated_at)} 생성`));
+  }
+  body.append(head);
+
+  const box = el('div', 'rv-body');
+  if (review.generating) {
+    const st = el('div', 'gen-status');
+    st.append(el('span', 'spin'), document.createTextNode('주간 리뷰 초안 생성 중… (claude -p, 30초~1분)'));
+    const sk = el('div', 'skeleton');
+    for (const w of ['92%', '86%', '70%', '80%']) {
+      const s = el('div', 'sk');
+      s.style.width = w;
+      sk.append(s);
+    }
+    box.append(st, sk);
+  } else if (review.error) {
+    const err = el('div', 'err');
+    err.append(el('div', 't', '생성 실패'), el('div', null, review.error));
+    box.append(err);
+  } else if (d?.review) {
+    box.append(window.MD.render(d.review.body));
+  } else {
+    const e = el('div', 'empty');
+    const hint = el('div');
+    hint.append(el('kbd', null, 'G'), document.createTextNode(' 로 이 주의 초안을 만듭니다'));
+    e.append(el('div', 'big', '◎'), el('div', null, '아직 만든 초안이 없습니다'), hint);
+    e.style.height = '260px';
+    box.append(e);
+  }
+  body.append(box);
+
+  if (d?.review?.file) {
+    const f = el('div', 'rv-file');
+    f.append(window.ICONS.context(), document.createTextNode(` ${d.review.file} — 열기`));
+    f.onclick = () => window.whenwork.reviewOpenFile(d.review.file);
+    body.append(f);
+  }
+}
+
+async function loadReview() {
+  const res = await window.whenwork.reviewGet(review.offset);
+  review.data = res.ok ? res : null;
+  review.generating = !!res.generating;
+  render();
+}
+
+function moveWeek(delta) {
+  review.offset = Math.min(0, review.offset + delta); // 미래 주는 볼 게 없다
+  review.error = null;
+  review.data = null;
+  render();
+  loadReview();
+}
+
+async function generateReview() {
+  if (review.generating) return;
+  review.generating = true;
+  review.error = null;
+  render();
+  const res = await window.whenwork.reviewGenerate(review.offset);
+  review.generating = false;
+  if (res.ok) await loadReview();
+  else {
+    review.error = res.busy ? '이미 생성 중입니다' : (res.error ?? 'claude -p 응답 없음');
+    render();
+  }
+}
+
 function renderBody() {
   const body = $('body');
+  if (tab === 'review') return renderReview();
   body.replaceChildren();
 
   if (!state) return;
@@ -389,6 +485,13 @@ function renderFooter() {
     return;
   }
   add('Tab', '탭');
+  if (tab === 'review') {
+    add('G', review.data?.review ? '다시 생성' : '생성');
+    add('←→', '주 이동');
+    if (review.data?.review?.file) add('O', '볼트에서 열기');
+    add('Esc', '닫기');
+    return;
+  }
   if (tab === 'projects') {
     add('N', '추가');
     add('E', '이름');
@@ -425,6 +528,7 @@ function switchTab(key) {
   tab = key;
   sel = 0;
   render();
+  if (key === 'review' && !review.data) loadReview();
 }
 
 function selectedItem() {
@@ -524,6 +628,30 @@ document.addEventListener('keydown', async (e) => {
       const i = TABS.findIndex((t) => t.key === tab);
       return switchTab(TABS[(i + (e.shiftKey ? TABS.length - 1 : 1)) % TABS.length].key);
     }
+  }
+
+  // 리뷰 탭 — 목록이 아니라 문서라 조작이 다르다
+  if (tab === 'review') {
+    switch (e.key) {
+      case 'g':
+      case 'G':
+        e.preventDefault();
+        return generateReview();
+      case 'o':
+      case 'O':
+        if (review.data?.review?.file) window.whenwork.reviewOpenFile(review.data.review.file);
+        return;
+      case 'ArrowLeft':
+      case 'h':
+        return moveWeek(-1);
+      case 'ArrowRight':
+      case 'l':
+        return moveWeek(1);
+    }
+    return;
+  }
+
+  switch (e.key) {
     case 'ArrowDown':
     case 'j':
     case 'J':
@@ -687,4 +815,9 @@ document.addEventListener('keydown', async (e) => {
 });
 
 window.whenwork.onRefresh(refresh);
+// 트레이에서 리뷰를 만들면 그 탭을 바로 열어준다
+window.whenwork.onOpenReview(() => {
+  review = { offset: 0, data: null, generating: false, error: null };
+  switchTab('review');
+});
 refresh();

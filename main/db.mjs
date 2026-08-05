@@ -67,6 +67,17 @@ CREATE TABLE IF NOT EXISTS event (
   detail text
 );
 CREATE INDEX IF NOT EXISTS event_at ON event (at DESC);
+
+-- 주간 리뷰 초안. DB가 원본이고 볼트 파일은 거기서 만든 뷰다(D5) — 앱은 파일 없이도 보여준다.
+CREATE TABLE IF NOT EXISTS review (
+  year         int NOT NULL,
+  week         int NOT NULL,
+  body         text NOT NULL,
+  range_label  text,
+  file         text,
+  generated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (year, week)
+);
 `;
 
 export function createDb(config = {}) {
@@ -359,6 +370,25 @@ export function createDb(config = {}) {
     };
   }
 
+  async function getReview(year, week) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      'SELECT year, week, body, range_label, file, generated_at FROM review WHERE year = $1 AND week = $2',
+      [year, week]
+    );
+    return rows[0] ?? null;
+  }
+
+  async function saveReview({ year, week, body, range_label, file }) {
+    await pool.query(
+      `INSERT INTO review (year, week, body, range_label, file, generated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (year, week)
+       DO UPDATE SET body = $3, range_label = $4, file = $5, generated_at = now()`,
+      [year, week, body, range_label, file]
+    );
+  }
+
   async function close() {
     await pool.end();
   }
@@ -392,6 +422,8 @@ export function createDb(config = {}) {
     getInbox,
     logEvent,
     weeklyMaterial,
+    getReview,
+    saveReview,
     close,
   };
 }

@@ -32,6 +32,12 @@ contextBridge.exposeInMainWorld('whenwork', {
   resumeGenerate: (projectId) => ipcRenderer.invoke('resume:generate', projectId),
   openUrl: (url) => ipcRenderer.send('open:url', url),
 
+  // ── 주간 리뷰 (M3)
+  reviewGet: (weekOffset) => ipcRenderer.invoke('review:get', weekOffset),
+  reviewGenerate: (weekOffset) => ipcRenderer.invoke('review:generate', weekOffset),
+  reviewOpenFile: (file) => ipcRenderer.invoke('review:openFile', file),
+  onOpenReview: (cb) => ipcRenderer.on('today:openReview', () => cb()),
+
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),
   openApp: () => ipcRenderer.send('app:open'),

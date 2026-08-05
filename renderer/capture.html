@@ -9,7 +9,10 @@
   /* 라운드·그림자는 Win11 네이티브에 맡긴다 */
   html, body { background: var(--bg-raised); overflow: hidden; height: 100%; }
   .capture { width: 100%; height: 100%; display: flex; flex-direction: column; }
-  .row { flex: 1; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 18px; }
+  /* 창을 잡아 옮길 수 있게 — 입력칸만 빼고 드래그 영역 */
+  .row { flex: 1; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 18px; -webkit-app-region: drag; }
+  .foot { -webkit-app-region: drag; }
+  input { -webkit-app-region: no-drag; }
   .logo {
     width: 24px; height: 24px; flex: none; border-radius: var(--r-sm);
     background: var(--accent-dim); color: var(--accent);

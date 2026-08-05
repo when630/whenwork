@@ -16,6 +16,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createQueue } from './queue.mjs';
 import { createDb } from './db.mjs';
+import { createSettings } from './settings.mjs';
+import { pickPosition } from './place.mjs';
 import { foregroundTitle } from './context.mjs';
 import { collectProject } from './collect.mjs';
 import { syncProjectIssues } from './issues.mjs';
@@ -43,6 +45,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 
 const queue = createQueue(path.join(app.getPath('userData'), 'queue.jsonl'));
 const db = createDb();
+const settings = createSettings(path.join(app.getPath('userData'), 'settings.json'));
 
 // ── 큐 → DB. 실패는 조용히 — 큐가 원본을 들고 있으니 다음 기회에 다시 흘린다.
 async function flush() {
@@ -80,6 +83,34 @@ function pinOnTop(win) {
   win.setAlwaysOnTop(true, 'pop-up-menu');
 }
 
+// ── 창 위치 기억
+//
+// 사용자가 드래그로 옮긴 자리를 다음에도 쓴다. 다만 저장된 자리가 지금 화면 밖이면
+// (모니터를 뺐거나 해상도가 바뀌면) 창이 안 보이는 곳에 뜨므로 그때는 가운데로 되돌린다.
+// 계산은 main/place.mjs (테스트 대상), 여기서는 화면 정보만 넘긴다.
+function placeWindow(win, key, { centerY = true } = {}) {
+  const [width, height] = win.getSize();
+  const { x, y } = pickPosition({
+    saved: settings.get(key),
+    size: { width, height },
+    workAreas: screen.getAllDisplays().map((d) => d.workArea),
+    cursorArea: screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea,
+    centerY,
+  });
+  win.setPosition(x, y);
+}
+
+// 옮기거나 크기를 바꾸면 그 자리를 기억한다
+function rememberPosition(win, key) {
+  const save = () => {
+    if (win.isDestroyed() || !win.isVisible()) return;
+    const [x, y] = win.getPosition();
+    settings.set(key, { x, y });
+  };
+  win.on('moved', save);
+  win.on('resized', save);
+}
+
 function getCaptureWin() {
   if (captureWin && !captureWin.isDestroyed()) return captureWin;
   captureWin = new BrowserWindow({
@@ -92,6 +123,7 @@ function getCaptureWin() {
     backgroundColor: '#1e2027',
   });
   pinOnTop(captureWin);
+  rememberPosition(captureWin, 'captureBounds');
   captureWin.loadFile(path.join(ROOT, 'renderer', 'capture.html'));
   captureWin.on('blur', () => captureWin.hide()); // 다른 데 클릭하면 캡처는 접는다
   captureWin.on('close', (e) => {
@@ -106,12 +138,7 @@ function getCaptureWin() {
 function showCapture() {
   pendingContext = foregroundTitle(); // 팝업이 포커스를 뺏기 전에 먼저
   const win = getCaptureWin();
-  const cursor = screen.getCursorScreenPoint();
-  const { workArea } = screen.getDisplayNearestPoint(cursor);
-  win.setPosition(
-    Math.round(workArea.x + (workArea.width - 560) / 2),
-    Math.round(workArea.y + workArea.height * 0.28)
-  );
+  placeWindow(win, 'captureBounds', { centerY: false });
   win.webContents.send('capture:reset');
   win.show();
   win.focus();
@@ -120,13 +147,19 @@ function showCapture() {
 function getTodayWin() {
   if (todayWin && !todayWin.isDestroyed()) return todayWin;
   // 오늘 뷰는 실제로 리사이즈해도 되는 창 — 최소 크기만 잡는다
+  const size = settings.get('todaySize') ?? {};
   todayWin = new BrowserWindow({
-    ...baseWinOpts(TODAY_W, TODAY_H),
+    ...baseWinOpts(size.width ?? TODAY_W, size.height ?? TODAY_H),
     minWidth: 560,
     minHeight: 420,
     backgroundColor: '#16171c',
   });
   pinOnTop(todayWin);
+  rememberPosition(todayWin, 'todayBounds');
+  todayWin.on('resized', () => {
+    const [width, height] = todayWin.getSize();
+    settings.set('todaySize', { width, height });
+  });
   todayWin.loadFile(path.join(ROOT, 'renderer', 'today.html'));
   todayWin.on('blur', () => todayWin.hide());
   todayWin.on('close', (e) => {
@@ -146,14 +179,7 @@ function toggleToday() {
 
 function showToday() {
   const win = getTodayWin();
-  // 커서가 있는 디스플레이의 중앙에 띄운다 (사용자가 리사이즈했다면 그 크기 기준)
-  const cursor = screen.getCursorScreenPoint();
-  const { workArea } = screen.getDisplayNearestPoint(cursor);
-  const [w, h] = win.getSize();
-  win.setPosition(
-    Math.round(workArea.x + (workArea.width - w) / 2),
-    Math.round(workArea.y + (workArea.height - h) / 2)
-  );
+  placeWindow(win, 'todayBounds'); // 옮겨둔 자리가 있으면 거기, 없으면 화면 중앙
   flush(); // 열 때 밀린 큐부터
   win.webContents.send('today:refresh');
   win.show();
@@ -182,6 +208,20 @@ function refreshTrayMenu() {
       {
         label: dbOnline ? 'DB 연결됨' : `DB 대기 중 — 큐 ${pending}건`,
         enabled: false,
+      },
+      { type: 'separator' },
+      {
+        label: '창 위치 초기화',
+        click: () => {
+          for (const key of ['captureBounds', 'todayBounds', 'todaySize']) settings.remove(key);
+          if (todayWin && !todayWin.isDestroyed()) {
+            todayWin.setSize(TODAY_W, TODAY_H);
+            if (todayWin.isVisible()) placeWindow(todayWin, 'todayBounds');
+          }
+          if (captureWin && !captureWin.isDestroyed() && captureWin.isVisible()) {
+            placeWindow(captureWin, 'captureBounds', { centerY: false });
+          }
+        },
       },
       { type: 'separator' },
       { label: '종료', click: () => app.quit() },
@@ -340,6 +380,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   quitting = true;
+  settings.flush(); // 디바운스로 미뤄둔 창 위치를 마저 쓴다
 });
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();

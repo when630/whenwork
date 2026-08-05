@@ -86,6 +86,22 @@
   .due.today { color: var(--warning); background: rgba(224,175,104,.1); }
   .due.over { color: var(--danger); background: rgba(247,118,142,.1); }
   .ctx, .wait-meta { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; }
+  .suggest { display: flex; gap: 6px; align-items: center; width: 100%; margin-left: 23px; font-size: var(--fs-xs); }
+  .suggest .act { color: var(--text-muted); }
+  .badge-ai {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; color: var(--ai); background: var(--ai-dim);
+    border-radius: 4px; padding: 0 6px;
+  }
+  .toast {
+    position: fixed; left: 50%; bottom: 46px; transform: translateX(-50%);
+    background: var(--bg-raised); border: 1px solid var(--border);
+    border-radius: var(--r-sm); padding: 6px 14px; font-size: var(--fs-sm);
+    color: var(--text-secondary); box-shadow: var(--shadow-pop);
+    display: none; z-index: 9;
+  }
+  .toast.show { display: block; }
+  .toast .spin { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid var(--ai-dim); border-top-color: var(--ai); border-radius: 99px; animation: rot .8s linear infinite; vertical-align: -1px; }
   .elapsed { font-family: var(--font-mono); }
   .elapsed.hot { color: var(--danger); }
 
@@ -223,6 +239,7 @@
     <label id="dlgLabel"></label>
     <input id="dlgIn" type="text" maxlength="500">
   </div>
+  <div class="toast" id="toast"></div>
 <script src="icons.js"></script>
 <script src="today.js"></script>
 </body>

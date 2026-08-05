@@ -54,6 +54,19 @@ CREATE TABLE IF NOT EXISTS resume_card (
   generated_at timestamptz NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS activity_uniq ON activity (project_id, ref) WHERE ref IS NOT NULL;
+
+-- 나중에 붙인 칼럼들. CREATE TABLE IF NOT EXISTS는 기존 테이블을 손대지 않으므로 따로 건다.
+ALTER TABLE item ADD COLUMN IF NOT EXISTS suggested_project_id int REFERENCES project(id);
+ALTER TABLE item ADD COLUMN IF NOT EXISTS note text;
+
+-- KPI 원장 (9절). 앱이 남기는 사용 흔적 — 지표 계산용이라 지워도 기능에는 영향 없다.
+CREATE TABLE IF NOT EXISTS event (
+  id     bigserial PRIMARY KEY,
+  at     timestamptz NOT NULL DEFAULT now(),
+  kind   text NOT NULL,
+  detail text
+);
+CREATE INDEX IF NOT EXISTS event_at ON event (at DESC);
 `;
 
 export function createDb(config = {}) {
@@ -90,16 +103,33 @@ export function createDb(config = {}) {
     }
   }
 
-  // 큐 항목 반영 — id(uuid)가 멱등 키라 재시도돼도 중복이 없다
+  // 큐 항목 반영 — id(uuid)가 멱등 키라 재시도돼도 중복이 없다.
+  // 캡처에 #약어가 붙어 있었으면 여기서 프로젝트로 풀어 인박스를 건너뛴다(캡처 경로는 DB를 모른다).
   async function insertCaptures(entries) {
     await ensureSchema();
     for (const e of entries) {
+      let projectId = null;
+      if (e.abbr) {
+        const { rows } = await pool.query(
+          "SELECT id FROM project WHERE lower(abbr) = lower($1) AND status = 'active'",
+          [e.abbr]
+        );
+        projectId = rows[0]?.id ?? null;
+      }
       await pool.query(
-        `INSERT INTO item (id, kind, title, captured_at, source, context)
-         VALUES ($1, 'inbox', $2, $3, 'manual', $4)
+        `INSERT INTO item (id, project_id, kind, title, captured_at, source, context)
+         VALUES ($1, $2, $3, $4, $5, 'manual', $6)
          ON CONFLICT (id) DO NOTHING`,
-        [e.id, e.title, e.captured_at, e.context ?? null]
+        [e.id, projectId, projectId ? 'todo' : 'inbox', e.title, e.captured_at, e.context ?? null]
       );
+    }
+  }
+
+  async function logEvent(kind, detail = null) {
+    try {
+      await pool.query('INSERT INTO event (kind, detail) VALUES ($1, $2)', [kind, detail]);
+    } catch {
+      // 지표 기록이 기능을 막지 않는다
     }
   }
 
@@ -224,8 +254,11 @@ export function createDb(config = {}) {
     await ensureSchema();
     const items = await pool.query(
       `SELECT i.id, i.project_id, p.name AS project_name, i.kind, i.title, i.due,
-              i.waiting_for, i.captured_at, i.done_at, i.context
-       FROM item i LEFT JOIN project p ON p.id = i.project_id
+              i.waiting_for, i.captured_at, i.done_at, i.context, i.note,
+              i.suggested_project_id, s.name AS suggested_project_name
+       FROM item i
+       LEFT JOIN project p ON p.id = i.project_id
+       LEFT JOIN project s ON s.id = i.suggested_project_id
        WHERE i.done_at IS NULL OR i.done_at > now() - interval '12 hours'
        ORDER BY i.due NULLS LAST, i.captured_at`
     );
@@ -247,9 +280,31 @@ export function createDb(config = {}) {
 
   async function assignProject(id, projectId) {
     await pool.query(
-      "UPDATE item SET project_id = $2, kind = 'todo' WHERE id = $1",
+      "UPDATE item SET project_id = $2, kind = 'todo', suggested_project_id = NULL WHERE id = $1",
       [id, projectId]
     );
+  }
+
+  async function setDue(id, due) {
+    await pool.query('UPDATE item SET due = $2 WHERE id = $1', [id, due]);
+  }
+
+  async function setNote(id, note) {
+    await pool.query('UPDATE item SET note = $2 WHERE id = $1', [id, note || null]);
+  }
+
+  // AI 분류 제안 — 사람 입력이 아니므로 언제든 덮어쓰고 버릴 수 있다 (설계 6절)
+  async function setSuggestions(pairs) {
+    for (const { id, project_id } of pairs) {
+      await pool.query('UPDATE item SET suggested_project_id = $2 WHERE id = $1', [id, project_id]);
+    }
+  }
+
+  async function getInbox() {
+    const { rows } = await pool.query(
+      "SELECT id, title, context FROM item WHERE kind = 'inbox' AND done_at IS NULL ORDER BY captured_at"
+    );
+    return rows;
   }
 
   async function toWaiting(id, waitingFor) {
@@ -265,6 +320,43 @@ export function createDb(config = {}) {
 
   async function removeItem(id) {
     await pool.query('DELETE FROM item WHERE id = $1', [id]);
+  }
+
+  // 주간 리뷰 재료 — 기간 안의 완료 항목·커밋·대기·열린 이슈를 프로젝트별로 모은다
+  async function weeklyMaterial(from, to) {
+    await ensureSchema();
+    const done = await pool.query(
+      `SELECT p.name AS project, i.title, i.done_at
+       FROM item i LEFT JOIN project p ON p.id = i.project_id
+       WHERE i.done_at >= $1 AND i.done_at < $2
+       ORDER BY p.name NULLS LAST, i.done_at`,
+      [from, to]
+    );
+    const commits = await pool.query(
+      `SELECT p.name AS project, a.summary, a.occurred_at
+       FROM activity a JOIN project p ON p.id = a.project_id
+       WHERE a.occurred_at >= $1 AND a.occurred_at < $2
+       ORDER BY p.name, a.occurred_at`,
+      [from, to]
+    );
+    const waiting = await pool.query(
+      `SELECT p.name AS project, i.title, i.waiting_for, i.captured_at
+       FROM item i LEFT JOIN project p ON p.id = i.project_id
+       WHERE i.kind = 'waiting' AND i.done_at IS NULL
+       ORDER BY i.captured_at`
+    );
+    const openTodos = await pool.query(
+      `SELECT p.name AS project, i.title, i.due
+       FROM item i LEFT JOIN project p ON p.id = i.project_id
+       WHERE i.kind = 'todo' AND i.done_at IS NULL
+       ORDER BY i.due NULLS LAST`
+    );
+    return {
+      done: done.rows,
+      commits: commits.rows,
+      waiting: waiting.rows,
+      openTodos: openTodos.rows,
+    };
   }
 
   async function close() {
@@ -294,6 +386,12 @@ export function createDb(config = {}) {
     toWaiting,
     renameItem,
     removeItem,
+    setDue,
+    setNote,
+    setSuggestions,
+    getInbox,
+    logEvent,
+    weeklyMaterial,
     close,
   };
 }

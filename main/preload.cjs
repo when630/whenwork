@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('whenwork', {
   assign: (id, projectId) => ipcRenderer.invoke('item:assign', id, projectId),
   toWaiting: (id, who) => ipcRenderer.invoke('item:toWaiting', id, who),
   rename: (id, title) => ipcRenderer.invoke('item:rename', id, title),
+  setDue: (id, text) => ipcRenderer.invoke('item:due', id, text),
+  setNote: (id, note) => ipcRenderer.invoke('item:note', id, note),
+  classifyInbox: () => ipcRenderer.invoke('inbox:classify'),
   remove: (id) => ipcRenderer.invoke('item:remove', id),
 
   // ── 프로젝트 관리

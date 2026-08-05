@@ -9,6 +9,7 @@ import {
   globalShortcut,
   screen,
   shell,
+  Notification,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,12 +22,17 @@ import { pickPosition } from './place.mjs';
 import { foregroundTitle } from './context.mjs';
 import { collectProject } from './collect.mjs';
 import { syncProjectIssues } from './issues.mjs';
-import { generateResumeCard } from './ai.mjs';
+import { generateResumeCard, classifyInbox, generateWeeklyReview } from './ai.mjs';
+import { parseCaptureToken, parseDue, isoWeek, weekRange } from './parse.mjs';
+import { writeWeekly, weeklyPath } from './vault.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const HOTKEY = 'Control+Alt+Space'; // 설계 11절 — Claude 쪽 바인딩은 사용자가 해제함
 const FLUSH_MS = 30_000;
+const COLLECT_MS = 6 * 60 * 60 * 1000; // git·이슈 백그라운드 수집 주기 (설계의 "일 1회"보다 촘촘하게)
+const COLLECT_DELAY_MS = 30_000; // 켜자마자 긁으면 부팅이 무거워진다 — 조금 뒤에
+const DEFAULT_VAULT = 'C:/Users/forcs/when630/01_work';
 const TODAY_W = 880; // 오늘 뷰 — 화면 중앙, 가로 넓게
 const TODAY_H = 680;
 const CAPTURE_H = 88; // 퀵캡처 — 한 줄 입력 + 힌트 푸터에 딱 맞는 높이
@@ -57,6 +63,54 @@ async function flush() {
     dbOnline = false;
   }
   refreshTrayMenu();
+}
+
+// ── 백그라운드 수집 (일과 중 언제 카드를 열어도 최신이도록)
+let collecting = false;
+async function collectAll() {
+  if (collecting || !(await db.online().catch(() => false))) return;
+  collecting = true;
+  try {
+    for (const p of await db.getProjects()) {
+      if (!p.repo_paths?.length) continue;
+      await collectProject(db, p);
+      await syncProjectIssues(db, p);
+    }
+    settings.set('lastCollect', new Date().toISOString());
+  } catch {
+    // 수집 실패는 조용히 — 다음 주기에 다시 시도한다
+  } finally {
+    collecting = false;
+  }
+}
+
+// ── 주간 리뷰 초안 → 볼트 (D5·오픈이슈 #1)
+let reviewing = false;
+async function makeWeeklyReview() {
+  if (reviewing) return;
+  reviewing = true;
+  const notify = (body) => new Notification({ title: 'WHENWORK 주간 리뷰', body }).show();
+  try {
+    if (!(await db.online())) return notify('DB가 꺼져 있어 만들 수 없습니다.');
+    const now = new Date();
+    const { from, to } = weekRange(now);
+    const range = {
+      label: `${from.toISOString().slice(0, 10)} ~ ${new Date(to - 86400000).toISOString().slice(0, 10)}`,
+    };
+    notify('초안 생성 중… (claude -p)');
+    const material = await db.weeklyMaterial(from, to);
+    const body = await generateWeeklyReview(range, material);
+    const week = isoWeek(now);
+    const file = weeklyPath(settings.get('vaultRoot') ?? DEFAULT_VAULT, now, week);
+    writeWeekly(file, body, { week, range });
+    await db.logEvent('weekly_review', file);
+    notify(`저장됨 — ${path.basename(file)}`);
+    shell.openPath(file);
+  } catch (err) {
+    notify(`실패: ${String(err?.message ?? err).slice(0, 120)}`);
+  } finally {
+    reviewing = false;
+  }
 }
 
 // ── 창
@@ -200,16 +254,34 @@ function refreshTrayMenu() {
   tray.setToolTip(
     `WHENWORK${dbOnline ? '' : ' — DB 대기'}${pending ? ` · 큐 ${pending}건` : ''}`
   );
+  const lastCollect = settings.get('lastCollect');
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '오늘 뷰', click: toggleToday },
       { label: `퀵캡처 (${hotkeyOk ? 'Ctrl+Alt+Space' : '단축키 등록 실패!'})`, click: showCapture },
       { type: 'separator' },
+      { label: '주간 리뷰 초안 만들기', click: makeWeeklyReview },
+      { label: '지금 수집 (git · 이슈)', click: collectAll },
+      { type: 'separator' },
       {
         label: dbOnline ? 'DB 연결됨' : `DB 대기 중 — 큐 ${pending}건`,
         enabled: false,
       },
+      {
+        label: lastCollect ? `마지막 수집 ${new Date(lastCollect).toLocaleString('ko-KR')}` : '수집 이력 없음',
+        enabled: false,
+      },
       { type: 'separator' },
+      {
+        label: '로그인 시 자동 시작',
+        type: 'checkbox',
+        checked: app.getLoginItemSettings().openAtLogin,
+        click: (menuItem) => {
+          app.setLoginItemSettings({ openAtLogin: menuItem.checked, args: [] });
+          settings.set('openAtLogin', menuItem.checked);
+          refreshTrayMenu();
+        },
+      },
       {
         label: '창 위치 초기화',
         click: () => {
@@ -231,12 +303,13 @@ function refreshTrayMenu() {
 
 // ── IPC
 ipcMain.handle('capture:save', async (_e, title) => {
-  const text = String(title ?? '').trim();
+  const { title: text, abbr } = parseCaptureToken(title);
   if (!text) return { ok: false };
   const fg = await Promise.race([pendingContext, new Promise((r) => setTimeout(() => r(null), 300))]);
   queue.append({
     id: crypto.randomUUID(),
     title: text,
+    abbr, // #약어 — 프로젝트로 푸는 건 플러시 시점(DB)에서
     captured_at: new Date().toISOString(),
     context: fg ? { fg } : null,
   });
@@ -260,6 +333,7 @@ const itemOps = {
   'item:toWaiting': (id, who) => db.toWaiting(id, who),
   'item:rename': (id, title) => db.renameItem(id, title),
   'item:remove': (id) => db.removeItem(id),
+  'item:note': (id, note) => db.setNote(id, note),
   'project:create': (name) => db.createProject(name),
   'project:update': (id, fields) => db.updateProject(id, fields),
   'project:repos': (id, paths) => db.setRepoPaths(id, paths),
@@ -277,8 +351,40 @@ for (const [ch, fn] of Object.entries(itemOps)) {
   });
 }
 
+// 마감일은 "오늘/내일/8·12" 같은 말로 받는다 — 못 알아들으면 되묻게 ok:false를 돌려준다
+ipcMain.handle('item:due', async (_e, id, text) => {
+  const parsed = parseDue(text);
+  if (!parsed.ok) return { ok: false, reason: 'parse' };
+  try {
+    await db.setDue(id, parsed.value);
+    return { ok: true, due: parsed.value };
+  } catch {
+    return { ok: false };
+  }
+});
+
+// ── M3: 인박스 AI 분류. 제안만 남기고 확정은 사람이 한다 (D4)
+let classifying = false;
+ipcMain.handle('inbox:classify', async () => {
+  if (classifying) return { ok: false, busy: true };
+  classifying = true;
+  try {
+    const [items, projects] = [await db.getInbox(), await db.getProjects()];
+    if (!items.length) return { ok: true, suggested: 0 };
+    const pairs = await classifyInbox(items, projects);
+    await db.setSuggestions(pairs);
+    await db.logEvent('inbox_classify', `${pairs.length}/${items.length}`);
+    return { ok: true, suggested: pairs.length, total: items.length };
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
+  } finally {
+    classifying = false;
+  }
+});
+
 // ── M2: 재개 카드
 const generatingCards = new Set(); // 프로젝트별 claude -p 중복 호출 방지
+let lastOpenedProject = null; // 프로젝트 전환 수(9절 KPI)를 세기 위한 직전 프로젝트
 
 async function findProject(projectId) {
   return (await db.getProjects()).find((p) => p.id === projectId) ?? null;
@@ -296,6 +402,12 @@ async function resumePayload(projectId) {
 
 ipcMain.handle('resume:get', async (_e, projectId) => {
   try {
+    // KPI: 카드 열람 수와 프로젝트 전환 수 (9절)
+    db.logEvent('resume_open', String(projectId));
+    if (lastOpenedProject !== null && lastOpenedProject !== projectId) {
+      db.logEvent('project_switch', `${lastOpenedProject}->${projectId}`);
+    }
+    lastOpenedProject = projectId;
     return await resumePayload(projectId);
   } catch {
     return { ok: false };
@@ -354,6 +466,9 @@ ipcMain.on('app:open', (e) => {
 
 // ── 앱 수명
 app.setAppUserModelId('com.when630.whenwork');
+// 개발 실행과 설치본이 같은 userData(큐·설정)를 쓰도록 이름을 고정한다 —
+// 안 그러면 productName 기준으로 갈려서 큐에 쌓인 캡처가 한쪽에만 남는다.
+app.setName('whenwork');
 
 app.whenReady().then(async () => {
   tray = new Tray(trayImage());
@@ -369,6 +484,16 @@ app.whenReady().then(async () => {
   refreshTrayMenu();
   setInterval(flush, FLUSH_MS);
   flush();
+
+  // 패키징본에서만 자동 시작을 걸어둔다 — 개발 실행(electron.exe)을 등록해봐야 쓸모없다
+  if (app.isPackaged && settings.get('openAtLogin') !== false) {
+    app.setLoginItemSettings({ openAtLogin: true, args: [] });
+  }
+
+  if (!SMOKE) {
+    setTimeout(collectAll, COLLECT_DELAY_MS);
+    setInterval(collectAll, COLLECT_MS);
+  }
 
   if (SMOKE) {
     setTimeout(() => {

@@ -243,11 +243,24 @@ function itemRow(it, idx) {
     meta.append(el('span', 'due ' + badge.cls, badge.text));
     row.append(meta);
   }
-  if (tab === 'inbox' && it.context?.fg) {
-    const ctx = el('div', 'ctx');
-    ctx.append(window.ICONS.context(), document.createTextNode(` 캡처 당시: ${it.context.fg}`));
-    row.append(ctx);
+  if (tab === 'inbox') {
+    if (it.suggested_project_id) {
+      // AI 제안은 사람 입력과 늘 구분해서 보여준다 (✦ 보라)
+      const s = el('div', 'suggest');
+      const chip = el('span', 'chip');
+      const dot = el('span', 'dot');
+      dot.style.background = projColor(it.suggested_project_id);
+      chip.append(dot, document.createTextNode(it.suggested_project_name ?? ''));
+      s.append(el('span', 'badge-ai', '✦ AI'), chip, el('span', 'act', 'Enter 확정'));
+      row.append(s);
+    }
+    if (it.context?.fg) {
+      const ctx = el('div', 'ctx');
+      ctx.append(window.ICONS.context(), document.createTextNode(` 캡처 당시: ${it.context.fg}`));
+      row.append(ctx);
+    }
   }
+  if (it.note) row.append(el('div', 'ctx', `↳ ${it.note}`));
   if (tab === 'waiting') {
     const days = elapsedDays(it.captured_at);
     const meta = el('div', 'wait-meta');
@@ -386,12 +399,15 @@ function renderFooter() {
     return;
   }
   if (tab === 'inbox') {
+    add('A', 'AI 분류');
     add('1~9', '프로젝트');
     add('W', '대기');
   } else if (tab === 'waiting') {
     add('Space', '회신 옴');
+    add('N', '메모');
   } else {
     add('Space', '완료');
+    add('D', '마감');
   }
   add('E', '제목');
   add('X', '삭제');
@@ -441,6 +457,18 @@ async function moveProject(dir) {
   await window.whenwork.projectMove(p.id, dir);
   sel = Math.max(0, Math.min(sel + (dir === 'up' ? -1 : 1), currentList().length - 1));
   await refresh();
+}
+
+// 짧은 알림 — 오래 걸리는 AI 작업의 진행 상태를 보여준다
+let toastTimer = null;
+function toast(text, { spinner = false, holdMs = 2400 } = {}) {
+  const node = $('toast');
+  clearTimeout(toastTimer);
+  node.replaceChildren();
+  if (spinner) node.append(el('span', 'spin'));
+  node.append(document.createTextNode(text));
+  node.classList.add('show');
+  if (holdMs) toastTimer = setTimeout(() => node.classList.remove('show'), holdMs);
 }
 
 function closeDlg(commit) {
@@ -576,11 +604,43 @@ document.addEventListener('keydown', async (e) => {
   // 항목 탭 (오늘·인박스·대기)
   const it = selectedItem();
   // 다이얼로그를 여는 키는 기본 동작을 먼저 끊는다 (그 글자가 입력창에 찍히지 않게)
-  if (['e', 'w'].includes(e.key.toLowerCase())) e.preventDefault();
+  if (['e', 'w', 'd', 'n'].includes(e.key.toLowerCase())) e.preventDefault();
   switch (e.key) {
     case 'Enter':
+      // 인박스에서 AI 제안이 있으면 Enter가 곧 확정 — 없으면 재개 카드로
+      if (tab === 'inbox' && it?.suggested_project_id) {
+        await window.whenwork.assign(it.id, it.suggested_project_id);
+        return refresh();
+      }
       if (it?.project_id) openResume(it.project_id);
       return;
+    case 'd':
+    case 'D': {
+      if (!it) return;
+      const text = await promptText('마감일 — 오늘 / 내일 / +3 / 8-12 / 2026-08-12 (비우면 해제)', it.due ? String(it.due).slice(0, 10) : '');
+      if (text === null) return;
+      const res = await window.whenwork.setDue(it.id, text);
+      if (!res.ok) toast('날짜를 알아듣지 못했습니다 — 오늘 / 내일 / +3 / 8-12 형식');
+      return refresh();
+    }
+    case 'n':
+    case 'N': {
+      if (!it) return;
+      const note = await promptText('메모 (대기 재촉 기록 등, 비우면 삭제)', it.note ?? '');
+      if (note === null) return;
+      await window.whenwork.setNote(it.id, note);
+      return refresh();
+    }
+    case 'a':
+    case 'A': {
+      if (tab !== 'inbox') return;
+      toast('인박스 분류 중… (claude -p)', { spinner: true, holdMs: 0 });
+      const res = await window.whenwork.classifyInbox();
+      if (res.ok) toast(res.suggested ? `${res.total}건 중 ${res.suggested}건 제안 — Enter로 확정` : '제안할 만한 항목이 없습니다');
+      else if (res.busy) toast('이미 분류 중입니다');
+      else toast('분류 실패 — claude -p 응답 없음');
+      return refresh();
+    }
     case 'e':
     case 'E': {
       if (!it) return;

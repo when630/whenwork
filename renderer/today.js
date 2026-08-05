@@ -391,6 +391,7 @@ function renderFooter() {
   } else {
     add('Space', '완료');
   }
+  add('E', '제목');
   add('X', '삭제');
   add('Enter', '재개 카드');
   add('Esc', '닫기');
@@ -572,10 +573,22 @@ document.addEventListener('keydown', async (e) => {
 
   // 항목 탭 (오늘·인박스·대기)
   const it = selectedItem();
+  // 다이얼로그를 여는 키는 기본 동작을 먼저 끊는다 (그 글자가 입력창에 찍히지 않게)
+  if (['e', 'w'].includes(e.key.toLowerCase())) e.preventDefault();
   switch (e.key) {
     case 'Enter':
       if (it?.project_id) openResume(it.project_id);
       return;
+    case 'e':
+    case 'E': {
+      if (!it) return;
+      const title = await promptText('제목 수정', it.title);
+      if (title) {
+        await window.whenwork.rename(it.id, title);
+        await refresh();
+      }
+      return;
+    }
     case ' ':
       e.preventDefault();
       if (!it) return;
@@ -585,7 +598,6 @@ document.addEventListener('keydown', async (e) => {
     case 'w':
     case 'W': {
       if (!it || tab === 'waiting') return;
-      e.preventDefault(); // 'w'가 다이얼로그 입력창에 찍히지 않게
       const who = await promptText('누구를 기다리나요? (비워도 됨)');
       if (who !== null) {
         await window.whenwork.toWaiting(it.id, who || null);

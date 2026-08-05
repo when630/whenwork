@@ -217,6 +217,7 @@ const itemOps = {
   'item:uncomplete': (id) => db.uncompleteItem(id),
   'item:assign': (id, projectId) => db.assignProject(id, projectId),
   'item:toWaiting': (id, who) => db.toWaiting(id, who),
+  'item:rename': (id, title) => db.renameItem(id, title),
   'item:remove': (id) => db.removeItem(id),
   'project:create': (name) => db.createProject(name),
   'project:update': (id, fields) => db.updateProject(id, fields),

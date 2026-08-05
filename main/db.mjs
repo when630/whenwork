@@ -259,6 +259,10 @@ export function createDb(config = {}) {
     );
   }
 
+  async function renameItem(id, title) {
+    await pool.query('UPDATE item SET title = $2 WHERE id = $1', [id, title]);
+  }
+
   async function removeItem(id) {
     await pool.query('DELETE FROM item WHERE id = $1', [id]);
   }
@@ -288,6 +292,7 @@ export function createDb(config = {}) {
     uncompleteItem,
     assignProject,
     toWaiting,
+    renameItem,
     removeItem,
     close,
   };

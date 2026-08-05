@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('whenwork', {
   uncomplete: (id) => ipcRenderer.invoke('item:uncomplete', id),
   assign: (id, projectId) => ipcRenderer.invoke('item:assign', id, projectId),
   toWaiting: (id, who) => ipcRenderer.invoke('item:toWaiting', id, who),
+  rename: (id, title) => ipcRenderer.invoke('item:rename', id, title),
   remove: (id) => ipcRenderer.invoke('item:remove', id),
 
   // ── 프로젝트 관리

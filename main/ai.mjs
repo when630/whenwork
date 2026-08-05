@@ -2,30 +2,46 @@
 // 프롬프트는 stdin으로 넘긴다 — Windows 인자 길이·따옴표 문제를 피한다.
 import { spawn } from 'node:child_process';
 
-function claudeP(prompt, timeoutMs = 120_000) {
+// CLI는 API 오류를 만나면 **stdout에 찍고 종료 코드 1**로 끝난다 — stderr만 보면 이유를 놓친다.
+// 게다가 529 같은 일시 오류는 CLI가 내부적으로 4분 가까이 재시도하므로, 우리 타임아웃이 그보다
+// 짧으면 진짜 원인을 못 보고 "응답 없음"으로만 잘린다. 그래서 기본 타임아웃을 넉넉히 잡는다.
+const DEFAULT_TIMEOUT_MS = 300_000;
+
+function friendlyError(text) {
+  const s = String(text ?? '').trim();
+  if (!s) return null;
+  if (/529|overloaded/i.test(s)) return 'Claude 서버가 혼잡합니다 (529) — 잠시 뒤 다시 시도하세요';
+  if (/rate limit|usage limit|quota/i.test(s)) return '구독 사용량 한도에 걸렸습니다 — 잠시 뒤 다시 시도하세요';
+  if (/not logged in|authentication|unauthorized/i.test(s)) return 'Claude 로그인이 필요합니다 — 터미널에서 `claude` 실행 후 로그인';
+  return s.split('\n')[0].slice(0, 160);
+}
+
+function claudeP(prompt, timeoutMs = DEFAULT_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const child = spawn('claude.exe', ['-p'], { windowsHide: true });
     let out = '';
     let err = '';
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error('claude -p timeout'));
+      reject(new Error(`claude -p 응답이 없어 ${Math.round(timeoutMs / 1000)}초에서 중단했습니다`));
     }, timeoutMs);
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (err += d));
     child.on('error', (e) => {
       clearTimeout(timer);
-      reject(e);
+      reject(new Error(e.code === 'ENOENT' ? 'claude 실행 파일을 찾을 수 없습니다' : String(e.message ?? e)));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0) resolve(out);
-      else reject(new Error(err || `claude exited ${code}`));
+      if (code === 0) return resolve(out);
+      reject(new Error(friendlyError(err || out) ?? `claude가 종료 코드 ${code}로 끝났습니다`));
     });
     child.stdin.write(prompt, 'utf8');
     child.stdin.end();
   });
 }
+
+export { friendlyError };
 
 // 모델이 JSON 앞뒤에 말을 붙여도 살려낸다
 function extractJson(text) {
@@ -138,7 +154,7 @@ export function buildWeeklyPrompt(range, material) {
 }
 
 export async function generateWeeklyReview(range, material) {
-  const raw = await claudeP(buildWeeklyPrompt(range, material), 180_000);
+  const raw = await claudeP(buildWeeklyPrompt(range, material));
   return raw.replace(/^```[a-z]*\n?|```$/gm, '').trim();
 }
 

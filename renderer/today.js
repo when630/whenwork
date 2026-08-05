@@ -199,10 +199,16 @@ async function openResume(projectId) {
   if (view !== 'resume' || resume.projectId !== projectId) return;
   if (synced.ok) resume.data = synced;
   render();
-  // 카드가 없거나 24시간 넘게 묵었으면 자동 재생성 (일 1회 정책)
+  // 카드가 없거나 24시간 넘게 묵었으면 자동 재생성 (일 1회 정책).
+  // 방금 실패했다면(서버 혼잡 등) 쿨다운 동안은 자동으로 다시 매달리지 않는다 — R로 직접 재시도.
   const card = resume.data?.card;
   const stale = !card || Date.now() - new Date(card.generated_at).getTime() > 24 * 3600 * 1000;
-  if (stale && !resume.generating) await regenerate(projectId);
+  const cooling = resume.data?.retryAfter && resume.data.retryAfter > Date.now();
+  if (stale && !resume.generating && !cooling) await regenerate(projectId);
+  else if (stale && cooling && !card) {
+    resume.error = '직전 생성이 실패해 잠시 쉬는 중입니다 — R로 다시 시도할 수 있습니다';
+    render();
+  }
 }
 
 async function regenerate(projectId) {

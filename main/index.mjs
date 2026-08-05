@@ -446,13 +446,20 @@ async function findProject(projectId) {
   return (await db.getProjects()).find((p) => p.id === projectId) ?? null;
 }
 
+// AI 호출이 실패하면(서버 혼잡 등) 카드를 열 때마다 몇 분씩 다시 매달리지 않도록 잠시 쉰다.
+// 수동 재생성(R)은 이 쿨다운을 무시한다.
+const CARD_COOLDOWN_MS = 10 * 60 * 1000;
+const cardFailure = new Map();
+
 async function resumePayload(projectId) {
+  const failedAt = cardFailure.get(projectId) ?? 0;
   return {
     ok: true,
     card: await db.getResumeCard(projectId),
     activities: await db.getActivities(projectId, 10),
     issues: await db.getIssues(projectId, 8),
     generating: generatingCards.has(projectId),
+    retryAfter: failedAt + CARD_COOLDOWN_MS > Date.now() ? failedAt + CARD_COOLDOWN_MS : null,
   };
 }
 
@@ -498,8 +505,10 @@ ipcMain.handle('resume:generate', async (_e, projectId) => {
       todos: view.today.filter((t) => t.project_id === projectId && !t.done_at),
     });
     await db.saveResumeCard(projectId, card);
+    cardFailure.delete(projectId);
     return await resumePayload(projectId);
   } catch (err) {
+    cardFailure.set(projectId, Date.now());
     return { ok: false, error: String(err?.message ?? err) };
   } finally {
     generatingCards.delete(projectId);

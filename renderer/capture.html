@@ -6,13 +6,10 @@
 <title>퀵캡처</title>
 <link rel="stylesheet" href="tokens.css">
 <style>
-  html, body { background: transparent; overflow: hidden; }
-  .capture {
-    width: 560px; background: var(--bg-raised);
-    border-radius: var(--r-xl);
-    box-shadow: var(--shadow-pop), 0 0 0 1px var(--border);
-    overflow: hidden;
-  }
+  /* 라운드·그림자는 Win11 네이티브에 맡긴다 */
+  html, body { background: var(--bg-raised); overflow: hidden; height: 100%; }
+  .capture { width: 100%; height: 100%; display: flex; flex-direction: column; }
+  .capture .row { flex: 1; }
   .row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4) 18px; }
   .logo {
     width: 26px; height: 26px; flex: none; border-radius: var(--r-sm);

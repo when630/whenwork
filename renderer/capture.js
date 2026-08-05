@@ -2,15 +2,24 @@
 const input = document.getElementById('in');
 const queueEl = document.getElementById('queue');
 let saving = false;
+let shownAt = 0;
 
 window.whenwork.onReset(() => {
   saving = false;
+  shownAt = Date.now();
   document.body.classList.remove('saved', 'offline');
   input.value = '';
   input.focus();
 });
 
+// 전역 단축키(Ctrl+Alt+Space)의 Space가 갓 포커스된 입력창으로 새어 들어온다 — 둘 다 막는다:
+// ① 수식키가 눌린 Space는 무시 ② 표시 직후 200ms 안의 공백-only 입력은 지운다
+input.addEventListener('input', () => {
+  if (Date.now() - shownAt < 200 && input.value.trim() === '') input.value = '';
+});
+
 document.addEventListener('keydown', async (e) => {
+  if (e.code === 'Space' && (e.ctrlKey || e.altKey)) return e.preventDefault();
   if (e.key === 'Escape') return window.whenwork.hide();
   if (e.key === 'Tab') {
     e.preventDefault();

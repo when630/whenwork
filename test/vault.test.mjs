@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { writeWeekly, weeklyPath } from '../main/vault.mjs';
+import { writeWeekly, weeklyPath, guessVaultRoot } from '../main/vault.mjs';
 
 const week = { year: 2026, week: 32 };
 const range = { label: '2026-08-03 ~ 2026-08-09' };
@@ -37,6 +37,47 @@ test('다시 생성하면 마커 안쪽만 바뀌고 사람이 쓴 부분은 남
   assert.doesNotMatch(text, /첫 번째 초안/);
   assert.match(text, /직접 적은 내용/); // 사람 글은 보존
   assert.equal(text.match(/AUTO:WEEKLY:START/g).length, 1);
+});
+
+// ── 볼트 자동 탐색 (경로를 코드에 박지 않기 위한 것)
+// 실제 디스크를 훑지 않도록 readdir을 주입해 트리를 흉내낸다.
+function fakeTree(tree) {
+  return (dir) => tree[dir.replace(/\\/g, '/')] ?? [];
+}
+
+test('홈 아래 두 단계까지 내려가 00_업무일지를 가진 폴더를 찾는다', () => {
+  const readdir = fakeTree({
+    '/home': ['docs', 'work'],
+    '/home/work': ['01_work'],
+    '/home/work/01_work': ['00_업무일지', '10_문서'],
+  });
+  assert.equal(guessVaultRoot('/home', { readdir }).replace(/\\/g, '/'), '/home/work/01_work');
+});
+
+test('표식이 없으면 null', () => {
+  const readdir = fakeTree({ '/home': ['docs'], '/home/docs': ['a'] });
+  assert.equal(guessVaultRoot('/home', { readdir }), null);
+});
+
+test('깊이 제한을 넘어선 곳은 찾지 않는다', () => {
+  const readdir = fakeTree({
+    '/home': ['a'],
+    '/home/a': ['b'],
+    '/home/a/b': ['c'],
+    '/home/a/b/c': ['00_업무일지'],
+  });
+  assert.equal(guessVaultRoot('/home', { readdir, depth: 2 }), null);
+});
+
+test('숨김·시스템 폴더는 훑지 않는다', () => {
+  const seen = [];
+  const readdir = (dir) => {
+    seen.push(dir.replace(/\\/g, '/'));
+    return { '/home': ['.git', '$Recycle', 'work'] }[dir.replace(/\\/g, '/')] ?? [];
+  };
+  guessVaultRoot('/home', { readdir });
+  assert.ok(!seen.some((d) => d.includes('.git') || d.includes('$Recycle')));
+  assert.ok(seen.includes('/home/work'));
 });
 
 test('마커 없는 기존 파일에는 아래에 덧붙인다', () => {

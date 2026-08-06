@@ -17,7 +17,9 @@ contextBridge.exposeInMainWorld('whenwork', {
   setDue: (id, text) => ipcRenderer.invoke('item:due', id, text),
   setNote: (id, note) => ipcRenderer.invoke('item:note', id, note),
   classifyInbox: () => ipcRenderer.invoke('inbox:classify'),
+  historyGet: (days) => ipcRenderer.invoke('history:get', days),
   remove: (id) => ipcRenderer.invoke('item:remove', id),
+  restore: (id) => ipcRenderer.invoke('item:restore', id),
 
   // ── 프로젝트 관리
   projectCreate: (name) => ipcRenderer.invoke('project:create', name),
@@ -37,6 +39,13 @@ contextBridge.exposeInMainWorld('whenwork', {
   reviewGenerate: (weekOffset) => ipcRenderer.invoke('review:generate', weekOffset),
   reviewOpenFile: (file) => ipcRenderer.invoke('review:openFile', file),
   onOpenReview: (cb) => ipcRenderer.on('today:openReview', () => cb()),
+
+  // ── 설정
+  settingsGet: () => ipcRenderer.invoke('settings:get'),
+  settingsSet: (key, value) => ipcRenderer.invoke('settings:set', key, value),
+  settingsPickFolder: (current) => ipcRenderer.invoke('settings:pickFolder', current),
+  settingsOpenFile: () => ipcRenderer.invoke('settings:openFile'),
+  backupNow: () => ipcRenderer.invoke('backup:now'),
 
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),

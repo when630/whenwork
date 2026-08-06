@@ -10,6 +10,7 @@ import {
   screen,
   shell,
   Notification,
+  dialog,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,7 +25,15 @@ import { collectProject } from './collect.mjs';
 import { syncProjectIssues } from './issues.mjs';
 import { generateResumeCard, classifyInbox, generateWeeklyReview } from './ai.mjs';
 import { parseCaptureToken, parseDue, isoWeek, weekRange } from './parse.mjs';
-import { writeWeekly, weeklyPath } from './vault.mjs';
+import { writeWeekly, weeklyPath, guessVaultRoot } from './vault.mjs';
+import { writeBackup } from './backup.mjs';
+import {
+  briefDecision,
+  briefingLines,
+  dayKey,
+  NOTIFY_AT_DEFAULT,
+  STALE_WAITING_DAYS,
+} from './brief.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -32,11 +41,36 @@ const HOTKEY = 'Control+Alt+Space'; // 설계 11절 — Claude 쪽 바인딩은 
 const FLUSH_MS = 30_000;
 const COLLECT_MS = 6 * 60 * 60 * 1000; // git·이슈 백그라운드 수집 주기 (설계의 "일 1회"보다 촘촘하게)
 const COLLECT_DELAY_MS = 30_000; // 켜자마자 긁으면 부팅이 무거워진다 — 조금 뒤에
-const DEFAULT_VAULT = 'C:/Users/forcs/when630/01_work';
+const PURGE_DAYS = 30; // 소프트 삭제한 항목을 실제로 비우기까지 두는 기간
 const TODAY_W = 880; // 오늘 뷰 — 화면 중앙, 가로 넓게
 const TODAY_H = 680;
 const CAPTURE_H = 88; // 퀵캡처 — 한 줄 입력 + 힌트 푸터에 딱 맞는 높이
 const SMOKE = process.argv.includes('--smoke');
+
+// 스모크에서 렌더러 안에서 돌리는 점검. 탭을 한 바퀴 돌리고 검색·완료 기록까지 열어보므로
+// "특정 화면에서만 터지는" 오류도 앱을 눈으로 보지 않고 잡힌다.
+const SMOKE_PROBE = `(async () => {
+  const errors = [];
+  window.addEventListener('error', (e) => errors.push('error: ' + e.message));
+  window.addEventListener('unhandledrejection', (e) => errors.push('reject: ' + ((e.reason && e.reason.message) || e.reason)));
+  const step = async (name, fn) => {
+    try { await fn(); } catch (e) { errors.push(name + ': ' + ((e && e.message) || e)); }
+  };
+  for (const t of ['inbox', 'waiting', 'projects', 'review', 'settings', 'today']) {
+    await step('tab:' + t, () => switchTab(t));
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  await step('search', () => { openSearch(); closeSearch(false); });
+  await step('history', () => openHistory(7));
+  await step('history:close', () => closeHistory());
+  await new Promise((r) => setTimeout(r, 300));
+  return {
+    view: !!window.VIEW,
+    tabs: document.getElementById('tabs') ? document.getElementById('tabs').children.length : -1,
+    body: document.getElementById('body') ? document.getElementById('body').children.length : -1,
+    errors,
+  };
+})()`;
 
 let tray = null;
 let captureWin = null;
@@ -44,14 +78,35 @@ let todayWin = null;
 let quitting = false;
 let hotkeyOk = false;
 let dbOnline = false;
+// 폴더 선택 같은 네이티브 다이얼로그가 뜨면 창이 blur된다 — 그때 창을 숨기면 안 된다
+let suppressHide = false;
 // 단축키를 누른 "그 순간"의 포그라운드 창 — 팝업이 뜨면 포그라운드가 우리가 되므로 먼저 잡는다
 let pendingContext = Promise.resolve(null);
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// 스모크는 실사용 인스턴스와 부딪히지 않게 격리한다 — 안 그러면 단일 인스턴스 락에 걸려
+// 아무것도 검증하지 않고 종료 코드 0으로 끝난다(캐시 점유 오류만 남는다).
+// 덤으로 "설정·큐가 빈 첫 실행" 경로를 검증하게 된다.
+if (SMOKE) app.setPath('userData', path.join(app.getPath('temp'), 'whenwork-smoke'));
+
+if (!SMOKE && !app.requestSingleInstanceLock()) app.quit();
 
 const queue = createQueue(path.join(app.getPath('userData'), 'queue.jsonl'));
-const db = createDb();
 const settings = createSettings(path.join(app.getPath('userData'), 'settings.json'));
+// DB 접속은 로컬 도커가 기본이지만 settings.json의 `db`로 덮어쓸 수 있다 (바꾸면 재시작)
+const dbConfig = settings.get('db') ?? {};
+const db = createDb(dbConfig);
+
+// 볼트 경로는 코드에 박지 않는다 — 설정에 있으면 그걸 쓰고, 없으면 홈에서 한 번 찾아 기억한다.
+// 끝까지 못 찾으면 null이고, 주간 리뷰는 DB에만 남는다(설정 탭에서 지정할 수 있다).
+function vaultRoot() {
+  const saved = settings.get('vaultRoot');
+  if (saved) return saved;
+  if (settings.get('vaultSearched')) return null; // 이미 찾아봤는데 없었다 — 매번 훑지 않는다
+  const found = guessVaultRoot(app.getPath('home'));
+  settings.set('vaultSearched', true);
+  if (found) settings.set('vaultRoot', found);
+  return found;
+}
 
 // ── 큐 → DB. 실패는 조용히 — 큐가 원본을 들고 있으니 다음 기회에 다시 흘린다.
 async function flush() {
@@ -115,17 +170,27 @@ async function makeWeeklyReview(weekOffset = 0, { notify: useNotification = fals
     notify('초안 생성 중… (claude -p)');
     const material = await db.weeklyMaterial(w.from, w.to);
     const body = await generateWeeklyReview(range, material);
-    const file = weeklyPath(settings.get('vaultRoot') ?? DEFAULT_VAULT, w.base, w.week);
+    const root = vaultRoot();
     let saved = null;
-    try {
-      writeWeekly(file, body, { week: w.week, range });
-      saved = file;
-    } catch {
-      // 볼트에 못 써도 DB에는 남는다 — 앱에서는 그대로 볼 수 있다
+    if (root) {
+      try {
+        const file = weeklyPath(root, w.base, w.week);
+        writeWeekly(file, body, { week: w.week, range });
+        saved = file;
+      } catch {
+        // 볼트에 못 써도 DB에는 남는다 — 앱에서는 그대로 볼 수 있다
+      }
     }
     await db.saveReview({ year: w.week.year, week: w.week.week, body, range_label: w.label, file: saved });
     await db.logEvent('weekly_review', saved ?? `${w.week.year}-W${w.week.week}`);
-    notify(saved ? `저장됨 — ${path.basename(saved)}` : '생성됨 (볼트 저장 실패 — 앱에서 확인)');
+    notify(
+      saved
+        ? `저장됨 — ${path.basename(saved)}`
+        : root
+          ? '생성됨 (볼트 저장 실패 — 앱에서 확인)'
+          : '생성됨 (볼트 경로 미설정 — 설정 탭에서 지정)'
+    );
+    backupNow().catch(() => {}); // 리뷰를 만든 주에는 백업도 한 번 남는다 — 기다리지 않는다
     return { ok: true, review: await db.getReview(w.week.year, w.week.week), ...w, label: w.label };
   } catch (err) {
     const msg = String(err?.message ?? err).slice(0, 160);
@@ -159,6 +224,112 @@ ipcMain.handle('review:openFile', async (_e, file) => {
   const err = await shell.openPath(file);
   return { ok: !err };
 });
+
+// ── 설정
+//
+// DB가 꺼져 있어도 봐야 하는 화면이라(접속 정보 확인) DB 경로를 타지 않는다.
+// 앱에서 만지는 건 아래 네 개뿐이고, DB 접속은 settings.json을 직접 고쳐 재시작한다.
+const SETTING_KEYS = ['vaultRoot', 'backupDir', 'notifyEnabled', 'notifyAt'];
+const BACKUP_DIR_DEFAULT = path.join(app.getPath('userData'), 'backups');
+
+ipcMain.handle('settings:get', () => ({
+  ok: true,
+  values: Object.fromEntries(SETTING_KEYS.map((k) => [k, settings.get(k)])),
+  defaults: { notifyAt: NOTIFY_AT_DEFAULT, backupDir: BACKUP_DIR_DEFAULT },
+  lastBackup: settings.get('lastBackup'),
+  db: {
+    host: dbConfig.host ?? '127.0.0.1',
+    port: dbConfig.port ?? 5433,
+    database: dbConfig.database ?? 'whenwork',
+    online: dbOnline,
+  },
+  file: settings.file,
+}));
+
+ipcMain.handle('settings:set', (_e, key, value) => {
+  if (!SETTING_KEYS.includes(key)) return { ok: false };
+  if (value === null || value === '') settings.remove(key);
+  else settings.set(key, value);
+  settings.flush(); // 설정은 미루지 않고 바로 쓴다
+  return { ok: true };
+});
+
+ipcMain.handle('settings:pickFolder', async (e, current) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  suppressHide = true; // 다이얼로그가 뜨면 창이 blur된다 — 그걸로 창을 접지 않는다
+  try {
+    const res = await dialog.showOpenDialog(win, {
+      title: '폴더 선택',
+      defaultPath: current || undefined,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return { ok: !res.canceled, path: res.filePaths?.[0] ?? null };
+  } catch {
+    return { ok: false };
+  } finally {
+    suppressHide = false;
+    win?.focus();
+  }
+});
+
+ipcMain.handle('settings:openFile', async () => {
+  settings.flush();
+  const err = await shell.openPath(settings.file);
+  return { ok: !err };
+});
+
+// ── 백업
+//
+// 데이터가 도커 볼륨 하나에만 있는 상태를 없앤다. 주간 리뷰를 만들 때 곁들여 돌리고
+// (그 주에 한 번은 반드시 남는다) 트레이에서 직접 돌릴 수도 있다.
+let backingUp = false;
+async function backupNow() {
+  if (backingUp) return { ok: false, busy: true };
+  backingUp = true;
+  try {
+    if (!(await db.online())) return { ok: false, error: 'DB가 꺼져 있습니다' };
+    const dir = settings.get('backupDir') || BACKUP_DIR_DEFAULT;
+    const file = writeBackup(dir, await db.exportAll());
+    settings.set('lastBackup', new Date().toISOString());
+    refreshTrayMenu();
+    return { ok: true, file };
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err).slice(0, 160) };
+  } finally {
+    backingUp = false;
+  }
+}
+
+ipcMain.handle('backup:now', () => backupNow());
+
+// ── 아침 브리핑 (오픈이슈 #3). 판단은 main/brief.mjs (테스트 대상), 여기서는 알림만 띄운다.
+const BRIEFING_CHECK_MS = 60_000;
+
+async function maybeBrief() {
+  if (!Notification.isSupported()) return;
+  const today = dayKey();
+  const decision = briefDecision({
+    at: settings.get('notifyAt') ?? NOTIFY_AT_DEFAULT,
+    lastBriefing: settings.get('lastBriefing'),
+    enabled: settings.get('notifyEnabled') !== false,
+  });
+  if (decision === 'wait') return;
+  if (decision === 'skip') {
+    settings.set('lastBriefing', today); // 창을 놓친 날은 넘기고 내일 다시
+    return;
+  }
+  if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 다시 시도한다
+  try {
+    const parts = briefingLines(await db.briefing(STALE_WAITING_DAYS));
+    settings.set('lastBriefing', today);
+    if (!parts.length) return; // 챙길 게 없으면 조용히
+    const note = new Notification({ title: '오늘 WHENWORK', body: parts.join(' · ') });
+    note.on('click', () => showToday());
+    note.show();
+  } catch {
+    // 브리핑 실패는 조용히 — 다음 날 다시
+  }
+}
 
 // ── 창
 //
@@ -226,7 +397,9 @@ function getCaptureWin() {
   pinOnTop(captureWin);
   rememberPosition(captureWin, 'captureBounds');
   captureWin.loadFile(path.join(ROOT, 'renderer', 'capture.html'));
-  captureWin.on('blur', () => captureWin.hide()); // 다른 데 클릭하면 캡처는 접는다
+  captureWin.on('blur', () => {
+    if (!suppressHide) captureWin.hide(); // 다른 데 클릭하면 캡처는 접는다
+  });
   captureWin.on('close', (e) => {
     if (!quitting) {
       e.preventDefault();
@@ -262,7 +435,9 @@ function getTodayWin() {
     settings.set('todaySize', { width, height });
   });
   todayWin.loadFile(path.join(ROOT, 'renderer', 'today.html'));
-  todayWin.on('blur', () => todayWin.hide());
+  todayWin.on('blur', () => {
+    if (!suppressHide) todayWin.hide();
+  });
   todayWin.on('close', (e) => {
     if (!quitting) {
       e.preventDefault();
@@ -302,6 +477,7 @@ function refreshTrayMenu() {
     `WHENWORK${dbOnline ? '' : ' — DB 대기'}${pending ? ` · 큐 ${pending}건` : ''}`
   );
   const lastCollect = settings.get('lastCollect');
+  const lastBackup = settings.get('lastBackup');
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '오늘 뷰', click: toggleToday },
@@ -317,7 +493,17 @@ function refreshTrayMenu() {
           }
         },
       },
-      { label: '지금 수집 (git · 이슈)', click: collectAll },
+      { label: '지금 수집 (git · 이슈 · PR)', click: collectAll },
+      {
+        label: '지금 백업',
+        click: async () => {
+          const res = await backupNow();
+          new Notification({
+            title: 'WHENWORK 백업',
+            body: res.ok ? `저장됨 — ${path.basename(res.file)}` : `실패: ${res.error ?? '잠시 뒤 다시'}`,
+          }).show();
+        },
+      },
       { type: 'separator' },
       {
         label: dbOnline ? 'DB 연결됨' : `DB 대기 중 — 큐 ${pending}건`,
@@ -325,6 +511,10 @@ function refreshTrayMenu() {
       },
       {
         label: lastCollect ? `마지막 수집 ${new Date(lastCollect).toLocaleString('ko-KR')}` : '수집 이력 없음',
+        enabled: false,
+      },
+      {
+        label: lastBackup ? `마지막 백업 ${new Date(lastBackup).toLocaleString('ko-KR')}` : '백업 이력 없음',
         enabled: false,
       },
       { type: 'separator' },
@@ -382,6 +572,14 @@ ipcMain.handle('today:getState', async () => {
   return { online: true, pending: queue.count(), ...state };
 });
 
+ipcMain.handle('history:get', async (_e, days = 7) => {
+  try {
+    return { ok: true, days, ...(await db.getHistory(days)) };
+  } catch {
+    return { ok: false };
+  }
+});
+
 const itemOps = {
   'item:complete': (id) => db.completeItem(id),
   'item:uncomplete': (id) => db.uncompleteItem(id),
@@ -389,6 +587,7 @@ const itemOps = {
   'item:toWaiting': (id, who) => db.toWaiting(id, who),
   'item:rename': (id, title) => db.renameItem(id, title),
   'item:remove': (id) => db.removeItem(id),
+  'item:restore': (id) => db.restoreItem(id),
   'item:note': (id, note) => db.setNote(id, note),
   'project:create': (name) => db.createProject(name),
   'project:update': (id, fields) => db.updateProject(id, fields),
@@ -457,7 +656,7 @@ async function resumePayload(projectId) {
     ok: true,
     card: await db.getResumeCard(projectId),
     activities: await db.getActivities(projectId, 10),
-    issues: await db.getIssues(projectId, 8),
+    issues: await db.getIssues(projectId, 12), // 이슈에 PR/MR까지 섞이므로 조금 넉넉하게
     generating: generatingCards.has(projectId),
     retryAfter: failedAt + CARD_COOLDOWN_MS > Date.now() ? failedAt + CARD_COOLDOWN_MS : null,
   };
@@ -501,7 +700,7 @@ ipcMain.handle('resume:generate', async (_e, projectId) => {
     const card = await generateResumeCard(p, {
       activities: await db.getActivities(projectId, 15),
       doneItems: await db.getDoneItems(projectId, 7),
-      issues: await db.getIssues(projectId, 10),
+      issues: await db.getIssues(projectId, 14),
       todos: view.today.filter((t) => t.project_id === projectId && !t.done_at),
     });
     await db.saveResumeCard(projectId, card);
@@ -558,13 +757,33 @@ app.whenReady().then(async () => {
   if (!SMOKE) {
     setTimeout(collectAll, COLLECT_DELAY_MS);
     setInterval(collectAll, COLLECT_MS);
+    // 오래 전에 지운 것만 실제로 비운다 — 되돌릴 창을 지난 뒤다
+    setTimeout(() => db.purgeDeleted(PURGE_DAYS).catch(() => {}), COLLECT_DELAY_MS);
+    setTimeout(maybeBrief, COLLECT_DELAY_MS); // 켠 직후 한 번 (DB가 붙을 시간을 준다)
+    setInterval(maybeBrief, BRIEFING_CHECK_MS);
   }
 
   if (SMOKE) {
-    setTimeout(() => {
-      console.log(`SMOKE_OK hotkey=${hotkeyOk} pending=${queue.count()}`);
-      app.quit();
-    }, 1500);
+    // 렌더러가 실제로 그려지는지까지 본다 — main만 띄워서는 화면 로직 오류가 잡히지 않는다.
+    // 창은 만들되 show하지 않으므로 화면에는 나타나지 않는다.
+    const win = getTodayWin();
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(async () => {
+        let probe = null;
+        try {
+          probe = await win.webContents.executeJavaScript(SMOKE_PROBE);
+        } catch (err) {
+          probe = { errors: [String(err?.message ?? err)] };
+        }
+        const ok =
+          probe?.view === true && probe?.tabs > 0 && probe?.body >= 0 && probe?.errors?.length === 0;
+        console.log(
+          `SMOKE_${ok ? 'OK' : 'FAIL'} hotkey=${hotkeyOk} pending=${queue.count()} renderer=${JSON.stringify(probe)}`
+        );
+        quitting = true;
+        app.exit(ok ? 0 : 1);
+      }, 1200); // 첫 refresh()가 한 바퀴 돌 시간
+    });
   }
 });
 

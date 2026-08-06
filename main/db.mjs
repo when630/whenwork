@@ -58,6 +58,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS activity_uniq ON activity (project_id, ref) WH
 -- 나중에 붙인 칼럼들. CREATE TABLE IF NOT EXISTS는 기존 테이블을 손대지 않으므로 따로 건다.
 ALTER TABLE item ADD COLUMN IF NOT EXISTS suggested_project_id int REFERENCES project(id);
 ALTER TABLE item ADD COLUMN IF NOT EXISTS note text;
+-- 삭제는 지우지 않고 표시만 한다 — 한 키에 사라지는 항목이 있으면 "캡처 손실 0건"이 성립하지 않는다.
+-- 되돌릴 수 있는 창(PURGE_DAYS)이 지나면 물리 삭제한다.
+ALTER TABLE item ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+
+-- issue 테이블은 PR/MR까지 담는다. GitHub는 이슈와 PR이 번호를 공유하지만 GitLab의
+-- issue iid와 MR iid는 별개 공간이라 kind 없이는 서로를 덮어쓴다 — 유일성을 kind까지 넣어 다시 잡는다.
+ALTER TABLE issue ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'issue';
+ALTER TABLE issue ADD COLUMN IF NOT EXISTS draft boolean NOT NULL DEFAULT false;
+ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_kind_check;
+ALTER TABLE issue ADD CONSTRAINT issue_kind_check CHECK (kind IN ('issue','pr'));
+-- 리뷰 요청받은 PR이 늘어난 관계다. 자기 PR에 자기를 리뷰어로 넣을 수는 없으니 조합은 생기지 않는다.
+ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_relation_check;
+ALTER TABLE issue ADD CONSTRAINT issue_relation_check
+  CHECK (relation IN ('author','assignee','both','reviewer'));
+ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_project_id_provider_number_key;
+CREATE UNIQUE INDEX IF NOT EXISTS issue_uniq ON issue (project_id, provider, kind, number);
 
 -- KPI 원장 (9절). 앱이 남기는 사용 흔적 — 지표 계산용이라 지워도 기능에는 영향 없다.
 CREATE TABLE IF NOT EXISTS event (
@@ -212,21 +228,34 @@ export function createDb(config = {}) {
     await ensureSchema();
     for (const i of issues) {
       await pool.query(
-        `INSERT INTO issue (project_id, provider, number, title, state, relation, url, updated_at, synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-         ON CONFLICT (project_id, provider, number)
-         DO UPDATE SET title = $4, state = $5, relation = $6, url = $7, updated_at = $8, synced_at = now()`,
-        [projectId, i.provider, i.number, i.title, i.state, i.relation, i.url, i.updated_at]
+        `INSERT INTO issue (project_id, provider, kind, number, title, state, relation, url, draft, updated_at, synced_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+         ON CONFLICT (project_id, provider, kind, number)
+         DO UPDATE SET title = $5, state = $6, relation = $7, url = $8, draft = $9,
+                       updated_at = $10, synced_at = now()`,
+        [
+          projectId,
+          i.provider,
+          i.kind ?? 'issue',
+          i.number,
+          i.title,
+          i.state,
+          i.relation,
+          i.url,
+          i.draft ?? false,
+          i.updated_at,
+        ]
       );
     }
   }
 
-  async function getIssues(projectId, limit = 8) {
-    // 열림 우선, 닫힘은 최근 것만 딸려온다 (설계 11절)
+  async function getIssues(projectId, limit = 12) {
+    // 열림 우선, 그중에서도 내 리뷰를 기다리는 것부터 — 남을 막고 있는 일이 가장 급하다.
+    // 닫힘·머지는 최근 것만 딸려온다 (설계 11절)
     const { rows } = await pool.query(
-      `SELECT provider, number, title, state, relation, url, updated_at, synced_at
+      `SELECT provider, kind, number, title, state, relation, url, draft, updated_at, synced_at
        FROM issue WHERE project_id = $1
-       ORDER BY (state = 'open') DESC, updated_at DESC LIMIT $2`,
+       ORDER BY (state = 'open') DESC, (relation = 'reviewer') DESC, updated_at DESC LIMIT $2`,
       [projectId, limit]
     );
     return rows;
@@ -235,7 +264,8 @@ export function createDb(config = {}) {
   async function getDoneItems(projectId, days = 7) {
     const { rows } = await pool.query(
       `SELECT title, done_at FROM item
-       WHERE project_id = $1 AND done_at > now() - ($2 || ' days')::interval
+       WHERE project_id = $1 AND deleted_at IS NULL
+         AND done_at > now() - ($2 || ' days')::interval
        ORDER BY done_at DESC LIMIT 20`,
       [projectId, String(days)]
     );
@@ -270,7 +300,8 @@ export function createDb(config = {}) {
        FROM item i
        LEFT JOIN project p ON p.id = i.project_id
        LEFT JOIN project s ON s.id = i.suggested_project_id
-       WHERE i.done_at IS NULL OR i.done_at > now() - interval '12 hours'
+       WHERE i.deleted_at IS NULL
+         AND (i.done_at IS NULL OR i.done_at > now() - interval '12 hours')
        ORDER BY i.due NULLS LAST, i.captured_at`
     );
     return {
@@ -313,7 +344,7 @@ export function createDb(config = {}) {
 
   async function getInbox() {
     const { rows } = await pool.query(
-      "SELECT id, title, context FROM item WHERE kind = 'inbox' AND done_at IS NULL ORDER BY captured_at"
+      "SELECT id, title, context FROM item WHERE kind = 'inbox' AND done_at IS NULL AND deleted_at IS NULL ORDER BY captured_at"
     );
     return rows;
   }
@@ -329,8 +360,23 @@ export function createDb(config = {}) {
     await pool.query('UPDATE item SET title = $2 WHERE id = $1', [id, title]);
   }
 
+  // 삭제는 표시만 — 되돌릴 수 있어야 한다(U). 실제 삭제는 purgeDeleted가 나중에 한다.
   async function removeItem(id) {
-    await pool.query('DELETE FROM item WHERE id = $1', [id]);
+    await pool.query('UPDATE item SET deleted_at = now() WHERE id = $1', [id]);
+  }
+
+  async function restoreItem(id) {
+    await pool.query('UPDATE item SET deleted_at = NULL WHERE id = $1', [id]);
+  }
+
+  // 되돌릴 수 있는 창이 지난 삭제분을 실제로 비운다. 기동 시 1회.
+  async function purgeDeleted(days = 30) {
+    await ensureSchema();
+    const { rowCount } = await pool.query(
+      "DELETE FROM item WHERE deleted_at < now() - ($1 || ' days')::interval",
+      [String(days)]
+    );
+    return rowCount;
   }
 
   // 주간 리뷰 재료 — 기간 안의 완료 항목·커밋·대기·열린 이슈를 프로젝트별로 모은다
@@ -339,7 +385,7 @@ export function createDb(config = {}) {
     const done = await pool.query(
       `SELECT p.name AS project, i.title, i.done_at
        FROM item i LEFT JOIN project p ON p.id = i.project_id
-       WHERE i.done_at >= $1 AND i.done_at < $2
+       WHERE i.deleted_at IS NULL AND i.done_at >= $1 AND i.done_at < $2
        ORDER BY p.name NULLS LAST, i.done_at`,
       [from, to]
     );
@@ -353,13 +399,13 @@ export function createDb(config = {}) {
     const waiting = await pool.query(
       `SELECT p.name AS project, i.title, i.waiting_for, i.captured_at
        FROM item i LEFT JOIN project p ON p.id = i.project_id
-       WHERE i.kind = 'waiting' AND i.done_at IS NULL
+       WHERE i.kind = 'waiting' AND i.done_at IS NULL AND i.deleted_at IS NULL
        ORDER BY i.captured_at`
     );
     const openTodos = await pool.query(
       `SELECT p.name AS project, i.title, i.due
        FROM item i LEFT JOIN project p ON p.id = i.project_id
-       WHERE i.kind = 'todo' AND i.done_at IS NULL
+       WHERE i.kind = 'todo' AND i.done_at IS NULL AND i.deleted_at IS NULL
        ORDER BY i.due NULLS LAST`
     );
     return {
@@ -368,6 +414,45 @@ export function createDb(config = {}) {
       waiting: waiting.rows,
       openTodos: openTodos.rows,
     };
+  }
+
+  // 완료 기록 — 오늘 뷰는 12시간만 보여주므로 "어제 뭐 했지"를 볼 창구가 없었다.
+  // 손으로 체크한 항목과 git이 자동 수집한 커밋을 같이 내려보낸다 (설계 2절: 한 일은 자동 수집)
+  async function getHistory(days = 7) {
+    await ensureSchema();
+    const items = await pool.query(
+      `SELECT i.id, i.title, i.kind, i.done_at, i.project_id, p.name AS project_name
+       FROM item i LEFT JOIN project p ON p.id = i.project_id
+       WHERE i.deleted_at IS NULL AND i.done_at > now() - ($1 || ' days')::interval
+       ORDER BY i.done_at DESC`,
+      [String(days)]
+    );
+    const commits = await pool.query(
+      `SELECT a.ref, a.summary, a.occurred_at, a.project_id, p.name AS project_name
+       FROM activity a JOIN project p ON p.id = a.project_id
+       WHERE a.occurred_at > now() - ($1 || ' days')::interval
+       ORDER BY a.occurred_at DESC`,
+      [String(days)]
+    );
+    return { items: items.rows, commits: commits.rows };
+  }
+
+  // 아침 브리핑 재료 (오픈이슈 #3) — 지금 챙겨야 하는 것의 건수만 센다
+  async function briefing(staleDays = 5) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT
+         count(*) FILTER (WHERE kind = 'todo' AND due < current_date)   AS overdue,
+         count(*) FILTER (WHERE kind = 'todo' AND due = current_date)   AS due_today,
+         count(*) FILTER (WHERE kind = 'inbox')                          AS inbox,
+         count(*) FILTER (WHERE kind = 'waiting'
+                            AND captured_at < now() - ($1 || ' days')::interval) AS stale_waiting
+       FROM item
+       WHERE deleted_at IS NULL AND done_at IS NULL`,
+      [String(staleDays)]
+    );
+    // count(*)는 bigint라 문자열로 온다 — 숫자로 바꿔 넘긴다
+    return Object.fromEntries(Object.entries(rows[0]).map(([k, v]) => [k, Number(v)]));
   }
 
   async function getReview(year, week) {
@@ -387,6 +472,19 @@ export function createDb(config = {}) {
        DO UPDATE SET body = $3, range_label = $4, file = $5, generated_at = now()`,
       [year, week, body, range_label, file]
     );
+  }
+
+  // 백업용 전량 덤프. 되살릴 때 순서가 중요하므로(참조 관계) 배열 순서를 지킨다.
+  const EXPORT_TABLES = ['project', 'item', 'activity', 'issue', 'resume_card', 'review', 'event'];
+
+  async function exportAll() {
+    await ensureSchema();
+    const out = {};
+    for (const t of EXPORT_TABLES) {
+      const { rows } = await pool.query(`SELECT * FROM ${t}`);
+      out[t] = rows;
+    }
+    return out;
   }
 
   async function close() {
@@ -416,14 +514,19 @@ export function createDb(config = {}) {
     toWaiting,
     renameItem,
     removeItem,
+    restoreItem,
+    purgeDeleted,
     setDue,
     setNote,
     setSuggestions,
     getInbox,
     logEvent,
     weeklyMaterial,
+    getHistory,
+    briefing,
     getReview,
     saveReview,
+    exportAll,
     close,
   };
 }

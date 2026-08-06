@@ -7,6 +7,25 @@ const TABS = [
   { key: 'waiting', label: '대기' },
   { key: 'projects', label: '프로젝트' },
   { key: 'review', label: '리뷰' },
+  { key: 'settings', label: '설정' },
+];
+
+// 앱에서 만지는 설정. DB 접속은 여기 없다 — settings.json을 고치고 재시작하는 쪽이 안전하다.
+const SETTING_FIELDS = [
+  {
+    key: 'vaultRoot',
+    label: '볼트 경로',
+    kind: 'folder',
+    hint: '주간 리뷰를 내보낼 Obsidian 볼트 루트. 비우면 DB에만 남는다',
+  },
+  { key: 'backupDir', label: '백업 폴더', kind: 'folder', hint: '비우면 앱 데이터 폴더 안의 backups' },
+  {
+    key: 'notifyEnabled',
+    label: '아침 브리핑 알림',
+    kind: 'bool',
+    hint: '오늘 마감·지연·오래 기다린 항목을 하루 한 번 알린다',
+  },
+  { key: 'notifyAt', label: '알림 시각', kind: 'time', hint: 'HH:MM' },
 ];
 
 let state = null; // 마지막으로 받은 서버 상태
@@ -14,10 +33,89 @@ let tab = 'inbox'; // 캡처 직후 열면 인박스부터 보는 게 자연스�
 let sel = 0; // 현재 탭에서 선택된 행
 let dlgResolve = null; // 텍스트 입력 다이얼로그가 기다리는 resolve
 let review = { offset: 0, data: null, generating: false, error: null }; // 리뷰 탭 상태
+let cfg = null; // 설정 탭이 받아둔 값 (DB와 무관하게 따로 읽는다)
+let filter = ''; // 검색어 — 탭을 옮겨도 유지된다 (어느 탭에 있는지 모를 때 찾으려고)
+let searchOn = false; // 검색 입력에 포커스가 가 있는 동안
+let dueOnly = false; // 오늘 탭: 마감 있는 것만 보기 (F)
+let history = null; // 완료 기록 화면 상태 (H)
 let view = 'list'; // 'list' | 'resume'
 let resume = null; // { projectId, data, loading, generating, error, sel }
+let resetScroll = false; // 탭·뷰가 바뀐 렌더에서만 맨 위로
+const deleted = []; // 되돌릴 수 있는 삭제 스택 (U) — 최근 것부터 되살린다
+
+const clip = (s, n = 24) => (String(s ?? '').length > n ? String(s).slice(0, n) + '…' : String(s ?? ''));
 
 const $ = (id) => document.getElementById(id);
+
+// 계산은 view.js에 있다 (DOM을 만지지 않는 부분 — 테스트 대상)
+const {
+  dueBadge,
+  elapsedDays,
+  matches,
+  todayGroups,
+  historyDays,
+  dayLabel,
+  settingDisplay,
+} = window.VIEW;
+
+// ── 스크롤
+//
+// 렌더는 본문을 통째로 다시 그리므로(replaceChildren) 아무것도 안 하면 스크롤이 매번 위로 튄다.
+// 그래서 render가 위치를 기억해 되돌리고, 선택된 행만 보이는 데까지 최소로 끌어온다.
+function keepSelectionVisible() {
+  $('body').querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
+}
+
+// 문서형 화면(리뷰 본문·재개 카드)은 선택 대신 본문을 직접 굴린다
+function scrollBody(to) {
+  const b = $('body');
+  if (to === 'top') b.scrollTop = 0;
+  else if (to === 'bottom') b.scrollTop = b.scrollHeight;
+  else b.scrollTop += to;
+}
+
+function pageStep() {
+  return Math.max(120, $('body').clientHeight - 60);
+}
+
+// 문서형 화면 공통 스크롤 키. 처리했으면 true.
+function handleDocScroll(e, { arrows = false } = {}) {
+  switch (e.key) {
+    case 'PageDown':
+      e.preventDefault();
+      scrollBody(pageStep());
+      return true;
+    case 'PageUp':
+      e.preventDefault();
+      scrollBody(-pageStep());
+      return true;
+    case 'Home':
+      e.preventDefault();
+      scrollBody('top');
+      return true;
+    case 'End':
+      e.preventDefault();
+      scrollBody('bottom');
+      return true;
+    case ' ':
+      e.preventDefault();
+      scrollBody(e.shiftKey ? -pageStep() : pageStep());
+      return true;
+    case 'ArrowDown':
+    case 'j':
+      if (!arrows) return false;
+      e.preventDefault();
+      scrollBody(80);
+      return true;
+    case 'ArrowUp':
+    case 'k':
+      if (!arrows) return false;
+      e.preventDefault();
+      scrollBody(-80);
+      return true;
+  }
+  return false;
+}
 
 function projColor(p) {
   const idx = state?.projects?.findIndex((x) => x.id === p) ?? -1;
@@ -28,22 +126,6 @@ function fmtDate(d = new Date()) {
   return `${d.getMonth() + 1}/${d.getDate()} (${'일월화수목금토'[d.getDay()]})`;
 }
 
-function dueBadge(due) {
-  if (!due) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(due);
-  d.setHours(0, 0, 0, 0);
-  const diff = Math.round((today - d) / 86400000);
-  if (diff > 0) return { text: `D+${diff}`, cls: 'over' };
-  if (diff === 0) return { text: '오늘', cls: 'today' };
-  return { text: `D-${-diff}`, cls: '' };
-}
-
-function elapsedDays(ts) {
-  return Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 86400000));
-}
-
 function el(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -51,40 +133,155 @@ function el(tag, cls, text) {
   return n;
 }
 
+function filtered(list) {
+  return filter ? list.filter((r) => matches(r, filter)) : list;
+}
+
+function todayView() {
+  if (!state?.online) return [];
+  let list = filtered(state.today ?? []);
+  // 마감 필터: 방금 완료한 것은 남겨둔다 (Space를 잘못 눌렀는지 확인할 창)
+  if (dueOnly) list = list.filter((it) => it.due || it.done_at);
+  return todayGroups(list);
+}
+
 // 화면에 그려지는 순서 그대로를 돌려준다.
-// 오늘 탭은 프로젝트별로 묶어 그리므로 그 정렬을 여기서 해야 한다 —
+// 오늘 탭은 묶어서 그리므로 그 정렬을 여기서 해야 한다 —
 // 안 그러면 선택 강조(그리는 순서)와 실제 대상(원본 순서)이 어긋나 엉뚱한 항목이 지워진다.
 function currentList() {
-  if (!state?.online) return [];
+  // 설정은 DB와 무관하게 항상 보여준다 — DB가 꺼져 있을 때 오히려 봐야 하는 화면이다
+  if (tab === 'settings') return SETTING_FIELDS;
   if (tab === 'review') return [];
-  if (tab === 'projects') return state.projects ?? [];
-  const list = state[tab] ?? [];
-  if (tab !== 'today') return list;
-  const groupOrder = new Map(); // 프로젝트별 첫 등장 순서 = 그룹 순서
-  for (const it of list) {
-    const pid = it.project_id ?? 0;
-    if (!groupOrder.has(pid)) groupOrder.set(pid, groupOrder.size);
+  if (!state?.online) return [];
+  if (tab === 'projects') return filtered(state.projects ?? []);
+  if (tab === 'today') return todayView().flatMap((g) => g.items);
+  return filtered(state[tab] ?? []);
+}
+
+// ── 완료 기록 (H)
+//
+// 오늘 뷰는 완료를 12시간만 남기므로 "어제 뭐 했지"를 볼 창구가 없었다.
+// 체크한 항목과 git 커밋을 하루 단위로 합쳐 보여준다 — 주간 리뷰의 일 단위 짝이다.
+const COMMITS_PER_DAY = 12; // 하루에 커밋이 수십 건이어도 윤곽만 보이면 된다
+
+function renderHistory() {
+  const body = $('body');
+  body.replaceChildren();
+
+  const head = el('div', 'rhead');
+  const back = el('span', 'back', '‹');
+  back.onclick = closeHistory;
+  head.append(back, el('span', 'pname', `완료 기록 — 최근 ${history.days}일`));
+  body.append(head);
+
+  if (history.loading) {
+    body.append(el('div', 'empty', '불러오는 중…'));
+    return;
   }
-  return list
-    .map((it, i) => ({ it, i }))
-    .sort((a, b) =>
-      groupOrder.get(a.it.project_id ?? 0) - groupOrder.get(b.it.project_id ?? 0) || a.i - b.i
-    )
-    .map((x) => x.it);
+  const days = historyDays(history.data);
+  if (!days.length) {
+    body.append(el('div', 'empty', '이 기간에 완료한 항목도 커밋도 없습니다'));
+    return;
+  }
+
+  for (const day of days) {
+    const h = el('div', 'hist-day');
+    h.append(document.createTextNode(dayLabel(day.key)));
+    h.append(el('span', 'n', `완료 ${day.items.length} · 커밋 ${day.commits.length}`));
+    body.append(h);
+    for (const it of day.items) {
+      const row = el('div', 'hist-row');
+      row.append(el('span', 'mark', '✓'), el('span', 'tt', it.title));
+      if (it.project_name) row.append(el('span', 'p', it.project_name));
+      row.append(el('span', 'when', fmtWhen(it.done_at)));
+      body.append(row);
+    }
+    // 커밋은 하루에 수십 건이 될 수 있다 — 그날의 윤곽만 보이면 되므로 잘라 보여준다
+    for (const c of day.commits.slice(0, COMMITS_PER_DAY)) {
+      const row = el('div', 'hist-row commit-row');
+      row.append(el('span', 'mark', '·'), el('span', 'tt', c.summary));
+      if (c.project_name) row.append(el('span', 'p', c.project_name));
+      row.append(el('span', 'when', fmtWhen(c.occurred_at)));
+      body.append(row);
+    }
+    if (day.commits.length > COMMITS_PER_DAY) {
+      const more = el('div', 'hist-row commit-row');
+      more.append(el('span', 'mark', ''), el('span', 'tt', `… 커밋 ${day.commits.length - COMMITS_PER_DAY}건 더`));
+      body.append(more);
+    }
+  }
+}
+
+async function openHistory(days = 7) {
+  view = 'history';
+  history = { days, data: null, loading: true };
+  resetScroll = true;
+  render();
+  const res = await window.whenwork.historyGet(days);
+  if (view !== 'history') return;
+  history.data = res.ok ? res : null;
+  history.loading = false;
+  render();
+}
+
+function closeHistory() {
+  view = 'list';
+  history = null;
+  resetScroll = true;
+  render();
+}
+
+// ── 검색
+function renderSearch() {
+  const bar = $('search');
+  const on = searchOn || !!filter;
+  bar.classList.toggle('show', on);
+  bar.classList.toggle('idle', !searchOn && !!filter);
+  if (!on) return;
+  const list = currentList();
+  $('searchCnt').textContent = filter ? `${list.length}건` : '';
+}
+
+function openSearch() {
+  if (tab === 'review' || tab === 'settings' || view !== 'list') return; // 목록이 있는 화면에서만
+  searchOn = true;
+  render();
+  const input = $('searchIn');
+  input.value = filter;
+  input.focus();
+  input.select();
+}
+
+// keep=false면 필터까지 해제한다 (Esc)
+function closeSearch(keep) {
+  searchOn = false;
+  if (!keep) filter = '';
+  $('searchIn').blur();
+  sel = 0;
+  resetScroll = true;
+  render();
 }
 
 // ── 렌더
 function render() {
+  const body = $('body');
+  const keep = resetScroll ? 0 : body.scrollTop;
+  resetScroll = false;
   $('date').textContent = fmtDate();
+  renderSearch();
   if (view === 'resume') {
     $('tabs').replaceChildren();
     renderResume();
-    renderFooter();
-    return;
+  } else if (view === 'history') {
+    $('tabs').replaceChildren();
+    renderHistory();
+  } else {
+    renderTabs();
+    renderBody();
   }
-  renderTabs();
-  renderBody();
   renderFooter();
+  body.scrollTop = keep;
+  keepSelectionVisible();
 }
 
 // ── 재개 카드 (M2, 목업 03) — AI 카드 + git 활동 + 내 이슈 3단
@@ -169,13 +366,17 @@ function renderResume() {
 
   // 3단: 내 이슈 (작성·할당)
   const issSec = el('div');
-  issSec.append(el('div', 'sec-h', '내 이슈 — 작성·할당 (Enter/O 브라우저)'));
+  issSec.append(el('div', 'sec-h', '내 이슈·PR — 작성·할당·리뷰 요청 (Enter/O 브라우저)'));
   const issues = data?.issues ?? [];
-  if (issues.length === 0) issSec.append(el('div', 'sync-note', '이슈 없음 또는 동기화 전'));
+  if (issues.length === 0) issSec.append(el('div', 'sync-note', '이슈·PR 없음 또는 동기화 전'));
   issues.forEach((i, idx) => {
     const row = el('div', 'issue' + (idx === resume.sel ? ' selected' : ''));
-    row.append(el('span', 'st ' + i.state), el('span', 'prov', i.provider === 'github' ? 'GH' : 'GL'), el('span', 'num', `#${i.number}`), el('span', 'tt', i.title));
-    if (i.relation === 'assignee') row.append(el('span', 'asg', '할당'));
+    row.append(el('span', 'st ' + i.state), el('span', 'prov', i.provider === 'github' ? 'GH' : 'GL'));
+    if (i.kind === 'pr') row.append(el('span', 'kind', i.provider === 'gitlab' ? 'MR' : 'PR'));
+    row.append(el('span', 'num', `#${i.number}`), el('span', 'tt', i.title));
+    if (i.draft) row.append(el('span', 'asg draft', '초안'));
+    if (i.relation === 'reviewer') row.append(el('span', 'asg rev', '리뷰'));
+    else if (i.relation !== 'author') row.append(el('span', 'asg', '할당'));
     row.append(el('span', 'when', fmtWhen(i.updated_at)));
     row.onclick = () => window.whenwork.openUrl(i.url);
     issSec.append(row);
@@ -187,6 +388,7 @@ function renderResume() {
 async function openResume(projectId) {
   view = 'resume';
   resume = { projectId, data: null, loading: true, generating: false, error: null, sel: 0 };
+  resetScroll = true;
   render();
   const first = await window.whenwork.resumeGet(projectId);
   if (view !== 'resume' || resume.projectId !== projectId) return;
@@ -226,6 +428,7 @@ async function regenerate(projectId) {
 function closeResume() {
   view = 'list';
   resume = null;
+  resetScroll = true;
   refresh();
 }
 
@@ -233,10 +436,11 @@ function renderTabs() {
   const tabs = $('tabs');
   tabs.replaceChildren();
   for (const t of TABS) {
-    const n = !state?.online ? 0
-      : t.key === 'projects' ? (state.projects?.length ?? 0)
-      : t.key === 'review' ? null
-      : (state[t.key]?.filter((i) => !i.done_at).length ?? 0);
+    // 검색 중에는 탭 숫자도 매칭 건수 — 어느 탭에 있는지 배지만 보고 알 수 있다
+    const n = t.key === 'review' || t.key === 'settings' ? null
+      : !state?.online ? 0
+      : t.key === 'projects' ? filtered(state.projects ?? []).length
+      : filtered(state[t.key] ?? []).filter((i) => !i.done_at).length;
     const node = el('div', 'tab' + (tab === t.key ? ' on' : ''));
     node.append(el('span', null, t.label));
     if (n !== null) node.append(el('span', 'n', String(n)));
@@ -358,6 +562,7 @@ function moveWeek(delta) {
   review.offset = Math.min(0, review.offset + delta); // 미래 주는 볼 게 없다
   review.error = null;
   review.data = null;
+  resetScroll = true;
   render();
   loadReview();
 }
@@ -376,9 +581,99 @@ async function generateReview() {
   }
 }
 
+// ── 설정 탭
+function renderSettings() {
+  const body = $('body');
+  body.replaceChildren();
+  if (!cfg) {
+    body.append(el('div', 'empty', '설정을 불러오는 중…'));
+    return;
+  }
+
+  SETTING_FIELDS.forEach((f, idx) => {
+    const row = el('div', 'item' + (idx === sel ? ' selected' : ''));
+    row.append(el('div', 't', f.label));
+    const v = cfg.values[f.key];
+    const isDefault = f.kind === 'bool' ? false : !v;
+    row.append(el('span', 'set-val' + (isDefault ? ' dim' : ''), settingDisplay(f, cfg.values, cfg.defaults)));
+    row.append(el('div', 'ctx', f.hint));
+    row.onclick = () => {
+      sel = idx;
+      render();
+    };
+    body.append(row);
+  });
+
+  const dbSec = el('div', 'set-foot');
+  dbSec.append(el('div', 'sec-h', 'DB — settings.json의 db로 바꾸고 재시작'));
+  dbSec.append(
+    el('div', 'ctx', `${cfg.db.host}:${cfg.db.port}/${cfg.db.database} — ${cfg.db.online ? '연결됨' : '대기 중'}`)
+  );
+  const backup = el('div', 'rv-file');
+  backup.append(
+    window.ICONS.context(),
+    document.createTextNode(
+      cfg.lastBackup ? ` 마지막 백업 ${fmtWhen(cfg.lastBackup)} — 지금 백업 (B)` : ' 백업 이력 없음 — 지금 백업 (B)'
+    )
+  );
+  backup.onclick = runBackup;
+  dbSec.append(backup);
+  const open = el('div', 'rv-file');
+  open.append(window.ICONS.context(), document.createTextNode(` ${cfg.file} — 열기`));
+  open.onclick = () => window.whenwork.settingsOpenFile();
+  dbSec.append(open);
+  body.append(dbSec);
+}
+
+async function runBackup() {
+  toast('백업 중…', { spinner: true, holdMs: 0 });
+  const res = await window.whenwork.backupNow();
+  if (res.ok) toast(`백업 저장 — ${res.file}`);
+  else toast(res.busy ? '이미 백업 중입니다' : `백업 실패 — ${res.error ?? '알 수 없는 오류'}`);
+  return loadSettings();
+}
+
+async function loadSettings() {
+  cfg = await window.whenwork.settingsGet();
+  render();
+}
+
+async function editSetting(f) {
+  if (!f || !cfg) return;
+  if (f.kind === 'bool') {
+    await window.whenwork.settingsSet(f.key, cfg.values[f.key] === false);
+    return loadSettings();
+  }
+  if (f.kind === 'folder') {
+    const res = await window.whenwork.settingsPickFolder(cfg.values[f.key] ?? '');
+    if (!res.ok || !res.path) return;
+    await window.whenwork.settingsSet(f.key, res.path);
+    toast(`${f.label} — ${res.path}`);
+    return loadSettings();
+  }
+  const raw = await promptText(`${f.label} (${f.hint})`, cfg.values[f.key] ?? cfg.defaults?.notifyAt ?? '');
+  if (raw === null) return;
+  if (!raw) {
+    await window.whenwork.settingsSet(f.key, null);
+    return loadSettings();
+  }
+  const m = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return toast('시각은 HH:MM 형식으로 입력하세요');
+  await window.whenwork.settingsSet(f.key, `${String(Number(m[1])).padStart(2, '0')}:${m[2]}`);
+  return loadSettings();
+}
+
+async function clearSetting(f) {
+  if (!f) return;
+  await window.whenwork.settingsSet(f.key, null);
+  toast(`${f.label} — 기본값으로`);
+  return loadSettings();
+}
+
 function renderBody() {
   const body = $('body');
   if (tab === 'review') return renderReview();
+  if (tab === 'settings') return renderSettings();
   body.replaceChildren();
 
   if (!state) return;
@@ -398,7 +693,11 @@ function renderBody() {
 
   if (list.length === 0) {
     const e = el('div', 'empty');
-    if (tab === 'projects') {
+    if (filter) {
+      const hint = el('div');
+      hint.append(el('kbd', null, 'Esc'), document.createTextNode(' 로 검색 해제'));
+      e.append(el('div', 'big', '◎'), el('div', null, `"${filter}"에 맞는 항목이 없습니다`), hint);
+    } else if (tab === 'projects') {
       const hint = el('div');
       hint.append(el('kbd', null, 'N'), document.createTextNode(' 으로 프로젝트를 추가하세요'));
       e.append(el('div', 'big', '◎'), el('div', null, '프로젝트가 없습니다'), hint);
@@ -438,22 +737,22 @@ function renderBody() {
   }
 
   if (tab === 'today') {
-    // list는 이미 프로젝트별로 묶인 순서(currentList) — 그대로 훑으며 그룹이 바뀔 때 머리글을 넣는다
-    let lastPid;
-    list.forEach((it, idx) => {
-      const pid = it.project_id ?? 0;
-      if (pid !== lastPid) {
-        lastPid = pid;
-        const h = el('div', 'group-h');
+    // 그룹 구성은 todayView가 정한다 — currentList의 flat 순서와 같은 순서라 선택 인덱스가 맞는다
+    let idx = 0;
+    for (const g of todayView()) {
+      const h = el('div', 'group-h' + (g.key === 'urgent' ? ' urgent' : ''));
+      if (g.key === 'urgent') {
+        h.append(el('span', 'hot', g.label));
+      } else {
         const chip = el('span', 'chip');
         const dot = el('span', 'dot');
-        dot.style.background = projColor(pid);
-        chip.append(dot, document.createTextNode(it.project_name ?? '미지정'));
+        dot.style.background = projColor(g.pid);
+        chip.append(dot, document.createTextNode(g.label));
         h.append(chip);
-        body.append(h);
       }
-      body.append(itemRow(it, idx));
-    });
+      body.append(h);
+      for (const it of g.items) body.append(itemRow(it, idx++));
+    }
   } else {
     list.forEach((it, idx) => body.append(itemRow(it, idx)));
   }
@@ -484,6 +783,11 @@ function renderFooter() {
     s.append(el('kbd', null, key), document.createTextNode(' ' + label));
     hints.append(s);
   };
+  if (view === 'history') {
+    add('↑↓', '스크롤');
+    add('Esc', '뒤로');
+    return;
+  }
   if (view === 'resume') {
     add('R', '다시 생성');
     add('Enter', '이슈 열기');
@@ -493,8 +797,17 @@ function renderFooter() {
   add('Tab', '탭');
   if (tab === 'review') {
     add('G', review.data?.review ? '다시 생성' : '생성');
+    add('↑↓', '스크롤');
     add('←→', '주 이동');
     if (review.data?.review?.file) add('O', '볼트에서 열기');
+    add('Esc', '닫기');
+    return;
+  }
+  if (tab === 'settings') {
+    add('Enter', '변경');
+    add('X', '기본값으로');
+    add('B', '지금 백업');
+    add('O', 'settings.json');
     add('Esc', '닫기');
     return;
   }
@@ -505,6 +818,8 @@ function renderFooter() {
     add('R', '리포');
     add('Shift+↕', '순서');
     add('X', '보관');
+    add('/', '검색');
+    add('Esc', filter ? '검색 해제' : '닫기');
     return;
   }
   if (tab === 'inbox') {
@@ -517,11 +832,15 @@ function renderFooter() {
   } else {
     add('Space', '완료');
     add('D', '마감');
+    add('F', dueOnly ? '전체' : '마감만');
+    add('H', '기록');
   }
   add('E', '제목');
   add('X', '삭제');
+  if (deleted.length) add('U', '되돌리기');
+  add('/', '검색');
   add('Enter', '재개 카드');
-  add('Esc', '닫기');
+  add('Esc', filter ? '검색 해제' : '닫기');
 }
 
 // ── 동작
@@ -533,8 +852,10 @@ async function refresh() {
 function switchTab(key) {
   tab = key;
   sel = 0;
+  resetScroll = true;
   render();
   if (key === 'review' && !review.data) loadReview();
+  if (key === 'settings') loadSettings();
 }
 
 function selectedItem() {
@@ -588,6 +909,14 @@ function closeDlg(commit) {
   resolve?.(commit ? $('dlgIn').value.trim() : null);
 }
 
+// 입력할 때마다 걸러 보여준다 — 확정을 기다리면 오타를 알아채기 어렵다
+$('searchIn').addEventListener('input', (e) => {
+  filter = e.target.value.trim();
+  sel = 0;
+  resetScroll = true;
+  render();
+});
+
 document.addEventListener('keydown', async (e) => {
   // 다이얼로그 입력 중에는 그 입력만 받는다
   if (dlgResolve) {
@@ -597,9 +926,31 @@ document.addEventListener('keydown', async (e) => {
     return;
   }
 
-  // 재개 카드 화면
+  // 검색 입력 중에는 글자가 입력창으로 가야 한다 — 단축키를 가로채지 않는다
+  if (searchOn) {
+    if (e.key === 'Escape') closeSearch(false);
+    else if (e.key === 'Enter') closeSearch(true); // 필터는 남기고 목록으로 돌아간다
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      closeSearch(true);
+    }
+    e.stopPropagation();
+    return;
+  }
+
+  // 완료 기록 — 읽기만 하는 화면이라 스크롤과 닫기만 있다
+  if (view === 'history') {
+    if (handleDocScroll(e, { arrows: true })) return;
+    if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'h' || e.key === 'H') {
+      return closeHistory();
+    }
+    return;
+  }
+
+  // 재개 카드 화면 — ↑↓는 이슈 선택에 쓰므로 스크롤은 Page·Home·End·Space만
   if (view === 'resume') {
     const issues = resume?.data?.issues ?? [];
+    if (handleDocScroll(e)) return;
     switch (e.key) {
       case 'Escape':
       case 'Backspace':
@@ -628,7 +979,11 @@ document.addEventListener('keydown', async (e) => {
   // 공통: 닫기·탭 전환·이동
   switch (e.key) {
     case 'Escape':
+      if (filter) return closeSearch(false); // 필터부터 푼다 — 창은 한 번 더 누르면 닫힌다
       return window.whenwork.hide();
+    case '/':
+      e.preventDefault();
+      return openSearch();
     case 'Tab': {
       e.preventDefault();
       const i = TABS.findIndex((t) => t.key === tab);
@@ -636,8 +991,9 @@ document.addEventListener('keydown', async (e) => {
     }
   }
 
-  // 리뷰 탭 — 목록이 아니라 문서라 조작이 다르다
+  // 리뷰 탭 — 목록이 아니라 문서라 조작이 다르다 (↑↓·j·k까지 스크롤로 쓴다)
   if (tab === 'review') {
+    if (handleDocScroll(e, { arrows: true })) return;
     switch (e.key) {
       case 'g':
       case 'G':
@@ -670,6 +1026,44 @@ document.addEventListener('keydown', async (e) => {
       if (tab === 'projects' && e.shiftKey) return moveProject('up');
       sel = Math.max(sel - 1, 0);
       return render();
+    // 목록에서는 Page·Home·End가 스크롤이 아니라 선택 점프다 — 스크롤은 선택을 따라온다
+    case 'Home':
+      e.preventDefault();
+      sel = 0;
+      return render();
+    case 'End':
+      e.preventDefault();
+      sel = Math.max(0, currentList().length - 1);
+      return render();
+    case 'PageDown':
+      e.preventDefault();
+      sel = Math.max(0, Math.min(sel + 10, currentList().length - 1));
+      return render();
+    case 'PageUp':
+      e.preventDefault();
+      sel = Math.max(sel - 10, 0);
+      return render();
+  }
+
+  // 설정 탭
+  if (tab === 'settings') {
+    const f = SETTING_FIELDS[sel] ?? null;
+    if (['x', 'o', 'b'].includes(e.key.toLowerCase())) e.preventDefault();
+    switch (e.key) {
+      case 'Enter':
+        e.preventDefault();
+        return editSetting(f);
+      case 'x':
+      case 'X':
+        return clearSetting(f);
+      case 'o':
+      case 'O':
+        return window.whenwork.settingsOpenFile();
+      case 'b':
+      case 'B':
+        return runBackup();
+    }
+    return;
   }
 
   // 프로젝트 탭 — 프로젝트 자체를 관리한다 (시드·하드코딩 없음)
@@ -801,11 +1195,36 @@ document.addEventListener('keydown', async (e) => {
       }
       return;
     }
+    case 'h':
+    case 'H':
+      e.preventDefault();
+      return openHistory();
+    case 'f':
+    case 'F': {
+      if (tab !== 'today') return;
+      e.preventDefault();
+      dueOnly = !dueOnly;
+      sel = 0;
+      resetScroll = true;
+      toast(dueOnly ? '마감 있는 것만 봅니다' : '오늘 탭 — 전체를 봅니다');
+      return render();
+    }
     case 'x':
     case 'X':
       if (!it) return;
       await window.whenwork.remove(it.id);
+      // 지운 것은 되돌릴 수 있다 — 연달아 지웠으면 U를 누른 만큼 거꾸로 살아난다
+      deleted.push({ id: it.id, title: it.title });
+      toast(`삭제 — "${clip(it.title)}" · U로 되돌리기`);
       return refresh();
+    case 'u':
+    case 'U': {
+      const last = deleted.pop();
+      if (!last) return toast('되돌릴 삭제가 없습니다');
+      await window.whenwork.restore(last.id);
+      toast(`되돌림 — "${clip(last.title)}"`);
+      return refresh();
+    }
     default: {
       // 1~9: 프로젝트 지정 (인박스 항목을 todo로 보낸다 — 다른 탭에서는 재지정)
       const n = Number(e.key);

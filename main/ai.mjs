@@ -56,10 +56,19 @@ function fmtWhen(ts) {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+// 이슈와 PR을 한 줄로. 관계(리뷰 대기·할당)까지 적어야 모델이 급한 것을 고를 수 있다.
+function issueLine(i) {
+  const tag = i.kind === 'pr' ? (i.provider === 'gitlab' ? 'MR' : 'PR') : '이슈';
+  const rel =
+    i.relation === 'reviewer' ? '·내 리뷰 대기' : i.relation === 'author' ? '' : '·나에게 할당';
+  return `- [${tag}${i.draft ? '·초안' : ''}${rel}] #${i.number} ${i.title}`;
+}
+
 export function buildResumePrompt(project, { activities, doneItems, issues, todos }) {
   const lines = [];
   lines.push(`프로젝트 "${project.name}"의 작업 재개 카드를 만든다.`);
-  lines.push('아래 자료(최근 커밋·완료한 일·열린 이슈·남은 todo)를 근거로만 판단하고, 자료에 없는 내용을 지어내지 않는다.');
+  lines.push('아래 자료(최근 커밋·완료한 일·열린 이슈·PR·남은 todo)를 근거로만 판단하고, 자료에 없는 내용을 지어내지 않는다.');
+  lines.push('내 리뷰를 기다리는 PR이 있으면 남을 막고 있는 일이므로 다음 액션 후보로 먼저 고려한다.');
   lines.push('');
   lines.push('## 최근 커밋 (최신순)');
   lines.push(activities.length
@@ -69,10 +78,9 @@ export function buildResumePrompt(project, { activities, doneItems, issues, todo
   lines.push('## 최근 완료한 일');
   lines.push(doneItems.length ? doneItems.map((d) => `- ${d.title}`).join('\n') : '- (없음)');
   lines.push('');
-  lines.push('## 열린 이슈');
-  lines.push(issues.length
-    ? issues.filter((i) => i.state === 'open').map((i) => `- #${i.number} ${i.title}`).join('\n')
-    : '- (없음)');
+  lines.push('## 열린 이슈·PR');
+  const open = issues.filter((i) => i.state === 'open');
+  lines.push(open.length ? open.map(issueLine).join('\n') : '- (없음)');
   lines.push('');
   lines.push('## 남은 todo');
   lines.push(todos.length ? todos.map((t) => `- ${t.title}`).join('\n') : '- (없음)');

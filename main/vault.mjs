@@ -8,13 +8,47 @@ import path from 'node:path';
 
 const START = '<!-- AUTO:WEEKLY:START -->';
 const END = '<!-- AUTO:WEEKLY:END -->';
+export const WORKLOG_DIR = '00_업무일지'; // 볼트를 알아보는 표식이자 주간 리뷰가 들어가는 폴더
+
+// 볼트 경로를 코드에 박지 않는다 — 홈 아래에서 `00_업무일지`를 가진 폴더를 찾아 후보로 쓴다.
+// 못 찾으면 null이고, 그때는 설정 화면에서 사용자가 직접 고른다.
+export function guessVaultRoot(home, { depth = 2, readdir = defaultReaddir } = {}) {
+  const seen = new Set();
+  let level = [home];
+  for (let d = 0; d <= depth; d++) {
+    const next = [];
+    for (const dir of level) {
+      if (seen.has(dir)) continue;
+      seen.add(dir);
+      const names = readdir(dir);
+      if (names.includes(WORKLOG_DIR)) return dir;
+      for (const name of names) {
+        if (name.startsWith('.') || name.startsWith('$')) continue; // 숨김·시스템 폴더는 건너뛴다
+        next.push(path.join(dir, name));
+      }
+    }
+    level = next;
+  }
+  return null;
+}
+
+function defaultReaddir(dir) {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+  } catch {
+    return []; // 권한 없는 폴더는 조용히 건너뛴다
+  }
+}
 
 export function weeklyPath(vaultRoot, date, week) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
   return path.join(
     vaultRoot,
-    '00_업무일지',
+    WORKLOG_DIR,
     `${y}년`,
     `${m}월`,
     `00_주간리뷰_${week.year}-W${String(week.week).padStart(2, '0')}.md`

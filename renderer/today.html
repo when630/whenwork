@@ -48,6 +48,21 @@
   .tab.on .n { background: var(--accent-dim); color: var(--accent); }
   .tab:hover:not(.on) { background: var(--bg-raised); }
 
+  /* ── 검색 바: 필터가 걸려 있는 동안은 흐리게 남아 상태를 드러낸다 */
+  .search {
+    display: none; align-items: center; gap: var(--sp-2); flex: none;
+    padding: 6px var(--sp-5); border-bottom: 1px solid var(--border);
+    background: var(--bg-raised);
+  }
+  .search.show { display: flex; }
+  .search.idle { opacity: .55; }
+  .search .ico { font-family: var(--font-mono); color: var(--accent); }
+  .search input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--text-primary); font-family: var(--font-sans); font-size: var(--fs-md);
+  }
+  .search .cnt { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
+
   /* ── 본문: 넓은 창에서도 줄이 늘어지지 않게 좌우 패딩으로 760px 중앙 제한 */
   .body {
     flex: 1; overflow-y: auto; outline: none;
@@ -60,6 +75,26 @@
     font-size: var(--fs-xs); color: var(--text-muted);
   }
   .group-h::after { content: ""; flex: 1; height: 1px; background: var(--border); opacity: .6; }
+  .group-h .hot { color: var(--danger); font-weight: 700; letter-spacing: .02em; }
+
+  /* ── 완료 기록 (H) */
+  .hist-day {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-4) var(--sp-4) var(--sp-1);
+    font-size: var(--fs-sm); color: var(--text-secondary); font-weight: 700;
+  }
+  .hist-day .n { font-family: var(--font-mono); font-size: 10px; font-weight: 400; color: var(--text-muted); }
+  .hist-day::after { content: ""; flex: 1; height: 1px; background: var(--border); opacity: .6; }
+  .hist-row {
+    display: flex; gap: var(--sp-2); align-items: baseline;
+    padding: 3px var(--sp-4); font-size: var(--fs-sm); color: var(--text-secondary);
+  }
+  .hist-row .mark { flex: none; width: 14px; text-align: center; color: var(--success); }
+  .hist-row.commit-row { font-family: var(--font-mono); font-size: var(--fs-xs); }
+  .hist-row.commit-row .mark { color: var(--warning); }
+  .hist-row .tt { flex: 1; }
+  .hist-row .p { flex: none; font-size: var(--fs-xs); color: var(--text-muted); }
+  .hist-row .when { flex: none; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 
   .item {
     display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-2);
@@ -117,6 +152,17 @@
   .proj-num { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); flex: none; width: 14px; text-align: right; margin-top: 3px; }
   .proj-repos { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 22px; font-family: var(--font-mono); }
 
+  /* 설정 탭 */
+  .set-val {
+    flex: none; font-family: var(--font-mono); font-size: var(--fs-xs);
+    color: var(--accent); background: var(--accent-dim);
+    border-radius: 99px; padding: 1px 9px; max-width: 60%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;
+  }
+  .set-val.dim { color: var(--text-muted); background: var(--bg-inset); }
+  .set-foot { margin: var(--sp-4) var(--sp-3) 0; padding-top: var(--sp-3); border-top: 1px dashed var(--border); }
+  .set-foot .ctx { margin-left: 0; font-family: var(--font-mono); }
+
   .empty {
     height: 100%; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: var(--sp-2);
@@ -134,7 +180,9 @@
   .sync { display: flex; align-items: center; gap: 6px; }
   .sync .led { width: 7px; height: 7px; border-radius: 99px; background: var(--success); box-shadow: 0 0 6px rgba(158,206,106,.6); }
   .sync.off .led { background: var(--warning); box-shadow: 0 0 6px rgba(224,175,104,.6); }
-  .foot-hints { display: flex; gap: var(--sp-4); }
+  /* 힌트가 늘어 폭을 넘기면 레이아웃이 밀리는 대신 뒤쪽(관습적인 Esc 등)부터 잘린다 */
+  .foot-hints { display: flex; gap: var(--sp-3); flex-wrap: nowrap; overflow: hidden; }
+  .foot-hints span { white-space: nowrap; }
 
   /* ── 재개 카드 */
   .rhead {
@@ -190,6 +238,13 @@
   .issue.selected { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
   .issue .st { width: 8px; height: 8px; border-radius: 99px; flex: none; align-self: center; background: var(--text-muted); }
   .issue .st.open { background: var(--success); }
+  .issue .st.merged { background: var(--ai); }
+  .issue .kind {
+    font-family: var(--font-mono); font-size: 10px; flex: none;
+    border-radius: 4px; padding: 0 4px; color: var(--accent); background: var(--accent-dim);
+  }
+  .issue .asg.rev { color: var(--ai); background: var(--ai-dim); }
+  .issue .asg.draft { color: var(--text-muted); background: var(--bg-inset); }
   .issue .prov { font-family: var(--font-mono); font-size: 10px; flex: none; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; color: var(--text-muted); }
   .issue .num { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); flex: none; }
   .issue .tt { flex: 1; color: var(--text-primary); }
@@ -264,6 +319,11 @@
       <nav class="tabs" id="tabs"></nav>
       <span class="date" id="date"></span>
     </header>
+    <div class="search" id="search">
+      <span class="ico">/</span>
+      <input id="searchIn" type="text" maxlength="80" placeholder="제목 · 메모 · 프로젝트 · 대기 상대">
+      <span class="cnt" id="searchCnt"></span>
+    </div>
     <div class="body" id="body" tabindex="-1"></div>
     <footer>
       <span class="sync" id="sync"><span class="led"></span><span id="syncText">동기화됨</span></span>
@@ -277,6 +337,7 @@
   <div class="toast" id="toast"></div>
 <script src="icons.js"></script>
 <script src="md.js"></script>
+<script src="view.js"></script>
 <script src="today.js"></script>
 </body>
 </html>

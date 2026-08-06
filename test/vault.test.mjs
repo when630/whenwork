@@ -106,6 +106,11 @@ test('있을 때만 붙는 항목 — 열지 않은 카드·전환 없는 주는
 
 test('회의 시간은 30분 미만이면 생략하고 소수 한 자리로 적는다', () => {
   assert.match(statsLine({ meeting_hours: 3.46 }), /회의 3\.5시간/);
+  // AI 호출은 구독 한도를 나눠 쓰므로 회고에 숫자로 남는다 (오픈이슈 #4)
+  assert.match(statsLine({ ai_calls: 12 }), /AI 호출 12회/);
+  assert.match(statsLine({ ai_calls: 12, ai_fails: 2 }), /AI 호출 12회 \(실패 2\)/);
+  assert.ok(!statsLine({ ai_calls: 12 }).includes('실패')); // 실패 0은 붙이지 않는다
+  assert.ok(!statsLine({}).includes('AI 호출'));
   assert.match(statsLine({ meeting_hours: 0.5 }), /회의 0\.5시간/);
   assert.ok(!statsLine({ meeting_hours: 0.2 }).includes('회의'));
   assert.ok(!statsLine({}).includes('회의'));

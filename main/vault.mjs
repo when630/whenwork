@@ -82,6 +82,11 @@ export function statsLine(s = {}) {
   const parts = [`캡처 ${n(s.captured)}`, `완료 ${n(s.done)}`, `커밋 ${n(s.commits)}`];
   if (n(s.resume_open)) parts.push(`재개 카드 ${n(s.resume_open)}회`);
   if (n(s.switches)) parts.push(`프로젝트 전환 ${n(s.switches)}회`);
+  // claude -p 호출 — 구독 한도를 Claude Code와 나눠 쓰므로 빈도를 조정할 근거가 필요하다(#4).
+  // 실패는 있을 때만 덧붙인다(늘 붙으면 0이라는 사실이 눈에서 사라진다).
+  if (n(s.ai_calls)) {
+    parts.push(`AI 호출 ${n(s.ai_calls)}회${n(s.ai_fails) ? ` (실패 ${n(s.ai_fails)})` : ''}`);
+  }
   const hours = Math.round(n(s.meeting_hours) * 10) / 10;
   if (hours >= 0.5) parts.push(`회의 ${hours}시간`);
   return `> ${parts.join(' · ')}`;

@@ -12,12 +12,27 @@ function git(args, cwd, timeoutMs = 10_000) {
   });
 }
 
-// 리포 하나에서 내 커밋만 — 회사 리포에는 남의 커밋도 있으므로 리포의 user.email로 거른다
+// 어떤 커밋을 "내가 한 일"로 볼지 정하는 규칙 (오픈이슈 #2).
+//
+// auto-worklog(`worklog-common.ps1`)와 같은 커밋을 세야 한다 — 같은 주를 주간 리뷰와 일일
+// 업무일지가 다르게 세면 회고가 어긋난다. 갈리던 것은 `--all` 하나였다: 없으면 체크아웃한
+// 브랜치의 조상만 세므로 **아직 머지하지 않은 브랜치의 작업이 빠진다**(실측 gowrite 241 vs 242).
+// 저자는 이름을 코드에 박지 않고 리포의 user.email로 거른다(회사 리포에는 남의 커밋도 있다) —
+// 설정이 없으면 거르지 않는다. auto-worklog가 쓰는 이름 정규식보다 이쪽이 견고하다.
+export function logArgs(email) {
+  return [
+    'log',
+    '--all',
+    '--no-merges',
+    `--since=${SINCE}`,
+    ...(email ? [`--author=${email}`] : []),
+    `--pretty=%H${SEP}%aI${SEP}%s`,
+  ];
+}
+
 async function scanRepo(repoPath) {
   const email = (await git(['config', 'user.email'], repoPath).catch(() => '')).trim();
-  const args = ['log', `--since=${SINCE}`, '--no-merges', `--pretty=%H${SEP}%aI${SEP}%s`];
-  if (email) args.splice(1, 0, `--author=${email}`);
-  const out = await git(args, repoPath);
+  const out = await git(logArgs(email), repoPath);
   return out
     .split('\n')
     .filter((l) => l.includes(SEP))

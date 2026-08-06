@@ -582,6 +582,11 @@ export function createDb(config = {}) {
            WHERE kind = 'resume_open' AND at >= $1 AND at < $2) AS resume_open,
          (SELECT count(*) FROM event
            WHERE kind = 'project_switch' AND at >= $1 AND at < $2) AS switches,
+         -- claude -p 호출 수와 그중 실패 (오픈이슈 #4 — 구독 한도를 Claude Code와 나눠 쓴다)
+         (SELECT count(*) FROM event
+           WHERE kind = 'ai_call' AND at >= $1 AND at < $2) AS ai_calls,
+         (SELECT count(*) FROM event
+           WHERE kind = 'ai_call' AND detail LIKE '%:fail:%' AND at >= $1 AND at < $2) AS ai_fails,
          (SELECT coalesce(sum(extract(epoch FROM (end_at - start_at))) / 3600, 0) FROM cal_event
            WHERE all_day = false AND start_at >= $1 AND start_at < $2) AS meeting_hours`,
       [from, to]

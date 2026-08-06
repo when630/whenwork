@@ -391,6 +391,24 @@ async function collectAll() {
   prewarmCards().catch(() => {});
 }
 
+// ── `claude -p` 호출 계량 (오픈이슈 #4)
+//
+// 사용량이 Claude Code와 같은 구독 한도를 쓰는데 "초과 시 빈도 조정"이라 적어두고도
+// 호출 수를 재는 창구가 없었다. 실패와 걸린 시간까지 남겨야 조정할 근거가 된다
+// (카드 생성은 사람이 부른 게 아니라 백그라운드로 도는 쪽이 많아 화면 이벤트로는 안 잡힌다).
+async function withAiLog(job, fn) {
+  const started = Date.now();
+  const secs = () => Math.round((Date.now() - started) / 1000);
+  try {
+    const out = await fn();
+    db.logEvent('ai_call', `${job}:ok:${secs()}s`);
+    return out;
+  } catch (err) {
+    db.logEvent('ai_call', `${job}:fail:${secs()}s`);
+    throw err;
+  }
+}
+
 // ── 주간 리뷰 초안 (D5·오픈이슈 #1)
 //
 // DB에 저장하고 볼트 파일로도 내보낸다. 앱의 리뷰 탭은 DB 쪽을 읽으므로 볼트가 없어도 볼 수 있다.
@@ -422,7 +440,8 @@ async function makeWeeklyReview(weekOffset = 0, { notify: useNotification = fals
     notify('초안 생성 중… (claude -p)');
     const material = await db.weeklyMaterial(w.from, w.to);
     // 지표는 사실이라 AI를 거칠 이유가 없다 — 초안 맨 위에 한 줄로 앱이 직접 붙인다
-    const body = `${statsLine(material.stats)}\n\n${await generateWeeklyReview(range, material)}`;
+    const draft = await withAiLog('weekly_review', () => generateWeeklyReview(range, material));
+    const body = `${statsLine(material.stats)}\n\n${draft}`;
     const root = vaultRoot();
     let saved = null;
     if (root) {
@@ -1007,7 +1026,7 @@ ipcMain.handle('inbox:classify', async () => {
   try {
     const [items, projects] = [await db.getInbox(), await db.getProjects()];
     if (!items.length) return { ok: true, suggested: 0 };
-    const pairs = await classifyInbox(items, projects);
+    const pairs = await withAiLog('inbox_classify', () => classifyInbox(items, projects));
     await db.setSuggestions(pairs);
     await db.logEvent('inbox_classify', `${pairs.length}/${items.length}`);
     return { ok: true, suggested: pairs.length, total: items.length };
@@ -1095,12 +1114,14 @@ async function buildResumeCard(projectId) {
     const p = await findProject(projectId);
     if (!p) throw new Error('프로젝트 없음');
     const view = await db.getViewState();
-    const card = await generateResumeCard(p, {
+    // 자료를 먼저 모으고 AI 호출만 감싼다 — 계량에 DB 시간이 섞이지 않게
+    const material = {
       activities: await db.getActivities(projectId, 15),
       doneItems: await db.getDoneItems(projectId, 7),
       issues: await db.getIssues(projectId, 14),
       todos: view.today.filter((t) => t.project_id === projectId && !t.done_at),
-    });
+    };
+    const card = await withAiLog('resume_card', () => generateResumeCard(p, material));
     await db.saveResumeCard(projectId, card);
     cardFailure.delete(projectId);
   } catch (err) {

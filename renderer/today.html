@@ -65,7 +65,9 @@
 
   /* ── 본문: 넓은 창에서도 줄이 늘어지지 않게 좌우 패딩으로 760px 중앙 제한 */
   .body {
-    flex: 1; overflow-y: auto; outline: none;
+    /* 내용 길이에 따라 스크롤바가 생겼다 없어지면 폭이 10px 흔들려 화면이 들썩인다 —
+       자리를 늘 비워 둔다 */
+    flex: 1; overflow-y: auto; scrollbar-gutter: stable; outline: none;
     padding: var(--sp-3) max(var(--sp-3), calc((100% - 760px) / 2)) var(--sp-4);
   }
 
@@ -108,6 +110,8 @@
     border: 1.5px solid var(--text-muted); border-radius: 5px; position: relative;
     transition: background .1s, border-color .1s;
   }
+  /* 눌러도 되게 생긴 것은 실제로 눌린다 (키보드는 Space) */
+  .cb:hover { border-color: var(--success); }
   .item.done .cb { background: var(--success); border-color: var(--success); }
   .item.done .cb::after { content: "✓"; position: absolute; inset: -3px 0 0 2px; font-size: 11px; color: #16171c; }
   .item.done .t { color: var(--text-muted); text-decoration: line-through; }
@@ -230,6 +234,15 @@
     content: ""; flex: 1; height: 0; border-top: 1px dashed var(--accent); opacity: .45;
   }
 
+  /* 방금 끝났거나 진행 중인 회의 — 후속을 붙일 수 있다는 표식(누르면 M과 같은 일) */
+  .tl-follow {
+    flex: none; margin-left: 6px; cursor: pointer;
+    font-family: var(--font-mono); font-size: 10px;
+    color: var(--accent); background: var(--accent-dim);
+    border-radius: 99px; padding: 1px 7px;
+  }
+  .tl-follow:hover { background: rgba(122,162,247,.26); }
+
   .tl-allday {
     display: flex; align-items: center; gap: var(--sp-2);
     padding: 3px var(--sp-3) 3px 0; margin: 0 var(--sp-2);
@@ -318,6 +331,9 @@
   }
   .next .arrow { color: var(--accent); font-weight: 700; flex: none; }
   .sec-h { font-size: 11px; color: var(--text-muted); letter-spacing: .08em; margin-bottom: var(--sp-2); }
+  /* gh/glab을 새로 긁는 동안 — 아래 두 단이 이유 없이 늦게 바뀌어 보이지 않게 */
+  .sec-h .sync-live { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; color: var(--ai); }
+  .sec-h .sync-live .spin { width: 9px; height: 9px; border-width: 1.5px; }
   .commit {
     display: flex; gap: var(--sp-2); align-items: baseline;
     font-family: var(--font-mono); font-size: var(--fs-xs);
@@ -332,6 +348,10 @@
     transition: background .1s;
   }
   .issue:hover { background: var(--bg-raised); }
+  /* 이슈 탭에서는 목록 안에 서므로 항목 행과 좌우를 맞춘다 (재개 카드 안은 음수 마진) */
+  .issue.in-tab { margin: 1px var(--sp-2); padding: 7px var(--sp-3); }
+  .issue .num { cursor: pointer; }
+  .issue .num:hover { color: var(--accent); }
   .issue.selected { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
   .issue .st { width: 8px; height: 8px; border-radius: 99px; flex: none; align-self: center; background: var(--text-muted); }
   .issue .st.open { background: var(--success); }
@@ -360,7 +380,14 @@
   /* ── 주간 리뷰 */
   .rv-head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0 var(--sp-3); }
   .rv-head .wk { font-weight: 700; font-size: var(--fs-lg); }
-  .rv-head .range { color: var(--text-muted); font-size: var(--fs-xs); }
+  .rv-head .range { color: var(--text-muted); font-size: var(--fs-xs); min-height: 18px; }
+  /* 이번 주 표시 — 주차 숫자와 뒤섞이지 않게 배지로 뗀다 */
+  .rv-head .wk .now {
+    margin-left: 9px; vertical-align: 2px;
+    font-size: 11px; font-weight: 400; font-family: var(--font-mono);
+    color: var(--accent); background: var(--accent-dim);
+    border-radius: 99px; padding: 1px 8px;
+  }
   .rv-head .gen-at { margin-left: auto; font-size: var(--fs-xs); color: var(--text-muted); }
   .rv-nav { display: flex; gap: 2px; }
   .rv-nav span {
@@ -368,10 +395,15 @@
     border-radius: var(--r-sm); color: var(--text-muted); cursor: pointer;
   }
   .rv-nav span:hover { background: var(--bg-hover); color: var(--text-primary); }
+  /* 이번 주에서는 오른쪽으로 갈 데가 없다 */
+  .rv-nav span.dim { opacity: .25; cursor: default; }
+  .rv-nav span.dim:hover { background: none; color: var(--text-muted); }
   .rv-body {
     background: var(--bg-raised); border: 1px solid var(--border);
     border-radius: var(--r-md); padding: var(--sp-4) var(--sp-5) var(--sp-5);
   }
+  /* 다음 주를 불러오는 동안의 옛 본문 — 자리를 지키느라 남겨둔 것이라 물러나 있는다 */
+  .rv-body.stale { opacity: .4; }
   .rv-body h3 {
     font-size: var(--fs-md); margin: var(--sp-4) 0 var(--sp-2);
     color: var(--accent); font-weight: 700;

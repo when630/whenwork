@@ -60,7 +60,7 @@ const SMOKE_PROBE = `(async () => {
   const step = async (name, fn) => {
     try { await fn(); } catch (e) { errors.push(name + ': ' + ((e && e.message) || e)); }
   };
-  for (const t of ['inbox', 'waiting', 'projects', 'review', 'settings', 'today']) {
+  for (const t of ['inbox', 'waiting', 'issues', 'projects', 'review', 'settings', 'today']) {
     await step('tab:' + t, () => switchTab(t));
     await new Promise((r) => setTimeout(r, 60));
   }
@@ -92,6 +92,88 @@ const SMOKE_PROBE = `(async () => {
     var gchip = document.querySelector('.group-h .chip:not(.cal-chip)');
     if (gchip && !gchip.querySelector('.pn')) throw new Error('오늘 탭 그룹 칩에 번호가 없다');
   });
+  // 리뷰 탭에서 이번 주에 → 를 누르면 아무 일도 없어야 한다 —
+  // 자리는 그대로인데 화면을 비우고 다시 불러와서 누를 때마다 깜빡였다
+  await step('review:week', () => {
+    switchTab('review');
+    var sentinel = { year: 2026, week: 32, label: 'x', review: null };
+    review.data = sentinel;
+    var before = review.offset;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    if (review.offset !== before) throw new Error('이번 주에서 → 로 미래 주로 갔다: ' + review.offset);
+    if (review.data !== sentinel) throw new Error('이번 주에서 → 가 화면을 비웠다 (깜빡임)');
+    if (!document.querySelector('.rv-nav .dim')) throw new Error('갈 데 없는 화살표가 흐려지지 않았다');
+    // 지난 주로 옮길 때도 본문을 비우면 빈 화면이 끼어들어 들썩인다 — 옛 본문을 지고 간다
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    if (review.offset !== before - 1) throw new Error('← 로 지난 주로 가지 않았다: ' + review.offset);
+    if (review.data !== sentinel) throw new Error('주를 옮기며 본문을 비웠다 (들썩임)');
+    // 로딩 표시는 늦어질 때만 — 몇 ms 스치는 「불러오는 중」이 곧 깜빡임이다
+    if (review.loading) throw new Error('옮긴 즉시 로딩 표시를 켰다 (깜빡임)');
+    // 이번 주는 배지로 붙는다 (제목 뒤 괄호는 주차 숫자와 뒤섞여 읽혔다)
+    review.offset = before;
+    review.loading = false;
+    review.data = { year: 2026, week: 32, label: '2026-08-03 ~ 2026-08-09', review: null };
+    render();
+    if (!document.querySelector('.rv-head .wk .now')) throw new Error('이번 주 배지가 없다');
+    // 기간 줄이 접히면 아래가 들썩인다 — 비어 있어도 자리를 지켜야 한다.
+    // 높이는 **숫자로** 먼저 잡아둔다: 다시 그리면 노드가 떼어져 0이 나온다.
+    var withText = document.querySelector('.rv-head .range').getBoundingClientRect().height;
+    review.data = null;
+    review.loading = true;
+    render();
+    var whileLoading = document.querySelector('.rv-head .range').getBoundingClientRect().height;
+    if (Math.abs(whileLoading - withText) > 1) {
+      throw new Error('불러오는 동안 기간 줄이 접힌다: ' + withText + ' → ' + whileLoading);
+    }
+    review.loading = false;
+  });
+  // 늦어지면 표시는 떠야 한다 — IPC를 늦출 수 없으니 타이머를 직접 걸어 본다
+  await step('review:slow', () => scheduleLoading());
+  await new Promise((r) => setTimeout(r, 260));
+  await step('review:slow-check', () => {
+    if (!review.loading) throw new Error('늦어져도 로딩 표시가 켜지지 않는다');
+    if (!document.querySelector('.rv-head .spin')) throw new Error('로딩 표시가 그려지지 않았다');
+    review.loading = false;
+    render();
+  });
+  // 이슈 탭 — 재개 카드 안에만 있던 열린 이슈를 여기서 본다
+  await step('issues', () => {
+    if (!state || !state.online) return;
+    switchTab('issues');
+    if (document.getElementById('numlegend').classList.contains('show')) {
+      throw new Error('이슈 탭에는 1~9가 없으므로 번호 띠를 감춰야 한다');
+    }
+    if (!state.issues.length) return;
+    if (!document.querySelector('.issue')) throw new Error('열린 이슈가 그려지지 않았다');
+    if (!document.querySelector('.group-h .chip')) throw new Error('이슈가 프로젝트별로 묶이지 않았다');
+    if (typeof document.querySelector('.issue .num').onclick !== 'function') {
+      throw new Error('이슈 번호에 원본 열기가 붙어 있지 않다');
+    }
+  });
+  // 이슈 행은 재개 카드용 음수 마진을 쓰므로 목록 안에서는 항목 행과 좌우가 어긋난다 — 재 둔다
+  await step('issue-align', () => {
+    if (!state || !state.online || !state.issues.length) return;
+    switchTab('today');
+    var item = document.querySelector('.item');
+    if (!item) return;
+    var itemLeft = item.getBoundingClientRect().left;
+    switchTab('issues');
+    var iss = document.querySelector('.issue.in-tab');
+    if (!iss) throw new Error('이슈 탭 행에 in-tab이 붙지 않았다');
+    var d = Math.abs(iss.getBoundingClientRect().left - itemLeft);
+    if (d > 1) throw new Error('이슈 행이 항목 행과 좌우가 어긋난다: ' + d.toFixed(1) + 'px');
+  });
+  // 오늘 탭 그룹 순서 — 마감 순서를 따라가면 자리가 매일 바뀐다(프로젝트 번호가 오름차순이어야 한다)
+  await step('group-order', () => {
+    if (!state || !state.online) return;
+    switchTab('today');
+    var nums = [].slice
+      .call(document.querySelectorAll('.group-h .chip:not(.cal-chip) .pn'))
+      .map(function (n) { return Number(n.textContent); });
+    for (var i = 1; i < nums.length; i++) {
+      if (nums[i] < nums[i - 1]) throw new Error('그룹이 프로젝트 순서로 서지 않았다: ' + nums.join(','));
+    }
+  });
   // 하단 힌트는 몇 칸으로 줄여두고 나머지는 ?(전체 키맵)로 본다 — 다시 길어지지 않게 재 둔다
   await step('keys', () => {
     switchTab('today');
@@ -104,8 +186,15 @@ const SMOKE_PROBE = `(async () => {
     var panel = document.getElementById('keys');
     if (!panel.classList.contains('show')) throw new Error('?로 전체 키맵이 열리지 않았다');
     if (!panel.querySelector('kbd')) throw new Error('전체 키맵이 비어 있다');
+    // 키는 막았는데 마우스가 열려 있으면 뒤쪽 체크박스를 눌러 엉뚱한 항목이 완료된다
+    if (document.querySelector('.app').style.pointerEvents !== 'none') {
+      throw new Error('키맵이 떠 있는 동안 뒤쪽 클릭이 열려 있다');
+    }
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     if (panel.classList.contains('show')) throw new Error('Esc로 전체 키맵이 닫히지 않았다');
+    if (document.querySelector('.app').style.pointerEvents === 'none') {
+      throw new Error('키맵을 닫았는데 클릭이 여전히 막혀 있다');
+    }
   });
   // 캘린더가 붙지 않은 환경에서도 일정 띠 렌더 경로는 밟아 본다 (스모크는 빈 설정으로 돈다)
   await step('cal-strip', () => {
@@ -157,6 +246,10 @@ const SMOKE_PROBE = `(async () => {
     }];
     switchTab('today');
     if (!document.querySelector('.isu.closed')) throw new Error('닫힌 이슈 배지가 그려지지 않았다');
+    // 체크박스는 눌러도 되게 생겼으니 실제로 눌려야 한다 (여기서 누르지는 않는다 — 실 DB를 건드린다)
+    if (typeof document.querySelector('.item .cb').onclick !== 'function') {
+      throw new Error('체크박스에 클릭이 붙어 있지 않다');
+    }
     switchTab('waiting');
     if (!document.querySelector('.nudge-n')) throw new Error('재촉 횟수가 그려지지 않았다');
     // 프로젝트 표시가 없으면 대기 탭에서 1~9로 지정해도 화면이 그대로다
@@ -210,6 +303,7 @@ const CAPTURE_PROBE = `(() => {
 let tray = null;
 let captureWin = null;
 let todayWin = null;
+let todayHiddenAt = 0; // 트레이 클릭 토글용 — 방금 접혔는지
 let quitting = false;
 let hotkeyOk = false;
 let dbOnline = false;
@@ -657,6 +751,9 @@ function getTodayWin() {
     settings.set('todaySize', { width, height });
   });
   todayWin.loadFile(path.join(ROOT, 'renderer', 'today.html'));
+  todayWin.on('hide', () => {
+    todayHiddenAt = Date.now();
+  });
   todayWin.on('blur', () => {
     if (!suppressHide) todayWin.hide();
   });
@@ -669,9 +766,14 @@ function getTodayWin() {
   return todayWin;
 }
 
+// 트레이를 누르면 창이 blur돼 먼저 접히고, 그 뒤에 click이 와서 다시 열린다 —
+// 그래서 트레이로는 창을 닫을 수 없었다. 방금 접힌 직후의 클릭은 "닫으려는 클릭"으로 본다.
+const TOGGLE_GRACE_MS = 400;
+
 function toggleToday() {
   const win = getTodayWin();
   if (win.isVisible()) return win.hide();
+  if (Date.now() - todayHiddenAt < TOGGLE_GRACE_MS) return;
   showToday();
 }
 
@@ -809,7 +911,14 @@ ipcMain.handle('today:getState', async () => {
   if (!dbOnline) return { online: false, pending: queue.count() };
   await flush();
   const state = await db.getViewState();
-  return { online: true, pending: queue.count(), events: await todayEvents(), ...state };
+  return {
+    online: true,
+    pending: queue.count(),
+    events: await todayEvents(),
+    // 열린 이슈는 재개 카드 안에만 있어 오늘 뷰에서 놓쳤다 — 탭 배지로 건수가 늘 보이게 함께 싣는다
+    issues: await db.getOpenIssues().catch(() => []),
+    ...state,
+  };
 });
 
 ipcMain.handle('history:get', async (_e, days = 7) => {
@@ -859,10 +968,20 @@ ipcMain.handle('issue:promote', async (_e, projectId, issue) => {
   }
 });
 
-// 재촉 — 몇 번째인지를 화면에 돌려줘야 해서 itemOps(ok만 반환)와 따로 둔다
+// 재촉 — 몇 번째인지와 직전 값(되돌리기용)을 돌려줘야 해서 itemOps(ok만 반환)와 따로 둔다
 ipcMain.handle('item:nudge', async (_e, id) => {
   try {
-    return { ok: true, count: await db.nudgeItem(id) };
+    const res = await db.nudgeItem(id);
+    return res ? { ok: true, ...res } : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+});
+
+ipcMain.handle('item:nudgeUndo', async (_e, id, at, count) => {
+  try {
+    await db.nudgeRestore(id, at, count);
+    return { ok: true };
   } catch {
     return { ok: false };
   }
@@ -945,13 +1064,22 @@ ipcMain.handle('resume:get', async (_e, projectId, log = true) => {
   }
 });
 
-// git·이슈를 새로 긁고 최신 상태를 돌려준다 — 열 때마다 백그라운드로 부른다
+// git·이슈를 새로 긁고 최신 상태를 돌려준다 — 열 때마다 백그라운드로 부른다.
+// 다만 카드를 열 때마다 gh/glab을 전량 다시 돌리면 리포마다 CLI를 네댓 번 부르는 셈이라,
+// 방금 긁은 프로젝트는 건너뛴다(6시간 주기 수집과 재개 카드 선갱신이 따로 돌고 있다).
+const RESUME_SYNC_MS = 5 * 60 * 1000;
+const lastResumeSync = new Map();
+
 ipcMain.handle('resume:sync', async (_e, projectId) => {
   try {
-    const p = await findProject(projectId);
-    if (p) {
-      await collectProject(db, p);
-      await syncProjectIssues(db, p);
+    const last = lastResumeSync.get(projectId) ?? 0;
+    if (Date.now() - last > RESUME_SYNC_MS) {
+      const p = await findProject(projectId);
+      if (p) {
+        await collectProject(db, p);
+        await syncProjectIssues(db, p);
+        lastResumeSync.set(projectId, Date.now());
+      }
     }
     return await resumePayload(projectId);
   } catch {
@@ -1029,10 +1157,12 @@ ipcMain.on('win:hide', (e) => {
   BrowserWindow.fromWebContents(e.sender)?.hide();
 });
 
-// 퀵캡처에서 Tab — 캡처를 접고 오늘 뷰를 연다
+// 퀵캡처에서 Tab — 캡처를 접고 오늘 뷰를 연다.
+// 방금 던진 것을 정리하러 온 길이라 인박스에 쌓인 게 있으면 그 탭부터 보여준다.
 ipcMain.on('app:open', (e) => {
   BrowserWindow.fromWebContents(e.sender)?.hide();
   showToday();
+  todayWin?.webContents.send('today:fromCapture');
 });
 
 // ── 앱 수명

@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('whenwork', {
   // ── 오늘 뷰
   getState: () => ipcRenderer.invoke('today:getState'),
   onRefresh: (cb) => ipcRenderer.on('today:refresh', () => cb()),
+  // 퀵캡처에서 Tab으로 건너온 길 — 방금 던진 것을 정리하러 왔으므로 인박스부터 본다
+  onFromCapture: (cb) => ipcRenderer.on('today:fromCapture', () => cb()),
   complete: (id) => ipcRenderer.invoke('item:complete', id),
   uncomplete: (id) => ipcRenderer.invoke('item:uncomplete', id),
   // keepKind — 대기 항목에 프로젝트만 붙일 때(대기를 풀지 않는다)
@@ -20,6 +22,7 @@ contextBridge.exposeInMainWorld('whenwork', {
   setDue: (id, text) => ipcRenderer.invoke('item:due', id, text),
   setNote: (id, note) => ipcRenderer.invoke('item:note', id, note),
   nudge: (id) => ipcRenderer.invoke('item:nudge', id),
+  nudgeUndo: (id, at, count) => ipcRenderer.invoke('item:nudgeUndo', id, at, count),
   classifyInbox: () => ipcRenderer.invoke('inbox:classify'),
   historyGet: (days) => ipcRenderer.invoke('history:get', days),
   captureFollowUp: (title, meeting) => ipcRenderer.invoke('capture:followUp', title, meeting),

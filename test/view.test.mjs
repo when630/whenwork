@@ -50,6 +50,13 @@ test('대소문자를 가리지 않고, 빈 검색어는 모두 통과', () => {
   assert.ok(VIEW.matches({ title: '아무거나' }, ''));
 });
 
+test('이슈는 번호로도 찾는다 — 210도 #210도', () => {
+  const issue = { title: '복사버튼 추가', number: 210, project_name: 'GoWrite' };
+  assert.ok(VIEW.matches(issue, '210'));
+  assert.ok(VIEW.matches(issue, '#210'));
+  assert.ok(!VIEW.matches(issue, '#211'));
+});
+
 // ── 오늘 탭 배치 (선택 인덱스와 그리는 순서가 어긋나면 엉뚱한 항목이 지워진다)
 test('프로젝트별로만 묶는다 — 급한 것은 배지가 알린다', () => {
   const list = [
@@ -83,6 +90,30 @@ test('프로젝트 없는 항목은 미지정 그룹으로 모인다', () => {
 
 test('빈 목록이면 그룹도 없다', () => {
   assert.deepEqual(VIEW.todayGroups([]), []);
+});
+
+// 항목은 마감 순으로 오므로 첫 등장 순서로 묶으면 그룹 자리가 매일 바뀐다 —
+// 그룹 순서는 프로젝트 탭 순서(= 1~9 번호)를 따라야 위치로 기억할 수 있다.
+test('그룹 순서는 프로젝트 탭 순서를 따른다', () => {
+  const projects = [{ id: 3, name: '셋' }, { id: 1, name: '가' }, { id: 2, name: '나' }];
+  const list = [
+    todo({ id: 'a', project_id: 2, project_name: '나', due: '2026-08-01' }), // 마감이 가장 이르다
+    todo({ id: 'b', project_id: 3, project_name: '셋', due: '2026-08-02' }),
+    todo({ id: 'c', project_id: 1, due: '2026-08-03' }),
+  ];
+  assert.deepEqual(VIEW.todayGroups(list, projects).map((g) => g.label), ['셋', '가', '나']);
+  // flat 순서도 같이 따라와야 한다 (선택 인덱스의 근거)
+  assert.deepEqual(VIEW.todayGroups(list, projects).flatMap((g) => g.items).map((i) => i.id), ['b', 'c', 'a']);
+});
+
+test('목록에 없는 프로젝트와 미지정은 뒤로 밀린다', () => {
+  const projects = [{ id: 1, name: '가' }];
+  const list = [
+    { id: 'x', title: '무소속', project_id: null },
+    todo({ id: 'y', project_id: 9, project_name: '보관됨' }),
+    todo({ id: 'z', project_id: 1 }),
+  ];
+  assert.deepEqual(VIEW.todayGroups(list, projects).map((g) => g.label), ['가', '미지정', '보관됨']);
 });
 
 // ── 타임라인

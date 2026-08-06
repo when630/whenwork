@@ -310,6 +310,27 @@ export function createDb(config = {}) {
     return { created: true };
   }
 
+  // 열린 이슈·PR 전량 — 오늘 뷰의 이슈 탭이 쓴다. 재개 카드 안에만 있으면 오늘 뷰에서 놓친다.
+  // 순서는 프로젝트 탭 순서(그룹) → 내 리뷰 대기 → 최근 갱신. 이미 할 일로 세운 것도 목록에는
+  // 남기고 표식만 붙인다 — 사라지면 "그 이슈는 어디 갔지"가 된다.
+  async function getOpenIssues(limit = 60) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT i.project_id, p.name AS project_name, i.provider, i.kind, i.number, i.title,
+              i.state, i.relation, i.url, i.draft, i.updated_at, i.synced_at,
+              (t.id IS NOT NULL) AS promoted
+         FROM issue i
+         JOIN project p ON p.id = i.project_id AND p.status = 'active'
+         LEFT JOIN item t
+           ON t.issue_url = i.url AND t.deleted_at IS NULL AND t.done_at IS NULL
+        WHERE i.state = 'open'
+        ORDER BY p.sort, p.id, (i.relation = 'reviewer') DESC, i.updated_at DESC
+        LIMIT $1`,
+      [limit]
+    );
+    return rows;
+  }
+
   // 이미 todo로 서 있는 이슈들 — 재개 카드에서 「할 일」 표식을 붙이는 데 쓴다
   async function promotedIssueUrls(projectId) {
     const { rows } = await pool.query(
@@ -432,13 +453,37 @@ export function createDb(config = {}) {
     await pool.query('UPDATE item SET due = $2 WHERE id = $1', [id, due]);
   }
 
-  // 재촉 기록 — 경과 시계를 지금부터 다시 센다. 돌려주는 횟수는 화면 알림에 쓴다.
+  // 재촉 기록 — 경과 시계를 지금부터 다시 센다.
+  //
+  // 30분 안에 다시 누른 것은 손이 미끄러진 것으로 보고 횟수를 올리지 않는다(실사용에서 한 항목에
+  // 5회가 찍혔다 — 같은 사람을 30분 안에 두 번 찌를 일은 없다). 직전 값을 함께 돌려주는 것은
+  // U로 되돌리기 위해서다: 확인 없이 경과 시계를 리셋하는 키였는데 취소할 방법이 없었다.
+  const NUDGE_DEDUP_MIN = 30;
+
   async function nudgeItem(id) {
+    const before = await pool.query('SELECT nudged_at, nudge_count FROM item WHERE id = $1', [id]);
+    const prev = before.rows[0];
+    if (!prev) return null;
+    const repeated =
+      !!prev.nudged_at && Date.now() - new Date(prev.nudged_at).getTime() < NUDGE_DEDUP_MIN * 60_000;
     const { rows } = await pool.query(
-      'UPDATE item SET nudged_at = now(), nudge_count = nudge_count + 1 WHERE id = $1 RETURNING nudge_count',
-      [id]
+      'UPDATE item SET nudged_at = now(), nudge_count = $2 WHERE id = $1 RETURNING nudge_count',
+      [id, Number(prev.nudge_count ?? 0) + (repeated ? 0 : 1)]
     );
-    return rows[0]?.nudge_count ?? 0;
+    return {
+      count: rows[0]?.nudge_count ?? 0,
+      repeated,
+      prev: { at: prev.nudged_at, count: Number(prev.nudge_count ?? 0) },
+    };
+  }
+
+  // 재촉 되돌리기 — 직전 값을 그대로 되돌려 놓는다 (첫 재촉이었으면 at은 null)
+  async function nudgeRestore(id, at, count) {
+    await pool.query('UPDATE item SET nudged_at = $2, nudge_count = $3 WHERE id = $1', [
+      id,
+      at ?? null,
+      Number(count) || 0,
+    ]);
   }
 
   async function setNote(id, note) {
@@ -615,9 +660,11 @@ export function createDb(config = {}) {
   async function briefing(staleDays = 5) {
     await ensureSchema();
     const { rows } = await pool.query(
+      // 마감은 어느 탭에 있든 챙겨야 한다 — kind='todo'만 세던 동안 인박스·대기 항목의 마감은
+      // 화면에 배지로는 뜨는데 아침에는 조용히 빠졌다(D로 넣을 수 있는 곳과 세는 곳이 어긋났다)
       `SELECT
-         count(*) FILTER (WHERE kind = 'todo' AND due < current_date)   AS overdue,
-         count(*) FILTER (WHERE kind = 'todo' AND due = current_date)   AS due_today,
+         count(*) FILTER (WHERE due < current_date)   AS overdue,
+         count(*) FILTER (WHERE due = current_date)   AS due_today,
          count(*) FILTER (WHERE kind = 'inbox')                          AS inbox,
          -- 재촉한 건은 그때부터 다시 센다 — 처음 부탁한 날로 세면 방금 재촉한 것까지 묶여 나온다
          count(*) FILTER (WHERE kind = 'waiting'
@@ -680,6 +727,7 @@ export function createDb(config = {}) {
     getActivities,
     upsertIssues,
     getIssues,
+    getOpenIssues,
     promoteIssue,
     promotedIssueUrls,
     getDoneItems,
@@ -698,6 +746,7 @@ export function createDb(config = {}) {
     setDue,
     setNote,
     nudgeItem,
+    nudgeRestore,
     setSuggestions,
     getInbox,
     logEvent,

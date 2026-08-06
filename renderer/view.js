@@ -63,7 +63,9 @@
   // 낱말이 여럿이면 모두 포함해야 한다(AND).
   function matches(row, q) {
     if (!q) return true;
-    const hay = [row.title, row.note, row.project_name, row.waiting_for, row.name, row.abbr]
+    // 이슈는 번호로 부른다 — "#210"도 "210"도 걸리게 넣는다
+    const hay = [row.title, row.note, row.project_name, row.waiting_for, row.name, row.abbr,
+      row.number != null ? `#${row.number}` : null]
       .filter(Boolean)
       .join(' ')
       .toLowerCase();
@@ -80,20 +82,29 @@
   // 둘(급함/프로젝트)이 되면서 오히려 어수선했다. 급한 건 마감 배지(D+2·오늘)가 알려주고
   // 그룹 안에서는 마감 빠른 순으로 서므로(getViewState의 ORDER BY) 위치로 또 표시할 필요가 없다.
   //
+  // 그룹 순서는 **프로젝트 탭 순서**(= 1~9 번호)를 따른다. 항목이 마감 순으로 오므로
+  // 첫 등장 순서대로 묶으면 그룹 자리가 마감에 따라 매일 바뀌어, 위치로 기억할 수가 없다.
+  // projects가 없으면(테스트 등) 들어온 순서를 그대로 쓴다.
+  //
   // 그리는 쪽과 선택 인덱스가 이 순서를 함께 쓰므로, 여기가 유일한 정렬 기준이어야 한다.
-  function todayGroups(list) {
-    const byProject = new Map(); // 첫 등장 순서 = 그룹 순서
+  function todayGroups(list, projects = []) {
+    const byProject = new Map();
     for (const it of list) {
       const pid = it.project_id ?? 0;
       if (!byProject.has(pid)) byProject.set(pid, []);
       byProject.get(pid).push(it);
     }
-    return [...byProject].map(([pid, items]) => ({
-      key: `p${pid}`,
-      pid,
-      label: items[0].project_name ?? '미지정',
-      items,
-    }));
+    const order = new Map(projects.map((p, i) => [p.id, i]));
+    // 목록에 없는 프로젝트·미지정은 뒤로. 같은 값이면 Array.sort가 안정적이라 등장 순서가 남는다
+    const rank = (pid) => (order.has(pid) ? order.get(pid) : Number.MAX_SAFE_INTEGER);
+    return [...byProject]
+      .sort((a, b) => rank(a[0]) - rank(b[0]))
+      .map(([pid, items]) => ({
+        key: `p${pid}`,
+        pid,
+        label: items[0].project_name ?? '미지정',
+        items,
+      }));
   }
 
   // 일정을 시간 축에 늘어놓고 "지금"이 어디쯤인지 끼워 넣는다.

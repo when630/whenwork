@@ -125,6 +125,25 @@ CREATE TABLE IF NOT EXISTS review (
 );
 `;
 
+// 스키마가 만드는 테이블 이름들. 백업이 무엇을 빠뜨렸는지 테스트가 이것으로 대조한다.
+export function schemaTables() {
+  return [...SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]);
+}
+
+// 백업에 담는 테이블 — 부모부터 적어 되살릴 때도 순서가 맞다.
+// 새 테이블을 만들면 여기에도 넣는다. 빠뜨리면 테스트가 잡는다
+// (실제로 나중에 붙인 cal_event가 여기에서 빠져 있었다).
+export const EXPORT_TABLES = [
+  'project',
+  'item',
+  'activity',
+  'issue',
+  'resume_card',
+  'cal_event',
+  'event',
+  'review',
+];
+
 export function createDb(config = {}) {
   const pool = new Pool({
     host: config.host ?? '127.0.0.1',
@@ -702,9 +721,7 @@ export function createDb(config = {}) {
     );
   }
 
-  // 백업용 전량 덤프. 되살릴 때 순서가 중요하므로(참조 관계) 배열 순서를 지킨다.
-  const EXPORT_TABLES = ['project', 'item', 'activity', 'issue', 'resume_card', 'review', 'event'];
-
+  // 백업용 전량 덤프. 되살릴 때 순서가 중요하므로(참조 관계) EXPORT_TABLES 순서를 지킨다.
   async function exportAll() {
     await ensureSchema();
     const out = {};

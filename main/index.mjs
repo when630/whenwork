@@ -26,7 +26,7 @@ import { syncProjectIssues } from './issues.mjs';
 import { generateResumeCard, classifyInbox, generateWeeklyReview } from './ai.mjs';
 import { parseCaptureToken, parseDue, isoWeek, weekRange } from './parse.mjs';
 import { writeWeekly, weeklyPath, guessVaultRoot, statsLine } from './vault.mjs';
-import { writeBackup } from './backup.mjs';
+import { writeBackup, backupDue } from './backup.mjs';
 import { syncCalendar, maskUrl, calendarRange } from './calendar.mjs';
 import {
   briefDecision,
@@ -523,6 +523,7 @@ ipcMain.handle('settings:get', () => ({
   calendar: { lastSync: settings.get('lastCalendarSync'), error: lastCalendarError },
   defaults: { notifyAt: NOTIFY_AT_DEFAULT, backupDir: BACKUP_DIR_DEFAULT },
   lastBackup: settings.get('lastBackup'),
+  lastBackupError: settings.get('lastBackupError'),
   db: {
     host: dbConfig.host ?? '127.0.0.1',
     port: dbConfig.port ?? 5433,
@@ -606,8 +607,8 @@ async function todayEvents() {
 
 // ── 백업
 //
-// 데이터가 도커 볼륨 하나에만 있는 상태를 없앤다. 주간 리뷰를 만들 때 곁들여 돌리고
-// (그 주에 한 번은 반드시 남는다) 트레이에서 직접 돌릴 수도 있다.
+// 데이터가 도커 볼륨 하나에만 있는 상태를 없앤다. 하루 한 번 스스로 남기고,
+// 주간 리뷰를 만들 때도 곁들여 돌리며, 트레이에서 직접 돌릴 수도 있다.
 let backingUp = false;
 async function backupNow() {
   if (backingUp) return { ok: false, busy: true };
@@ -617,6 +618,7 @@ async function backupNow() {
     const dir = settings.get('backupDir') || BACKUP_DIR_DEFAULT;
     const file = writeBackup(dir, await db.exportAll());
     settings.set('lastBackup', new Date().toISOString());
+    settings.remove('lastBackupError'); // 지난 실패는 성공으로 지운다
     refreshTrayMenu();
     return { ok: true, file };
   } catch (err) {
@@ -627,6 +629,28 @@ async function backupNow() {
 }
 
 ipcMain.handle('backup:now', () => backupNow());
+
+// 하루 한 번. 알림 설정과 무관하게 돈다 — 백업은 아침 브리핑을 꺼둔 날에도 필요하다.
+// 판단은 main/backup.mjs의 backupDue (테스트 대상).
+async function maybeBackup() {
+  if (
+    !backupDue({ lastBackup: settings.get('lastBackup'), lastTry: settings.get('lastBackupTry') })
+  ) {
+    return;
+  }
+  if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 — 시도로 치지 않는다
+  const res = await backupNow();
+  if (res.ok || res.busy) return; // 성공은 조용히. lastBackup이 갱신돼 오늘 몫은 끝난다
+  const why = res.error ?? '원인 불명';
+  settings.set('lastBackupTry', dayKey()); // 실패한 날은 더 두드리지 않는다
+  settings.set('lastBackupError', why);
+  refreshTrayMenu();
+  // 백업만은 조용히 실패하면 안 된다 — 사본이 없다는 걸 모르는 채로 지내게 된다.
+  // 하루 한 번만 시도하므로 이 알림도 하루 한 번을 넘지 않는다.
+  if (Notification.isSupported()) {
+    new Notification({ title: 'WHENWORK 백업 실패', body: `${why} — 트레이에서 다시 시도할 수 있다` }).show();
+  }
+}
 
 // ── 아침 브리핑 (오픈이슈 #3). 판단은 main/brief.mjs (테스트 대상), 여기서는 알림만 띄운다.
 const BRIEFING_CHECK_MS = 60_000;
@@ -833,6 +857,7 @@ function refreshTrayMenu() {
   );
   const lastCollect = settings.get('lastCollect');
   const lastBackup = settings.get('lastBackup');
+  const backupError = settings.get('lastBackupError');
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '오늘 뷰', click: toggleToday },
@@ -869,7 +894,12 @@ function refreshTrayMenu() {
         enabled: false,
       },
       {
-        label: lastBackup ? `마지막 백업 ${new Date(lastBackup).toLocaleString('ko-KR')}` : '백업 이력 없음',
+        // 실패를 먼저 말한다 — 마지막 백업 시각만 보이면 그 뒤로 못 남긴 걸 알 수 없다
+        label: backupError
+          ? `백업 실패 — ${backupError}`
+          : lastBackup
+            ? `마지막 백업 ${new Date(lastBackup).toLocaleString('ko-KR')}`
+            : '백업 이력 없음',
         enabled: false,
       },
       { type: 'separator' },
@@ -1234,6 +1264,8 @@ app.whenReady().then(async () => {
     setTimeout(() => db.purgeDeleted(PURGE_DAYS).catch(() => {}), COLLECT_DELAY_MS);
     setTimeout(maybeBrief, COLLECT_DELAY_MS); // 켠 직후 한 번 (DB가 붙을 시간을 준다)
     setInterval(maybeBrief, BRIEFING_CHECK_MS);
+    setTimeout(maybeBackup, COLLECT_DELAY_MS); // 백업도 같은 박자로 — 시각은 따지지 않는다
+    setInterval(maybeBackup, BRIEFING_CHECK_MS);
     // 캘린더는 git보다 자주 바뀐다 — 6시간 주기와 따로 돈다
     setInterval(syncCalendarNow, CALENDAR_MS);
   }

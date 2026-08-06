@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { backupName, staleBackups, writeBackup } from '../main/backup.mjs';
+import { backupName, staleBackups, writeBackup, backupDue } from '../main/backup.mjs';
+import { schemaTables, EXPORT_TABLES } from '../main/db.mjs';
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'whenwork-b-'));
@@ -53,4 +54,48 @@ test('없는 폴더도 만들어서 쓴다', () => {
   const dir = path.join(tmpDir(), 'nested', 'backups');
   const file = writeBackup(dir, { item: [] });
   assert.ok(fs.existsSync(file));
+});
+
+// ── 하루 한 번 판단
+const NOW = new Date(2026, 7, 6, 14, 0);
+
+test('이력이 없으면 남긴다', () => {
+  assert.equal(backupDue({ now: NOW }), true);
+});
+
+test('오늘 이미 남겼으면 다시 남기지 않는다', () => {
+  assert.equal(backupDue({ lastBackup: new Date(2026, 7, 6, 9, 0).toISOString(), now: NOW }), false);
+});
+
+test('어제 남긴 것은 오늘 몫이 아니다', () => {
+  assert.equal(backupDue({ lastBackup: new Date(2026, 7, 5, 23, 59).toISOString(), now: NOW }), true);
+});
+
+test('24시간이 아니라 날짜가 기준이다', () => {
+  // 어젯밤 11시에 남겼어도 오늘 아침이면 새로 남긴다 — "하루 한 번"이 사람이 세는 방식이다
+  assert.equal(
+    backupDue({ lastBackup: new Date(2026, 7, 5, 23, 0).toISOString(), now: new Date(2026, 7, 6, 1, 0) }),
+    true
+  );
+});
+
+test('오늘 실패한 뒤에는 그날 다시 두드리지 않는다', () => {
+  assert.equal(backupDue({ lastTry: '2026-08-06', now: NOW }), false);
+  assert.equal(backupDue({ lastTry: '2026-08-05', now: NOW }), true); // 어제 실패는 오늘을 막지 않는다
+});
+
+test('시각 값이 깨졌으면 남기는 쪽으로 기운다', () => {
+  assert.equal(backupDue({ lastBackup: '어제쯤', now: NOW }), true);
+});
+
+// ── 백업 범위
+test('스키마의 모든 테이블이 백업에 담긴다', () => {
+  // cal_event가 실제로 빠져 있었다. 새 테이블을 만들고 EXPORT_TABLES를 잊으면 여기서 걸린다
+  assert.deepEqual([...EXPORT_TABLES].sort(), [...schemaTables()].sort());
+});
+
+test('백업 순서는 부모 테이블이 먼저다', () => {
+  // 되살릴 때 참조가 걸린다 — item은 project 뒤여야 한다
+  assert.ok(EXPORT_TABLES.indexOf('project') < EXPORT_TABLES.indexOf('item'));
+  assert.ok(EXPORT_TABLES.indexOf('project') < EXPORT_TABLES.indexOf('resume_card'));
 });

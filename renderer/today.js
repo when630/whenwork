@@ -837,7 +837,12 @@ function renderSettings() {
   backup.append(
     window.ICONS.context(),
     document.createTextNode(
-      cfg.lastBackup ? ` 마지막 백업 ${fmtWhen(cfg.lastBackup)} — 지금 백업 (B)` : ' 백업 이력 없음 — 지금 백업 (B)'
+      // 실패가 있으면 그것부터 — 마지막 성공 시각만 보이면 그 뒤로 못 남긴 걸 알 수 없다
+      cfg.lastBackupError
+        ? ` 백업 실패 — ${cfg.lastBackupError} — 다시 시도 (B)`
+        : cfg.lastBackup
+          ? ` 마지막 백업 ${fmtWhen(cfg.lastBackup)} — 지금 백업 (B)`
+          : ' 백업 이력 없음 — 지금 백업 (B)'
     )
   );
   backup.onclick = runBackup;

@@ -12,7 +12,7 @@
 
 ## 문서
 
-- [설계 v2.10](docs/01_설계.md) — 배경·아키텍처·설계 결정(D1~D7)·데이터 모델·마일스톤·UI 확정 사항·구현 현황
+- [설계 v2.12](docs/01_설계.md) — 배경·아키텍처·설계 결정(D1~D7)·데이터 모델·마일스톤·UI 확정 사항·구현 현황
 - [Apps Script 캘린더 스크립트](docs/apps-script-calendar.gs) — 캘린더 연동용 웹앱 (배포 방법이 주석에 있다)
 - [UI 목업 v0.2](docs/mockups/index.html) — 퀵캡처·오늘 뷰·재개 카드 정적 목업 (브라우저로 열기)
 
@@ -24,7 +24,7 @@ docker compose up -d   # PostgreSQL (localhost:5433) — 없어도 캡처는 동
 npm start
 ```
 
-설치본으로 쓰려면 `npm run build` → `dist/WHENWORK Setup <version>.exe`. 설치본은 로그인 시 자동 시작이 기본으로 켜진다(트레이에서 끌 수 있음).
+실사용은 **설치본**으로 한다: `npm run build` → `dist/WHENWORK Setup <version>.exe`(사일런트 설치는 `/S`). 자동 시작은 **설치본에서만** 걸린다 — 개발 실행의 `electron.exe` 경로를 로그인 항목에 박아봐야 쓸모없기 때문이다. 설치본과 개발 실행은 `app.setName('whenwork')`로 **같은 `userData`(큐·설정)를 공유**하고 단일 인스턴스 락을 나눠 갖는다. 그래서 코드를 고쳐 `npm start`로 확인하려면 **트레이에서 설치본을 먼저 종료**해야 하고, 확인이 끝나면 다시 빌드·설치해야 실사용에 반영된다.
 
 ### 조작
 
@@ -63,7 +63,7 @@ npm start
 
 캘린더는 [Apps Script 웹앱](docs/apps-script-calendar.gs)을 15분마다 긁어 `cal_event`에 캐시한다. 오늘 일정은 오늘 탭 맨 위에 타임라인으로 선다 — "지금"이 어디쯤인지 점선으로 표시되고, 지난 것은 흐리게, 진행 중인 것은 초록으로 강조된다. 아침 브리핑과 주간 리뷰 재료에도 들어간다. 회사 Workspace가 iCal 비공개 주소를 막아 이 경로를 쓰며, 공개 iCal과 달리 캘린더를 공개하지 않고도 제목까지 받는다. 웹앱 URL에는 토큰이 들어 있어 설정 화면에는 가린 값만 보인다.
 
-백업은 주간 리뷰를 만들 때 자동으로, 그리고 트레이·설정 탭에서 직접 돌릴 수 있다. `userData/backups`에 전체 테이블을 담은 JSON으로 쌓이고 최근 8개만 남는다 — 데이터가 도커 볼륨 하나에만 있는 상태를 없애기 위한 것이라 `pg_dump`나 docker에 기대지 않는다.
+백업은 **하루 한 번 스스로** 남고, 주간 리뷰를 만들 때도 곁들여 돌며, 트레이·설정 탭에서 직접 돌릴 수도 있다. `userData/backups`에 전체 테이블을 담은 JSON으로 쌓이고 최근 8개만 남는다 — 데이터가 도커 볼륨 하나에만 있는 상태를 없애기 위한 것이라 `pg_dump`나 docker에 기대지 않는다. 실패하면 알림 한 번을 띄우고 트레이·설정 화면에 마지막 성공 시각보다 실패 이유를 먼저 보여준다(그날은 다시 두드리지 않는다).
 
 본문 글꼴로 [Pretendard](https://github.com/orioncactus/pretendard)(OFL)를 `renderer/fonts`에 동봉한다 — 라이선스 전문은 `PretendardOFL.txt`.
 

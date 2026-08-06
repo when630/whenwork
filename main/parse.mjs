@@ -1,15 +1,29 @@
 // 입력 문자열 해석 — Electron 없이 검증할 수 있게 순수 함수로 둔다.
 
-// 캡처 끝에 붙인 #약어를 떼어낸다. 프로젝트 목록을 몰라도 되게 토큰만 뽑고,
+// 캡처의 #약어를 떼어낸다. 프로젝트 목록을 몰라도 되게 토큰만 뽑고,
 // 실제 프로젝트로 푸는 일은 DB가 살아난 뒤(플러시 시점)에 한다 — 캡처 경로는 DB를 모른다(D1).
+//
+// **앞뒤 어디든 받는다.** 끝만 받던 동안 "#gw 오늘 할일"처럼 앞에 치면 조용히 인박스로 갔다 —
+// 손이 먼저 가는 자리가 앞이라면 그쪽이 맞다. 앞을 열면 "#201 이슈 확인"처럼 번호를 앞에 쓰는
+// 습관과 부딪히지만, 어느 프로젝트도 가리키지 않는 토큰은 플러시 때 **원문 그대로** 되살아나므로
+// 잃는 것이 없다(insertCaptures).
+const TOKEN_END = /\s#([A-Za-z0-9_-]{1,16})$/;
+const TOKEN_HEAD = /^#([A-Za-z0-9_-]{1,16})\s/;
+
 export function parseCaptureToken(raw) {
   const text = String(raw ?? '').trim();
-  const m = text.match(/\s#([A-Za-z0-9_-]{1,16})$/);
-  if (!m) return { title: text, abbr: null };
-  const title = text.slice(0, m.index).trim();
-  // 본문이 통째로 날아가면(예: "#gw"만 입력) 토큰으로 보지 않는다
-  if (!title) return { title: text, abbr: null };
-  return { title, abbr: m[1] };
+  const end = text.match(TOKEN_END);
+  if (end) {
+    const title = text.slice(0, end.index).trim();
+    // 본문이 통째로 날아가면(예: "#gw"만 입력) 토큰으로 보지 않는다
+    return title ? { title, abbr: end[1] } : { title: text, abbr: null };
+  }
+  const head = text.match(TOKEN_HEAD);
+  if (head) {
+    const title = text.slice(head[0].length).trim();
+    return title ? { title, abbr: head[1] } : { title: text, abbr: null };
+  }
+  return { title: text, abbr: null };
 }
 
 function ymd(d) {

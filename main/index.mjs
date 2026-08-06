@@ -272,8 +272,15 @@ const SMOKE_PROBE = `(async () => {
 
 // 퀵캡처 렌더러 점검. 창 폭이 560px로 고정이라 힌트가 하나 늘면 안내가 조용히 잘리고,
 // `#약어` 피드백은 이 창에만 있으므로 실제로 쳐 보지 않으면 깨진 것을 알 수 없다.
-const CAPTURE_PROBE = `(() => {
+const CAPTURE_PROBE = `(async () => {
   const errors = [];
+  // 창을 만들자마자 보낸 push는 리스너가 없어 사라진다 — 렌더러가 직접 가져와야 한다.
+  // 가져오기는 비동기라 잠깐 기다려 준다(그래도 안 오면 그게 결함이다).
+  for (let i = 0; i < 30 && !projects.length; i++) await new Promise((r) => setTimeout(r, 50));
+  if (!projects.length) errors.push('약어 목록을 가져오지 못했다 (#약어가 통하지 않는 상태)');
+  if (document.getElementById('tokenHint').textContent === '#약어') {
+    errors.push('힌트가 실제 약어를 보여주지 않는다: ' + document.getElementById('tokenHint').textContent);
+  }
   const foot = document.querySelector('.foot');
   if (foot.scrollWidth > foot.clientWidth + 1) {
     errors.push('푸터가 폭을 넘었다: ' + foot.scrollWidth + ' > ' + foot.clientWidth);
@@ -286,6 +293,9 @@ const CAPTURE_PROBE = `(() => {
   };
   const hit = type('복사버튼 추가 #gw');
   if (hit.indexOf('GoWrite') < 0) errors.push('아는 약어인데 프로젝트를 알려주지 않았다: ' + hit);
+  // 앞에 치는 손도 받는다 (끝만 받던 동안 조용히 인박스로 갔다)
+  const head = type('#gw 복사버튼 추가');
+  if (head.indexOf('GoWrite') < 0) errors.push('앞에 붙인 약어를 알아보지 못했다: ' + head);
   const miss = type('복사버튼 추가 #gwx');
   if (miss.indexOf('없는 약어') < 0) errors.push('없는 약어를 알려주지 않았다: ' + miss);
   const none = type('복사버튼 추가');
@@ -741,16 +751,18 @@ async function refreshAbbrHints() {
   return abbrHints;
 }
 
+// 목록은 **렌더러가 가져가게** 한다(push 아님). 첫 핫키에서는 getCaptureWin()이 창을
+// 만드는 중이어서 곧바로 보낸 메시지를 받을 리스너가 아직 없다 — 그래서 앱 재시작 후
+// 첫 퀵캡처에서는 약어 목록이 영원히 비어 있었고 어떤 약어도 인식하지 못했다.
+ipcMain.handle('capture:projects', () => refreshAbbrHints());
+
 function showCapture() {
   trackForeground(); // 저장 시점에 기다리지 않게 미리
   const win = getCaptureWin();
   placeWindow(win, 'captureBounds', { centerY: false });
-  win.webContents.send('capture:reset', abbrHints); // 우선 캐시로 열고
+  win.webContents.send('capture:reset'); // 창이 이미 살아 있을 때만 뜻이 있다(갓 만든 창은 비어 있다)
   win.show();
   win.focus();
-  refreshAbbrHints().then((list) => {
-    if (!win.isDestroyed()) win.webContents.send('capture:projects', list); // 새 목록이 오면 갈아끼운다
-  });
 }
 
 function getTodayWin() {
@@ -901,6 +913,9 @@ ipcMain.handle('capture:save', async (_e, title) => {
     id: crypto.randomUUID(),
     title: text,
     abbr, // #약어 — 프로젝트로 푸는 건 플러시 시점(DB)에서
+    // 그 약어가 어느 프로젝트도 아니면 원문을 그대로 되살린다 — 앞에 붙은 "#201 이슈 확인"이
+    // 어순이 바뀐 채 남으면 안 된다
+    raw: abbr ? String(title).trim() : null,
     captured_at: new Date().toISOString(),
     context: fg ? { fg } : null,
   });

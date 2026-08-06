@@ -172,9 +172,10 @@ export function createDb(config = {}) {
         );
         projectId = rows[0]?.id ?? null;
       }
-      // 약어가 어느 프로젝트도 가리키지 않으면(오타) 토큰을 제목에 되돌린다 —
-      // 조용히 떼어내면 인박스에서 "왜 여기 있지"를 풀 단서가 사라진다
-      const title = e.abbr && !projectId ? `${e.title} #${e.abbr}` : e.title;
+      // 약어가 어느 프로젝트도 가리키지 않으면(오타·이슈 번호 등) 원문을 그대로 되살린다 —
+      // 조용히 떼어내면 인박스에서 "왜 여기 있지"를 풀 단서가 사라지고, 토큰이 앞에 있었다면
+      // 뒤에 붙여 되돌리는 것만으로는 어순이 바뀐다. raw가 없는 옛 큐 항목은 뒤에 붙인다.
+      const title = e.abbr && !projectId ? (e.raw ?? `${e.title} #${e.abbr}`) : e.title;
       await pool.query(
         `INSERT INTO item (id, project_id, kind, title, captured_at, source, context)
          VALUES ($1, $2, $3, $4, $5, 'manual', $6)

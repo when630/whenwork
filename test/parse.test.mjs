@@ -11,8 +11,18 @@ test('토큰이 없으면 제목 그대로', () => {
   assert.deepEqual(parseCaptureToken('그냥 할 일'), { title: '그냥 할 일', abbr: null });
 });
 
+test('앞에 붙은 #약어도 떼어낸다 — 손이 먼저 가는 자리가 앞이면 그쪽도 받는다', () => {
+  assert.deepEqual(parseCaptureToken('#gw 오늘 할일'), { title: '오늘 할일', abbr: 'gw' });
+});
+
+// 앞을 열면 이 습관과 부딪힌다. 다만 어느 프로젝트도 아닌 토큰은 플러시 때 원문(raw)이
+// 그대로 되살아나므로(insertCaptures) 제목을 잃지 않는다.
+test('앞의 이슈 번호도 일단 토큰으로 본다 — 못 풀면 원문이 되살아난다', () => {
+  assert.deepEqual(parseCaptureToken('#201 이슈 확인하기'), { title: '이슈 확인하기', abbr: '201' });
+});
+
 test('본문 중간의 #는 토큰이 아니다', () => {
-  assert.deepEqual(parseCaptureToken('#201 이슈 확인하기'), { title: '#201 이슈 확인하기', abbr: null });
+  assert.deepEqual(parseCaptureToken('이슈 #201 확인하기'), { title: '이슈 #201 확인하기', abbr: null });
 });
 
 test('토큰만 입력하면 본문으로 둔다', () => {

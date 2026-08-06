@@ -4,9 +4,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('whenwork', {
   // ── 퀵캡처
   save: (title) => ipcRenderer.invoke('capture:save', title),
-  // 열 때마다 초기화 — 프로젝트 약어 목록을 함께 받아 "#gw → GoWrite"를 그 자리에서 보여준다
-  onReset: (cb) => ipcRenderer.on('capture:reset', (_e, projects) => cb(projects)),
-  onProjects: (cb) => ipcRenderer.on('capture:projects', (_e, projects) => cb(projects)),
+  onReset: (cb) => ipcRenderer.on('capture:reset', () => cb()),
+  // 약어 목록은 렌더러가 직접 가져간다 — 갓 만든 창은 push를 받을 수 없다
+  projects: () => ipcRenderer.invoke('capture:projects'),
 
   // ── 오늘 뷰
   getState: () => ipcRenderer.invoke('today:getState'),

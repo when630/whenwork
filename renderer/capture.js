@@ -7,32 +7,48 @@ let sessionCount = 0; // 이번에 연달아 던진 개수
 let msgTimer = null;
 let projects = []; // [{ abbr, name }] — main이 열 때마다 내려준다
 
-window.whenwork.onReset((list) => {
-  if (Array.isArray(list)) projects = list;
+window.whenwork.onReset(() => {
   saving = false;
   sessionCount = 0;
   input.value = '';
   showDefaultMsg();
   input.focus();
+  loadProjects(); // 프로젝트·약어는 수시로 바뀐다 — 열 때마다 새로 가져온다
 });
 
-// 캐시로 먼저 열고 새 목록이 오면 갈아끼운다 (프로젝트·약어는 수시로 바뀐다)
-window.whenwork.onProjects((list) => {
-  if (Array.isArray(list)) projects = list;
-});
+// 약어 목록은 **가져온다**. main이 창을 만들자마자 보내면 리스너가 아직 없어 그 메시지가
+// 사라지고(앱 재시작 후 첫 퀵캡처가 그 경우다) 어떤 약어도 인식하지 못했다.
+async function loadProjects() {
+  const list = await window.whenwork.projects();
+  if (!Array.isArray(list)) return;
+  projects = list;
+  updateTokenHint();
+  showTokenMsg(); // 목록이 늦게 와도 이미 친 토큰을 그때 알아본다
+}
+
+// 힌트에 실제로 통하는 약어를 보여준다 — 「#약어」라고만 적어두면 그 글자를 그대로 치게 된다
+function updateTokenHint() {
+  const sample = projects.find((p) => p.abbr)?.abbr;
+  document.getElementById('tokenHint').textContent = sample ? `#${sample}` : '#약어';
+}
 
 // ── 끝의 #약어
 //
 // 약어를 타이핑하는 곳은 이 창뿐인데 확인할 화면은 여기서 볼 수 없다 — 그래서 치는 동안
 // 어느 프로젝트로 가는지(또는 그런 약어가 없다는 것을) 바로 보여준다.
 // 규칙은 main/parse.mjs의 parseCaptureToken과 같아야 한다: 여기서 알려주고 푸는 건 저쪽이다.
-const TOKEN_RE = /\s#([A-Za-z0-9_-]{1,16})$/;
+const TOKEN_END = /\s#([A-Za-z0-9_-]{1,16})$/;
+const TOKEN_HEAD = /^#([A-Za-z0-9_-]{1,16})\s/;
 
 function tokenOf(text) {
   const s = String(text ?? '');
-  const m = s.match(TOKEN_RE);
-  if (!m || !s.slice(0, m.index).trim()) return null; // 본문이 통째로 토큰이면 토큰으로 보지 않는다
-  const abbr = m[1];
+  const end = s.match(TOKEN_END);
+  const head = end ? null : s.match(TOKEN_HEAD);
+  // 본문이 통째로 토큰이면 토큰으로 보지 않는다
+  if (end && !s.slice(0, end.index).trim()) return null;
+  if (head && !s.slice(head[0].length).trim()) return null;
+  const abbr = (end ?? head)?.[1];
+  if (!abbr) return null;
   const hit = projects.find((p) => p.abbr && p.abbr.toLowerCase() === abbr.toLowerCase());
   return { abbr, project: hit ? hit.name : null };
 }
@@ -65,6 +81,7 @@ function showTokenMsg() {
 }
 
 showDefaultMsg();
+loadProjects();
 
 // 전역 단축키(Ctrl+Alt+Space)의 Space가 갓 포커스된 입력창으로 새어 들어온다.
 // 타이밍으로 거르면 놓치는 경우가 생기므로 **선두 공백 입력 자체를 금지**한다 —

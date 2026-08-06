@@ -59,8 +59,9 @@ const {
   elapsedDays,
   matches,
   todayGroups,
-  hhmm,
   eventState,
+  eventTime,
+  eventRelative,
   historyDays,
   dayLabel,
   settingDisplay,
@@ -748,12 +749,19 @@ function renderBody() {
   if (tab === 'today' && !filter) {
     const events = state.events ?? [];
     if (events.length) {
+      const done = events.filter((ev) => eventState(ev) === 'past').length;
       const strip = el('div', 'cal-strip');
+      const head = el('div', 'cal-head');
+      head.append(document.createTextNode('오늘 일정'));
+      head.append(el('span', 'n', done ? `${events.length}건 · ${done}건 지남` : `${events.length}건`));
+      strip.append(head);
       for (const ev of events) {
         const row = el('div', `cal ${eventState(ev)}`);
-        row.append(el('span', 'cal-t', ev.all_day ? '종일' : hhmm(ev.start_at)));
+        row.append(el('span', 'cal-t', eventTime(ev)));
         row.append(el('span', 'cal-title', ev.title));
         if (ev.location) row.append(el('span', 'cal-loc', ev.location));
+        const rel = eventRelative(ev);
+        if (rel) row.append(el('span', 'cal-rel', rel));
         strip.append(row);
       }
       body.append(strip);
@@ -1311,6 +1319,11 @@ document.addEventListener('keydown', async (e) => {
     }
   }
 });
+
+// "32분 뒤" 같은 말은 가만히 두면 틀어진다 — 오늘 탭을 보고 있는 동안만 1분마다 다시 그린다
+setInterval(() => {
+  if (view === 'list' && tab === 'today' && !dlgResolve && state?.events?.length) render();
+}, 60_000);
 
 window.whenwork.onRefresh(refresh);
 // 트레이에서 리뷰를 만들면 그 탭을 바로 열어준다

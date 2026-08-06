@@ -161,6 +161,43 @@ test('시각은 두 자리로 채운다', () => {
   assert.equal(VIEW.hhmm('깨진값'), '');
 });
 
+test('일정은 시작만이 아니라 끝나는 시각까지 보여준다', () => {
+  const ev = { start_at: new Date(2026, 7, 6, 14, 10), end_at: new Date(2026, 7, 6, 15, 10) };
+  assert.equal(VIEW.eventTime(ev), '14:10–15:10');
+  assert.equal(VIEW.eventTime({ all_day: true }), '종일');
+  // 길이가 0이면 굳이 같은 시각을 두 번 쓰지 않는다
+  assert.equal(VIEW.eventTime({ start_at: ev.start_at, end_at: ev.start_at }), '14:10');
+  assert.equal(VIEW.eventTime({ start_at: ev.start_at }), '14:10');
+});
+
+test('길이는 사람이 읽는 말로', () => {
+  assert.equal(VIEW.humanSpan(45), '45분');
+  assert.equal(VIEW.humanSpan(60), '1시간');
+  assert.equal(VIEW.humanSpan(130), '2시간 10분');
+  assert.equal(VIEW.humanSpan(0), null);
+  assert.equal(VIEW.humanSpan(-5), null);
+});
+
+test('앞으로의 일정은 시작까지, 진행 중이면 남은 시간을 말한다', () => {
+  const ev = { start_at: new Date(2026, 7, 6, 14, 0), end_at: new Date(2026, 7, 6, 15, 0) };
+  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 13, 30).getTime()), '30분 뒤');
+  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 14, 40).getTime()), '20분 남음');
+  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 11, 0).getTime()), '3시간 뒤');
+});
+
+test('지난 일정과 종일 일정에는 상대시간을 붙이지 않는다', () => {
+  const past = { start_at: new Date(2026, 7, 6, 10, 0), end_at: new Date(2026, 7, 6, 11, 0) };
+  assert.equal(VIEW.eventRelative(past, new Date(2026, 7, 6, 14, 0).getTime()), null);
+  assert.equal(VIEW.eventRelative({ all_day: true }, Date.now()), null);
+});
+
+test('막 시작하거나 막 끝나는 순간에도 말이 된다', () => {
+  const ev = { start_at: new Date(2026, 7, 6, 14, 0), end_at: new Date(2026, 7, 6, 15, 0) };
+  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 14, 0).getTime()), '1시간 남음');
+  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 14, 59, 45).getTime()), '곧 끝남');
+  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 13, 59, 45).getTime()), '곧 시작');
+});
+
 // ── 설정 표시
 test('빈 설정은 대신 쓰이는 값을 밝힌다', () => {
   const defaults = { notifyAt: '09:00', backupDir: 'C:/data/backups' };

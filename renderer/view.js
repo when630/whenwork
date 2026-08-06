@@ -96,6 +96,41 @@
     return 'next';
   }
 
+  // "14:10–15:10". 시작만 보여주면 회의가 언제 끝나는지 몰라 그 뒤에 뭘 넣을지 판단할 수 없다.
+  function eventTime(ev) {
+    if (ev.all_day) return '종일';
+    const start = ev.start_at ?? ev.start;
+    const end = ev.end_at ?? ev.end;
+    const a = hhmm(start);
+    const b = end ? hhmm(end) : '';
+    return b && b !== a ? `${a}–${b}` : a;
+  }
+
+  // 분 단위를 사람이 읽는 길이로. 0분이면 null (붙일 말이 없다)
+  function humanSpan(minutes) {
+    const m = Math.round(minutes);
+    if (m <= 0) return null;
+    if (m < 60) return `${m}분`;
+    const h = Math.floor(m / 60);
+    const rest = m % 60;
+    return rest ? `${h}시간 ${rest}분` : `${h}시간`;
+  }
+
+  // 지금 기준의 한마디 — 진행 중이면 남은 시간, 앞으로면 시작까지. 지난 것은 말이 없다.
+  // 이 값은 시간이 지나면 틀어지므로 화면 쪽에서 주기적으로 다시 그린다.
+  function eventRelative(ev, now = Date.now()) {
+    if (ev.all_day) return null;
+    const start = new Date(ev.start_at ?? ev.start).getTime();
+    const end = new Date(ev.end_at ?? ev.end ?? start).getTime();
+    if (end <= now) return null;
+    if (start <= now) {
+      const left = humanSpan((end - now) / 60000);
+      return left ? `${left} 남음` : '곧 끝남';
+    }
+    const until = humanSpan((start - now) / 60000);
+    return until ? `${until} 뒤` : '곧 시작';
+  }
+
   // 완료 항목과 커밋을 하루 단위로 묶는다 (최근 날짜부터)
   function historyDays(data) {
     const byDay = new Map();
@@ -140,6 +175,9 @@
     dayOf,
     hhmm,
     eventState,
+    eventTime,
+    eventRelative,
+    humanSpan,
     historyDays,
     dayLabel,
     settingDisplay,

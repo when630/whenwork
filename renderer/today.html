@@ -158,16 +158,27 @@
     background: var(--bg-raised); border: 1px solid var(--border);
     border-radius: var(--r-md); display: flex; flex-direction: column; gap: 2px;
   }
-  .cal { display: flex; gap: var(--sp-2); align-items: baseline; font-size: var(--fs-sm); }
+  .cal-head {
+    display: flex; align-items: center; gap: var(--sp-2);
+    font-size: 11px; color: var(--text-muted); letter-spacing: .08em; margin-bottom: 5px;
+  }
+  .cal-head .n { font-family: var(--font-mono); font-size: 10px; }
+  .cal { display: flex; gap: var(--sp-2); align-items: baseline; font-size: var(--fs-sm); padding: 2px 0; }
   .cal .cal-t {
-    flex: none; width: 44px; font-family: var(--font-mono);
-    font-size: var(--fs-xs); color: var(--accent);
+    flex: none; width: 94px; font-family: var(--font-mono);
+    font-size: var(--fs-xs); color: var(--accent); font-variant-numeric: tabular-nums;
   }
   .cal .cal-title { flex: 1; color: var(--text-primary); }
   .cal .cal-loc { flex: none; font-size: var(--fs-xs); color: var(--text-muted); }
-  .cal.past { opacity: .45; }
+  .cal .cal-rel {
+    flex: none; font-family: var(--font-mono); font-size: var(--fs-xs);
+    color: var(--text-muted); min-width: 74px; text-align: right;
+  }
+  .cal.past { opacity: .4; }
   .cal.past .cal-title { text-decoration: line-through; }
+  .cal.next .cal-rel { color: var(--accent); }
   .cal.live .cal-t, .cal.live .cal-title { color: var(--success); font-weight: 700; }
+  .cal.live .cal-rel { color: var(--success); }
   .cal.allday .cal-t { color: var(--text-muted); }
   /* 할 일이 없는 날에도 일정은 보인다 — 그때 빈 화면이 한 화면을 다 먹지 않게 */
   .cal-strip + .empty { height: auto; padding: 48px 0; }

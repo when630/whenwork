@@ -62,6 +62,19 @@ const SMOKE_PROBE = `(async () => {
     await new Promise((r) => setTimeout(r, 60));
   }
   await step('search', () => { openSearch(); closeSearch(false); });
+  // 캘린더가 붙지 않은 환경에서도 일정 띠 렌더 경로는 밟아 본다 (스모크는 빈 설정으로 돈다)
+  await step('cal-strip', () => {
+    if (!state || !state.online) return;
+    const now = Date.now();
+    state.events = [
+      { start_at: new Date(now - 7200000).toISOString(), end_at: new Date(now - 3600000).toISOString(), title: '지난 것', all_day: false },
+      { start_at: new Date(now - 600000).toISOString(), end_at: new Date(now + 600000).toISOString(), title: '진행 중', all_day: false, location: '회의실' },
+      { start_at: new Date(now + 3600000).toISOString(), end_at: new Date(now + 7200000).toISOString(), title: '앞으로', all_day: false },
+      { start_at: new Date(now).toISOString(), end_at: new Date(now).toISOString(), title: '종일 것', all_day: true },
+    ];
+    switchTab('today');
+    if (!document.querySelector('.cal-strip .cal')) throw new Error('일정 띠가 그려지지 않았다');
+  });
   await step('history', () => openHistory(7));
   await step('history:close', () => closeHistory());
   await new Promise((r) => setTimeout(r, 300));

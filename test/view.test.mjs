@@ -137,6 +137,30 @@ test('달을 넘는 어제도 어제로 본다', () => {
   assert.match(VIEW.dayLabel('2026-08-31', firstOfMonth), /\(어제\)$/);
 });
 
+// ── 일정
+test('일정은 지난 것·진행 중·앞으로를 가른다', () => {
+  const now = new Date(2026, 7, 6, 14, 30).getTime();
+  const ev = (h1, h2) => ({
+    start_at: new Date(2026, 7, 6, h1, 0),
+    end_at: new Date(2026, 7, 6, h2, 0),
+  });
+  assert.equal(VIEW.eventState(ev(10, 11), now), 'past');
+  assert.equal(VIEW.eventState(ev(14, 15), now), 'live');
+  assert.equal(VIEW.eventState(ev(16, 17), now), 'next');
+  assert.equal(VIEW.eventState({ all_day: true }, now), 'allday');
+});
+
+test('끝나는 순간은 이미 지난 것으로 본다', () => {
+  const now = new Date(2026, 7, 6, 15, 0).getTime();
+  const ev = { start_at: new Date(2026, 7, 6, 14, 0), end_at: new Date(2026, 7, 6, 15, 0) };
+  assert.equal(VIEW.eventState(ev, now), 'past');
+});
+
+test('시각은 두 자리로 채운다', () => {
+  assert.equal(VIEW.hhmm(new Date(2026, 7, 6, 9, 5)), '09:05');
+  assert.equal(VIEW.hhmm('깨진값'), '');
+});
+
 // ── 설정 표시
 test('빈 설정은 대신 쓰이는 값을 밝힌다', () => {
   const defaults = { notifyAt: '09:00', backupDir: 'C:/data/backups' };

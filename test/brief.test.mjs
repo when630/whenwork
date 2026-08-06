@@ -51,6 +51,21 @@ test('브리핑 문구는 급한 순서대로, 0인 항목은 빠진다', () => 
   assert.deepEqual(parts, ['지연 2건', '5일 넘게 기다림 1건', '인박스 3건']);
 });
 
+test('오늘 일정은 건수와 첫 시각을 함께 알린다', () => {
+  const events = [
+    { start_at: new Date(2026, 7, 6, 10, 0) },
+    { start_at: new Date(2026, 7, 6, 14, 10) },
+  ];
+  const parts = briefingLines({ overdue: 1 }, { events });
+  assert.deepEqual(parts, ['지연 1건', '일정 2건 (첫 일정 10:00)']);
+});
+
+test('일정만 있어도 알린다', () => {
+  assert.deepEqual(briefingLines({}, { events: [{ start_at: new Date(2026, 7, 6, 9, 5) }] }), [
+    '일정 1건 (첫 일정 09:05)',
+  ]);
+});
+
 test('챙길 게 없으면 빈 배열 — 호출부가 알림을 생략한다', () => {
   assert.deepEqual(briefingLines({ overdue: 0, due_today: 0, stale_waiting: 0, inbox: 0 }), []);
   assert.deepEqual(briefingLines({}), []);

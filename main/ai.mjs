@@ -151,6 +151,24 @@ export function buildWeeklyPrompt(range, material) {
     ? material.waiting.map((w) => `- ${w.title} → ${w.waiting_for ?? '(미지정)'}`).join('\n')
     : '- (없음)');
   lines.push('');
+  // 회의에 시간을 쓴 주는 커밋이 적은 게 정상이다 — 그 맥락 없이 보면 회고가 어긋난다
+  const events = material.events ?? [];
+  if (events.length) {
+    lines.push('## 이번 주 회의·일정');
+    lines.push(
+      events
+        .map((e) => {
+          const d = new Date(e.start_at);
+          const when = `${d.getMonth() + 1}/${d.getDate()}`;
+          const hm = e.all_day
+            ? '종일'
+            : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          return `- ${when} ${hm} ${e.title}`;
+        })
+        .join('\n')
+    );
+    lines.push('');
+  }
   lines.push('## 남은 할 일');
   lines.push(material.openTodos.length
     ? material.openTodos.slice(0, 20).map((t) => `- [${t.project ?? '미지정'}] ${t.title}`).join('\n')

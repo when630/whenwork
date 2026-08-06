@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('whenwork', {
   settingsPickFolder: (current) => ipcRenderer.invoke('settings:pickFolder', current),
   settingsOpenFile: () => ipcRenderer.invoke('settings:openFile'),
   backupNow: () => ipcRenderer.invoke('backup:now'),
+  calendarSync: () => ipcRenderer.invoke('calendar:sync'),
 
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),

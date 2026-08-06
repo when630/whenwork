@@ -152,6 +152,26 @@
   .proj-num { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); flex: none; width: 14px; text-align: right; margin-top: 3px; }
   .proj-repos { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 22px; font-family: var(--font-mono); }
 
+  /* ── 오늘 일정 (캘린더) — 항목이 아니라 그날의 배경이라 목록과 다른 결로 둔다 */
+  .cal-strip {
+    margin: 0 var(--sp-2) var(--sp-2); padding: var(--sp-2) var(--sp-3);
+    background: var(--bg-raised); border: 1px solid var(--border);
+    border-radius: var(--r-md); display: flex; flex-direction: column; gap: 2px;
+  }
+  .cal { display: flex; gap: var(--sp-2); align-items: baseline; font-size: var(--fs-sm); }
+  .cal .cal-t {
+    flex: none; width: 44px; font-family: var(--font-mono);
+    font-size: var(--fs-xs); color: var(--accent);
+  }
+  .cal .cal-title { flex: 1; color: var(--text-primary); }
+  .cal .cal-loc { flex: none; font-size: var(--fs-xs); color: var(--text-muted); }
+  .cal.past { opacity: .45; }
+  .cal.past .cal-title { text-decoration: line-through; }
+  .cal.live .cal-t, .cal.live .cal-title { color: var(--success); font-weight: 700; }
+  .cal.allday .cal-t { color: var(--text-muted); }
+  /* 할 일이 없는 날에도 일정은 보인다 — 그때 빈 화면이 한 화면을 다 먹지 않게 */
+  .cal-strip + .empty { height: auto; padding: 48px 0; }
+
   /* 설정 탭 */
   .set-val {
     flex: none; font-family: var(--font-mono); font-size: var(--fs-xs);

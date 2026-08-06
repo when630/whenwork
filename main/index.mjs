@@ -27,6 +27,7 @@ import { generateResumeCard, classifyInbox, generateWeeklyReview } from './ai.mj
 import { parseCaptureToken, parseDue, isoWeek, weekRange } from './parse.mjs';
 import { writeWeekly, weeklyPath, guessVaultRoot } from './vault.mjs';
 import { writeBackup } from './backup.mjs';
+import { syncCalendar, maskUrl, calendarRange } from './calendar.mjs';
 import {
   briefDecision,
   briefingLines,
@@ -132,6 +133,7 @@ async function collectAll() {
       await syncProjectIssues(db, p);
     }
     settings.set('lastCollect', new Date().toISOString());
+    await syncCalendarNow();
   } catch {
     // 수집 실패는 조용히 — 다음 주기에 다시 시도한다
   } finally {
@@ -229,12 +231,16 @@ ipcMain.handle('review:openFile', async (_e, file) => {
 //
 // DB가 꺼져 있어도 봐야 하는 화면이라(접속 정보 확인) DB 경로를 타지 않는다.
 // 앱에서 만지는 건 아래 네 개뿐이고, DB 접속은 settings.json을 직접 고쳐 재시작한다.
-const SETTING_KEYS = ['vaultRoot', 'backupDir', 'notifyEnabled', 'notifyAt'];
+const SETTING_KEYS = ['vaultRoot', 'backupDir', 'notifyEnabled', 'notifyAt', 'calendarUrl'];
 const BACKUP_DIR_DEFAULT = path.join(app.getPath('userData'), 'backups');
 
 ipcMain.handle('settings:get', () => ({
   ok: true,
-  values: Object.fromEntries(SETTING_KEYS.map((k) => [k, settings.get(k)])),
+  // 캘린더 URL에는 토큰이 박혀 있다 — 화면에는 가린 값만 내려보내고 원본은 main에만 둔다
+  values: Object.fromEntries(
+    SETTING_KEYS.map((k) => [k, k === 'calendarUrl' ? maskUrl(settings.get(k)) : settings.get(k)])
+  ),
+  calendar: { lastSync: settings.get('lastCalendarSync'), error: lastCalendarError },
   defaults: { notifyAt: NOTIFY_AT_DEFAULT, backupDir: BACKUP_DIR_DEFAULT },
   lastBackup: settings.get('lastBackup'),
   db: {
@@ -278,6 +284,46 @@ ipcMain.handle('settings:openFile', async () => {
   return { ok: !err };
 });
 
+// ── 캘린더 (오픈이슈 #6)
+//
+// Apps Script 웹앱을 주기적으로 긁어 DB에 캐시한다. 실패해도 캐시는 그대로 둬서
+// 네트워크가 끊긴 동안에도 오늘 일정은 계속 보인다. 마지막 오류는 설정 화면에 드러낸다.
+const CALENDAR_MS = 15 * 60 * 1000;
+let lastCalendarError = null;
+let syncingCalendar = false;
+
+async function syncCalendarNow() {
+  const url = settings.get('calendarUrl');
+  if (!url || syncingCalendar) return { ok: false, skipped: true };
+  syncingCalendar = true;
+  try {
+    if (!(await db.online().catch(() => false))) return { ok: false, error: 'DB가 꺼져 있습니다' };
+    const res = await syncCalendar(db, url);
+    lastCalendarError = null;
+    settings.set('lastCalendarSync', new Date().toISOString());
+    return res;
+  } catch (err) {
+    lastCalendarError = String(err?.message ?? err).slice(0, 200);
+    return { ok: false, error: lastCalendarError };
+  } finally {
+    syncingCalendar = false;
+  }
+}
+
+ipcMain.handle('calendar:sync', () => syncCalendarNow());
+
+// 오늘 0시부터 내일 0시까지 — 오늘 뷰가 쓰는 창
+async function todayEvents() {
+  if (!settings.get('calendarUrl')) return [];
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+  try {
+    return await db.getCalendar(base, new Date(base.getTime() + 86400000));
+  } catch {
+    return [];
+  }
+}
+
 // ── 백업
 //
 // 데이터가 도커 볼륨 하나에만 있는 상태를 없앤다. 주간 리뷰를 만들 때 곁들여 돌리고
@@ -320,7 +366,9 @@ async function maybeBrief() {
   }
   if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 다시 시도한다
   try {
-    const parts = briefingLines(await db.briefing(STALE_WAITING_DAYS));
+    const parts = briefingLines(await db.briefing(STALE_WAITING_DAYS), {
+      events: await todayEvents(),
+    });
     settings.set('lastBriefing', today);
     if (!parts.length) return; // 챙길 게 없으면 조용히
     const note = new Notification({ title: '오늘 WHENWORK', body: parts.join(' · ') });
@@ -569,7 +617,7 @@ ipcMain.handle('today:getState', async () => {
   if (!dbOnline) return { online: false, pending: queue.count() };
   await flush();
   const state = await db.getViewState();
-  return { online: true, pending: queue.count(), ...state };
+  return { online: true, pending: queue.count(), events: await todayEvents(), ...state };
 });
 
 ipcMain.handle('history:get', async (_e, days = 7) => {
@@ -761,6 +809,8 @@ app.whenReady().then(async () => {
     setTimeout(() => db.purgeDeleted(PURGE_DAYS).catch(() => {}), COLLECT_DELAY_MS);
     setTimeout(maybeBrief, COLLECT_DELAY_MS); // 켠 직후 한 번 (DB가 붙을 시간을 준다)
     setInterval(maybeBrief, BRIEFING_CHECK_MS);
+    // 캘린더는 git보다 자주 바뀐다 — 6시간 주기와 따로 돈다
+    setInterval(syncCalendarNow, CALENDAR_MS);
   }
 
   if (SMOKE) {

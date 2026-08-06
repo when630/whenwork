@@ -26,6 +26,12 @@ const SETTING_FIELDS = [
     hint: '오늘 마감·지연·오래 기다린 항목을 하루 한 번 알린다',
   },
   { key: 'notifyAt', label: '알림 시각', kind: 'time', hint: 'HH:MM' },
+  {
+    key: 'calendarUrl',
+    label: '캘린더 웹앱 URL',
+    kind: 'secret',
+    hint: 'Apps Script 웹앱 주소(토큰 포함). 비우면 캘린더를 쓰지 않는다',
+  },
 ];
 
 let state = null; // 마지막으로 받은 서버 상태
@@ -53,6 +59,8 @@ const {
   elapsedDays,
   matches,
   todayGroups,
+  hhmm,
+  eventState,
   historyDays,
   dayLabel,
   settingDisplay,
@@ -618,6 +626,22 @@ function renderSettings() {
   );
   backup.onclick = runBackup;
   dbSec.append(backup);
+  if (cfg.values.calendarUrl) {
+    const c = cfg.calendar ?? {};
+    const cal = el('div', 'rv-file');
+    cal.append(
+      window.ICONS.context(),
+      document.createTextNode(
+        c.error
+          ? ` 캘린더 오류 — ${c.error}`
+          : c.lastSync
+            ? ` 캘린더 동기화 ${fmtWhen(c.lastSync)} — 지금 동기화 (C)`
+            : ' 캘린더 아직 동기화 전 — 지금 동기화 (C)'
+      )
+    );
+    cal.onclick = runCalendarSync;
+    dbSec.append(cal);
+  }
   const open = el('div', 'rv-file');
   open.append(window.ICONS.context(), document.createTextNode(` ${cfg.file} — 열기`));
   open.onclick = () => window.whenwork.settingsOpenFile();
@@ -631,6 +655,16 @@ async function runBackup() {
   if (res.ok) toast(`백업 저장 — ${res.file}`);
   else toast(res.busy ? '이미 백업 중입니다' : `백업 실패 — ${res.error ?? '알 수 없는 오류'}`);
   return loadSettings();
+}
+
+async function runCalendarSync() {
+  toast('캘린더 동기화 중…', { spinner: true, holdMs: 0 });
+  const res = await window.whenwork.calendarSync();
+  if (res.ok) toast(`캘린더 — 일정 ${res.count}건`);
+  else if (res.skipped) toast('캘린더 URL이 설정되지 않았습니다');
+  else toast(`캘린더 실패 — ${res.error ?? '알 수 없는 오류'}`, { holdMs: 6000 });
+  await loadSettings();
+  return refresh();
 }
 
 async function loadSettings() {
@@ -650,6 +684,24 @@ async function editSetting(f) {
     await window.whenwork.settingsSet(f.key, res.path);
     toast(`${f.label} — ${res.path}`);
     return loadSettings();
+  }
+  if (f.kind === 'secret') {
+    // 화면에는 가린 값만 있으므로 편집이 아니라 새로 붙여넣는다 (빈 값이면 해제)
+    const url = await promptText(`${f.label} — 전체 주소를 붙여넣기 (비우면 사용 안 함)`, '');
+    if (url === null) return;
+    if (url && !/^https:\/\/script\.google\.com\//.test(url)) {
+      return toast('Apps Script 웹앱 주소(https://script.google.com/...)를 넣어주세요');
+    }
+    await window.whenwork.settingsSet(f.key, url || null);
+    await loadSettings();
+    if (!url) return toast(`${f.label} — 해제`);
+    toast('캘린더 확인 중…', { spinner: true, holdMs: 0 });
+    const res = await window.whenwork.calendarSync();
+    toast(res.ok ? `캘린더 연결됨 — 일정 ${res.count}건` : `캘린더 실패 — ${res.error ?? '알 수 없음'}`, {
+      holdMs: 6000,
+    });
+    await loadSettings();
+    return refresh();
   }
   const raw = await promptText(`${f.label} (${f.hint})`, cfg.values[f.key] ?? cfg.defaults?.notifyAt ?? '');
   if (raw === null) return;
@@ -690,6 +742,23 @@ function renderBody() {
 
   const list = currentList();
   sel = Math.min(sel, Math.max(0, list.length - 1));
+
+  // 오늘 일정은 항목이 아니라 배경이다 — 목록 위에 얇게 깔고, 검색 중에는 비켜준다.
+  // 할 일이 하나도 없는 날에도 일정은 보여야 하므로 빈 화면 분기보다 먼저 그린다.
+  if (tab === 'today' && !filter) {
+    const events = state.events ?? [];
+    if (events.length) {
+      const strip = el('div', 'cal-strip');
+      for (const ev of events) {
+        const row = el('div', `cal ${eventState(ev)}`);
+        row.append(el('span', 'cal-t', ev.all_day ? '종일' : hhmm(ev.start_at)));
+        row.append(el('span', 'cal-title', ev.title));
+        if (ev.location) row.append(el('span', 'cal-loc', ev.location));
+        strip.append(row);
+      }
+      body.append(strip);
+    }
+  }
 
   if (list.length === 0) {
     const e = el('div', 'empty');
@@ -807,6 +876,7 @@ function renderFooter() {
     add('Enter', '변경');
     add('X', '기본값으로');
     add('B', '지금 백업');
+    if (cfg?.values?.calendarUrl) add('C', '캘린더 동기화');
     add('O', 'settings.json');
     add('Esc', '닫기');
     return;
@@ -1048,7 +1118,7 @@ document.addEventListener('keydown', async (e) => {
   // 설정 탭
   if (tab === 'settings') {
     const f = SETTING_FIELDS[sel] ?? null;
-    if (['x', 'o', 'b'].includes(e.key.toLowerCase())) e.preventDefault();
+    if (['x', 'o', 'b', 'c'].includes(e.key.toLowerCase())) e.preventDefault();
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
@@ -1062,6 +1132,9 @@ document.addEventListener('keydown', async (e) => {
       case 'b':
       case 'B':
         return runBackup();
+      case 'c':
+      case 'C':
+        return runCalendarSync();
     }
     return;
   }

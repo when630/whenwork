@@ -75,6 +75,21 @@ ALTER TABLE issue ADD CONSTRAINT issue_relation_check
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_project_id_provider_number_key;
 CREATE UNIQUE INDEX IF NOT EXISTS issue_uniq ON issue (project_id, provider, kind, number);
 
+-- 캘린더 일정 캐시. 원본은 Google이고 우리는 읽기만 하므로 언제든 통째로 갈아끼울 수 있다.
+-- 캐시를 두는 이유는 네트워크가 끊겨도 오늘 일정은 보여야 하기 때문이다.
+-- 반복 일정은 회차마다 같은 uid로 오므로 시작 시각까지 묶어야 유일해진다.
+CREATE TABLE IF NOT EXISTS cal_event (
+  uid       text NOT NULL,
+  start_at  timestamptz NOT NULL,
+  end_at    timestamptz NOT NULL,
+  title     text NOT NULL,
+  location  text,
+  all_day   boolean NOT NULL DEFAULT false,
+  synced_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (uid, start_at)
+);
+CREATE INDEX IF NOT EXISTS cal_event_start ON cal_event (start_at);
+
 -- KPI 원장 (9절). 앱이 남기는 사용 흔적 — 지표 계산용이라 지워도 기능에는 영향 없다.
 CREATE TABLE IF NOT EXISTS event (
   id     bigserial PRIMARY KEY,
@@ -408,12 +423,58 @@ export function createDb(config = {}) {
        WHERE i.kind = 'todo' AND i.done_at IS NULL AND i.deleted_at IS NULL
        ORDER BY i.due NULLS LAST`
     );
+    // 그 주의 회의·일정. 회의가 많았던 주는 커밋이 적은 게 정상인데 그 맥락이 빠져 있었다.
+    const events = await pool.query(
+      `SELECT title, start_at, end_at, all_day FROM cal_event
+       WHERE start_at >= $1 AND start_at < $2 ORDER BY start_at`,
+      [from, to]
+    );
     return {
       done: done.rows,
       commits: commits.rows,
       waiting: waiting.rows,
       openTodos: openTodos.rows,
+      events: events.rows,
     };
+  }
+
+  // ── 캘린더
+  //
+  // 받아온 구간을 통째로 갈아끼운다(그 구간에서 지워진 일정도 사라져야 한다).
+  // 구간 밖의 캐시는 건드리지 않으므로 과거 기록은 남는다.
+  async function replaceCalendar(from, to, events) {
+    await ensureSchema();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM cal_event WHERE start_at >= $1 AND start_at < $2', [from, to]);
+      for (const e of events) {
+        await client.query(
+          `INSERT INTO cal_event (uid, start_at, end_at, title, location, all_day, synced_at)
+           VALUES ($1, $2, $3, $4, $5, $6, now())
+           ON CONFLICT (uid, start_at)
+           DO UPDATE SET end_at = $3, title = $4, location = $5, all_day = $6, synced_at = now()`,
+          [e.uid, e.start, e.end, e.title, e.location ?? null, !!e.allDay]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    return events.length;
+  }
+
+  async function getCalendar(from, to) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT uid, start_at, end_at, title, location, all_day, synced_at
+       FROM cal_event WHERE start_at >= $1 AND start_at < $2 ORDER BY start_at`,
+      [from, to]
+    );
+    return rows;
   }
 
   // 완료 기록 — 오늘 뷰는 12시간만 보여주므로 "어제 뭐 했지"를 볼 창구가 없었다.
@@ -523,6 +584,8 @@ export function createDb(config = {}) {
     logEvent,
     weeklyMaterial,
     getHistory,
+    replaceCalendar,
+    getCalendar,
     briefing,
     getReview,
     saveReview,

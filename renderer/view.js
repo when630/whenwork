@@ -80,6 +80,22 @@
     return ymd(new Date(ts));
   }
 
+  function hhmm(ts) {
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  // 일정의 지금 상태 — 지난 것은 흐리게, 진행 중인 것은 강조한다
+  function eventState(ev, now = Date.now()) {
+    if (ev.all_day) return 'allday';
+    const start = new Date(ev.start_at ?? ev.start).getTime();
+    const end = new Date(ev.end_at ?? ev.end ?? start).getTime();
+    if (end <= now) return 'past';
+    if (start <= now) return 'live';
+    return 'next';
+  }
+
   // 완료 항목과 커밋을 하루 단위로 묶는다 (최근 날짜부터)
   function historyDays(data) {
     const byDay = new Map();
@@ -108,6 +124,8 @@
     const v = values[field.key];
     if (field.kind === 'bool') return v === false ? '꺼짐' : '켜짐';
     if (field.kind === 'time') return v || `${defaults.notifyAt ?? '09:00'} (기본)`;
+    // 토큰이 박힌 값은 main에서 이미 가려서 내려온다 — 없으면 안 쓰는 상태다
+    if (field.kind === 'secret') return v || '미설정 — Enter로 붙여넣기';
     if (v) return v;
     if (field.key === 'backupDir') return `${defaults.backupDir ?? ''} (기본)`;
     return '미설정 — Enter로 폴더 선택';
@@ -120,6 +138,8 @@
     isUrgent,
     todayGroups,
     dayOf,
+    hhmm,
+    eventState,
     historyDays,
     dayLabel,
     settingDisplay,

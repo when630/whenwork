@@ -34,11 +34,22 @@ export function briefDecision({
   return mins > target + windowMin ? 'skip' : 'brief';
 }
 
-// 브리핑 한 줄. 급한 순서(지연 → 오늘 마감 → 오래된 대기 → 인박스)로 늘어놓는다.
-export function briefingLines(b = {}, { staleDays = STALE_WAITING_DAYS } = {}) {
+function hhmm(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// 브리핑 한 줄. 급한 순서로 늘어놓는다 —
+// 지연 → 오늘 마감 → 일정(시각이 박혀 있어 구속력이 크다) → 오래된 대기 → 인박스.
+export function briefingLines(b = {}, { staleDays = STALE_WAITING_DAYS, events = [] } = {}) {
   const parts = [];
   if (b.overdue) parts.push(`지연 ${b.overdue}건`);
   if (b.due_today) parts.push(`오늘 마감 ${b.due_today}건`);
+  if (events.length) {
+    const first = hhmm(events[0].start_at ?? events[0].start);
+    parts.push(`일정 ${events.length}건${first ? ` (첫 일정 ${first})` : ''}`);
+  }
   if (b.stale_waiting) parts.push(`${staleDays}일 넘게 기다림 ${b.stale_waiting}건`);
   if (b.inbox) parts.push(`인박스 ${b.inbox}건`);
   return parts;

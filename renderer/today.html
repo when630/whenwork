@@ -75,7 +75,6 @@
     font-size: var(--fs-xs); color: var(--text-muted);
   }
   .group-h::after { content: ""; flex: 1; height: 1px; background: var(--border); opacity: .6; }
-  .group-h .hot { color: var(--danger); font-weight: 700; letter-spacing: .02em; }
 
   /* ── 완료 기록 (H) */
   .hist-day {
@@ -152,36 +151,74 @@
   .proj-num { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); flex: none; width: 14px; text-align: right; margin-top: 3px; }
   .proj-repos { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 22px; font-family: var(--font-mono); }
 
-  /* ── 오늘 일정 (캘린더) — 항목이 아니라 그날의 배경이라 목록과 다른 결로 둔다 */
-  .cal-strip {
-    margin: 0 var(--sp-2) var(--sp-2); padding: var(--sp-2) var(--sp-3);
-    background: var(--bg-raised); border: 1px solid var(--border);
-    border-radius: var(--r-md); display: flex; flex-direction: column; gap: 2px;
+  /* ── 오늘 일정 타임라인
+     축(세로선)은 각 행이 자기 높이만큼 그려 이어 붙인다. 좌표를 소수점(50% - 0.5px)으로 두면
+     Windows 배율에서 행마다 반올림이 갈려 선이 두 줄로 어긋나므로 **정수 픽셀**로 고정한다.
+     --axis-x = 시각 칸(52) + 간격(8) + 점 중앙(4.5) − 선 두께 절반(0.5) */
+  .tl { --axis-x: 64px; margin: 0 var(--sp-2) var(--sp-2); }
+  .tl-row {
+    position: relative; display: flex; align-items: center;
+    gap: var(--sp-2); padding: 3px var(--sp-3) 3px 0;
   }
-  .cal-head {
-    display: flex; align-items: center; gap: var(--sp-2);
-    font-size: 11px; color: var(--text-muted); letter-spacing: .08em; margin-bottom: 5px;
+  .tl-row::before {
+    content: ""; position: absolute; left: var(--axis-x); top: 0; bottom: 0;
+    width: 1px; background: var(--border); z-index: 0;
   }
-  .cal-head .n { font-family: var(--font-mono); font-size: 10px; }
-  .cal { display: flex; gap: var(--sp-2); align-items: baseline; font-size: var(--fs-sm); padding: 2px 0; }
-  .cal .cal-t {
-    flex: none; width: 94px; font-family: var(--font-mono);
-    font-size: var(--fs-xs); color: var(--accent); font-variant-numeric: tabular-nums;
+  /* 축이 첫 점 위·마지막 점 아래로 삐져나오지 않게 반만 그린다 (점은 행 중앙에 있다) */
+  .tl-row:first-child::before { top: 50%; }
+  .tl-row:last-child::before { bottom: 50%; }
+  .tl-time {
+    flex: none; width: 52px; text-align: right;
+    font-family: var(--font-mono); font-size: var(--fs-xs);
+    color: var(--text-muted); font-variant-numeric: tabular-nums;
   }
-  .cal .cal-title { flex: 1; color: var(--text-primary); }
-  .cal .cal-loc { flex: none; font-size: var(--fs-xs); color: var(--text-muted); }
-  .cal .cal-rel {
+  .tl-dot { flex: none; width: 9px; height: 9px; position: relative; }
+  /* 점이 축 위에 얹혀 가운데를 가린다 */
+  .tl-dot::before {
+    content: ""; position: absolute; inset: 0; border-radius: 99px; z-index: 1;
+    background: var(--bg-app); border: 1.5px solid var(--text-muted);
+  }
+  .tl-title { flex: 1; font-size: var(--fs-sm); color: var(--text-primary); }
+  .tl-loc { color: var(--text-muted); font-size: var(--fs-xs); }
+  .tl-meta {
     flex: none; font-family: var(--font-mono); font-size: var(--fs-xs);
-    color: var(--text-muted); min-width: 74px; text-align: right;
+    color: var(--text-muted); font-variant-numeric: tabular-nums;
   }
-  .cal.past { opacity: .4; }
-  .cal.past .cal-title { text-decoration: line-through; }
-  .cal.next .cal-rel { color: var(--accent); }
-  .cal.live .cal-t, .cal.live .cal-title { color: var(--success); font-weight: 700; }
-  .cal.live .cal-rel { color: var(--success); }
-  .cal.allday .cal-t { color: var(--text-muted); }
+
+  /* 지난 것은 물러나고, 진행 중인 것만 채운 점으로 눈에 든다.
+     상태 클래스에 tl- 접두사가 붙는 이유: 이 CSS는 전역이라 .next 같은 이름은
+     이미 재개 카드의 "다음 액션" 박스가 쓰고 있다(붙이지 않으면 padding·배경이 딸려온다). */
+  .tl-row.tl-past { opacity: .4; }
+  .tl-row.tl-past .tl-title { text-decoration: line-through; }
+  .tl-row.tl-next .tl-dot::before { border-color: var(--accent); }
+  .tl-row.tl-next .tl-meta { color: var(--accent); }
+  .tl-row.tl-live .tl-dot::before { background: var(--success); border-color: var(--success); }
+  .tl-row.tl-live .tl-title { color: var(--success); font-weight: 700; }
+  .tl-row.tl-live .tl-meta { color: var(--success); }
+
+  /* "지금" 표시 — 축을 가로지르는 점선 */
+  .tl-row.tl-now .tl-time { color: var(--accent); }
+  .tl-row.tl-now .tl-dot::before { background: var(--accent); border-color: var(--accent); transform: scale(.6); }
+  .tl-nowline {
+    flex: 1; display: flex; align-items: center; gap: var(--sp-2);
+    font-size: 11px; color: var(--accent); letter-spacing: .06em;
+  }
+  .tl-nowline::before {
+    content: ""; flex: 1; height: 0; border-top: 1px dashed var(--accent); opacity: .45;
+  }
+
+  .tl-allday {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: 3px var(--sp-3) 3px 0; margin: 0 var(--sp-2);
+  }
+  .tl-allday .tl-time { color: var(--text-muted); }
+  .tl-allday .tl-title { font-size: var(--fs-sm); }
+
+  /* 일정 머리글은 프로젝트 그룹과 같은 칩 모양을 쓰되 색점이 없다 */
+  .group-h .cal-chip { color: var(--text-muted); }
+
   /* 할 일이 없는 날에도 일정은 보인다 — 그때 빈 화면이 한 화면을 다 먹지 않게 */
-  .cal-strip + .empty { height: auto; padding: 48px 0; }
+  .tl + .empty, .tl-allday + .empty { height: auto; padding: 48px 0; }
 
   /* 설정 탭 */
   .set-val {

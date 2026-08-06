@@ -51,18 +51,15 @@ test('대소문자를 가리지 않고, 빈 검색어는 모두 통과', () => {
 });
 
 // ── 오늘 탭 배치 (선택 인덱스와 그리는 순서가 어긋나면 엉뚱한 항목이 지워진다)
-test('지연·오늘 마감은 프로젝트 그룹보다 위에 따로 선다', () => {
+test('프로젝트별로만 묶는다 — 급한 것은 배지가 알린다', () => {
   const list = [
     todo({ id: 'a', project_id: 1, due: null }),
     todo({ id: 'b', project_id: 2, project_name: '나', due: '2026-08-05' }),
     todo({ id: 'c', project_id: 1, due: '2026-08-03' }),
-    todo({ id: 'd', project_id: 2, project_name: '나', due: null }),
   ];
-  const groups = VIEW.todayGroups(list, { now: NOW });
-  assert.equal(groups[0].key, 'urgent');
-  // 가장 오래 지난 것부터
-  assert.deepEqual(groups[0].items.map((i) => i.id), ['c', 'b']);
-  assert.deepEqual(groups.slice(1).map((g) => g.label), ['가', '나']);
+  const groups = VIEW.todayGroups(list);
+  assert.deepEqual(groups.map((g) => g.label), ['가', '나']);
+  assert.deepEqual(groups[0].items.map((i) => i.id), ['a', 'c']); // 들어온 순서 그대로
 });
 
 test('flat 순서가 그리는 순서와 같다 — 선택 인덱스의 근거', () => {
@@ -72,33 +69,81 @@ test('flat 순서가 그리는 순서와 같다 — 선택 인덱스의 근거',
     todo({ id: 'c', project_id: 2, project_name: '나' }),
     todo({ id: 'd', project_id: 1 }),
   ];
-  const groups = VIEW.todayGroups(list, { now: NOW });
-  const flat = groups.flatMap((g) => g.items).map((i) => i.id);
-  assert.deepEqual(flat, ['b', 'a', 'c', 'd']); // 급한 것 → 나(먼저 등장) → 가
-});
-
-test('급한 게 없으면 urgent 그룹을 만들지 않는다', () => {
-  const groups = VIEW.todayGroups([todo({ id: 'a' }), todo({ id: 'b' })], { now: NOW });
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].key, 'p1');
-});
-
-test('완료한 항목은 마감이 지났어도 급한 것으로 올리지 않는다', () => {
-  const list = [todo({ id: 'a', due: '2026-08-01', done_at: '2026-08-04T10:00:00Z' })];
-  const groups = VIEW.todayGroups(list, { now: NOW });
-  assert.equal(groups[0].key, 'p1');
+  const flat = VIEW.todayGroups(list).flatMap((g) => g.items).map((i) => i.id);
+  assert.deepEqual(flat, ['a', 'c', 'b', 'd']); // 나(먼저 등장) → 가
 });
 
 test('프로젝트 없는 항목은 미지정 그룹으로 모인다', () => {
   const list = [{ id: 'a', title: '무소속', project_id: null }, { id: 'b', title: '또', project_id: null }];
-  const groups = VIEW.todayGroups(list, { now: NOW });
+  const groups = VIEW.todayGroups(list);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].label, '미지정');
   assert.equal(groups[0].items.length, 2);
 });
 
 test('빈 목록이면 그룹도 없다', () => {
-  assert.deepEqual(VIEW.todayGroups([], { now: NOW }), []);
+  assert.deepEqual(VIEW.todayGroups([]), []);
+});
+
+// ── 타임라인
+const ev = (h1, h2, extra = {}) => ({
+  title: `${h1}시`,
+  start_at: new Date(2026, 7, 6, h1, 0),
+  end_at: new Date(2026, 7, 6, h2, 0),
+  ...extra,
+});
+
+test('"지금"은 아직 시작하지 않은 첫 일정 앞에 선다', () => {
+  const now = new Date(2026, 7, 6, 12, 0).getTime();
+  const { rows } = VIEW.timeline([ev(10, 11), ev(14, 15), ev(16, 17)], now);
+  assert.deepEqual(rows.map((r) => (r.type === 'now' ? '지금' : r.ev.title)), [
+    '10시',
+    '지금',
+    '14시',
+    '16시',
+  ]);
+});
+
+test('일정이 다 지났으면 "지금"이 축의 끝', () => {
+  const now = new Date(2026, 7, 6, 20, 0).getTime();
+  const { rows } = VIEW.timeline([ev(10, 11), ev(14, 15)], now);
+  assert.equal(rows[rows.length - 1].type, 'now');
+});
+
+test('아직 아무것도 시작 안 했으면 "지금"이 맨 위', () => {
+  const now = new Date(2026, 7, 6, 8, 0).getTime();
+  const { rows } = VIEW.timeline([ev(10, 11)], now);
+  assert.equal(rows[0].type, 'now');
+});
+
+test('진행 중인 일정 다음에 "지금"이 온다', () => {
+  const now = new Date(2026, 7, 6, 10, 30).getTime();
+  const { rows } = VIEW.timeline([ev(10, 11), ev(14, 15)], now);
+  assert.deepEqual(rows.map((r) => (r.type === 'now' ? '지금' : r.ev.title)), ['10시', '지금', '14시']);
+});
+
+test('종일 일정은 축에서 빼내 따로 준다', () => {
+  const allDayEv = { title: '휴가', all_day: true, start_at: new Date(2026, 7, 6) };
+  const { allDay, rows } = VIEW.timeline([allDayEv, ev(14, 15)], new Date(2026, 7, 6, 9).getTime());
+  assert.deepEqual(allDay.map((e) => e.title), ['휴가']);
+  assert.ok(!rows.some((r) => r.ev?.all_day));
+});
+
+test('종일 일정만 있으면 축을 그리지 않는다 — "지금"만 덜렁 남지 않게', () => {
+  const { allDay, rows } = VIEW.timeline([{ title: '휴가', all_day: true }], Date.now());
+  assert.equal(allDay.length, 1);
+  assert.deepEqual(rows, []);
+});
+
+test('시각 순서가 뒤섞여 들어와도 축은 시간순', () => {
+  const now = new Date(2026, 7, 6, 9, 0).getTime();
+  const { rows } = VIEW.timeline([ev(16, 17), ev(10, 11), ev(14, 15)], now);
+  assert.deepEqual(rows.filter((r) => r.type === 'event').map((r) => r.ev.title), ['10시', '14시', '16시']);
+});
+
+test('빈 입력에도 버틴다', () => {
+  assert.deepEqual(VIEW.timeline([], Date.now()), { allDay: [], rows: [] });
+  assert.deepEqual(VIEW.timeline(undefined, Date.now()), { allDay: [], rows: [] });
 });
 
 // ── 완료 기록

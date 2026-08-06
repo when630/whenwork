@@ -59,9 +59,11 @@ const {
   elapsedDays,
   matches,
   todayGroups,
+  hhmm,
   eventState,
   eventTime,
   eventRelative,
+  timeline,
   historyDays,
   dayLabel,
   settingDisplay,
@@ -749,22 +751,45 @@ function renderBody() {
   if (tab === 'today' && !filter) {
     const events = state.events ?? [];
     if (events.length) {
-      const done = events.filter((ev) => eventState(ev) === 'past').length;
-      const strip = el('div', 'cal-strip');
-      const head = el('div', 'cal-head');
-      head.append(document.createTextNode('오늘 일정'));
-      head.append(el('span', 'n', done ? `${events.length}건 · ${done}건 지남` : `${events.length}건`));
-      strip.append(head);
-      for (const ev of events) {
-        const row = el('div', `cal ${eventState(ev)}`);
-        row.append(el('span', 'cal-t', eventTime(ev)));
-        row.append(el('span', 'cal-title', ev.title));
-        if (ev.location) row.append(el('span', 'cal-loc', ev.location));
-        const rel = eventRelative(ev);
-        if (rel) row.append(el('span', 'cal-rel', rel));
-        strip.append(row);
+      // 할 일 그룹과 같은 머리글 모양을 쓴다 — 화면에 결이 하나만 남는다
+      const head = el('div', 'group-h');
+      head.append(el('span', 'chip cal-chip', '오늘 일정'));
+      body.append(head);
+
+      const { allDay, rows } = timeline(events);
+      // 종일 일정은 놓일 시각이 없어 축 위에 따로 세운다
+      for (const ev of allDay) {
+        const row = el('div', 'tl-allday');
+        row.append(el('span', 'tl-time', '종일'), el('span', 'tl-title', ev.title));
+        body.append(row);
       }
-      body.append(strip);
+
+      if (rows.length) {
+        const tl = el('div', 'tl');
+        for (const r of rows) {
+          if (r.type === 'now') {
+            const row = el('div', 'tl-row tl-now');
+            row.append(el('span', 'tl-time', hhmm(Date.now())), el('span', 'tl-dot'));
+            row.append(el('span', 'tl-nowline', '지금'));
+            tl.append(row);
+            continue;
+          }
+          const ev = r.ev;
+          // 상태 클래스에 tl- 접두사를 붙인다 — 이 CSS는 전역이라 next·past 같은 이름은
+          // 이미 다른 컴포넌트(재개 카드의 "다음 액션")가 쓰고 있어 그대로 쓰면 규칙이 겹친다
+          const row = el('div', 'tl-row tl-' + eventState(ev));
+          row.append(el('span', 'tl-time', eventTime(ev).split('–')[0]), el('span', 'tl-dot'));
+          const title = el('span', 'tl-title', ev.title);
+          if (ev.location) title.append(el('span', 'tl-loc', ` · ${ev.location}`));
+          row.append(title);
+          const meta = el('span', 'tl-meta');
+          const rel = eventRelative(ev);
+          meta.textContent = rel ? `${eventTime(ev)} · ${rel}` : eventTime(ev);
+          row.append(meta);
+          tl.append(row);
+        }
+        body.append(tl);
+      }
     }
   }
 
@@ -817,16 +842,12 @@ function renderBody() {
     // 그룹 구성은 todayView가 정한다 — currentList의 flat 순서와 같은 순서라 선택 인덱스가 맞는다
     let idx = 0;
     for (const g of todayView()) {
-      const h = el('div', 'group-h' + (g.key === 'urgent' ? ' urgent' : ''));
-      if (g.key === 'urgent') {
-        h.append(el('span', 'hot', g.label));
-      } else {
-        const chip = el('span', 'chip');
-        const dot = el('span', 'dot');
-        dot.style.background = projColor(g.pid);
-        chip.append(dot, document.createTextNode(g.label));
-        h.append(chip);
-      }
+      const h = el('div', 'group-h');
+      const chip = el('span', 'chip');
+      const dot = el('span', 'dot');
+      dot.style.background = projColor(g.pid);
+      chip.append(dot, document.createTextNode(g.label));
+      h.append(chip);
       body.append(h);
       for (const it of g.items) body.append(itemRow(it, idx++));
     }

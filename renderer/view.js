@@ -45,35 +45,52 @@
       .every((term) => hay.includes(term));
   }
 
-  // 지연·오늘 마감은 "지금 해야 하는 것"이다. 완료한 것은 급할 게 없다.
-  function isUrgent(it, now = new Date()) {
-    if (!it.due || it.done_at) return false;
-    const cls = dueBadge(it.due, now)?.cls;
-    return cls === 'over' || cls === 'today';
-  }
-
-  // 오늘 탭 배치 — [{ key, label, pid, items }].
+  // 오늘 탭 배치 — [{ key, label, pid, items }]. 프로젝트별로만 묶는다.
+  //
+  // 급한 것(지연·오늘 마감)을 맨 위 별도 그룹으로 뽑아봤지만, 같은 화면에 그룹 기준이
+  // 둘(급함/프로젝트)이 되면서 오히려 어수선했다. 급한 건 마감 배지(D+2·오늘)가 알려주고
+  // 그룹 안에서는 마감 빠른 순으로 서므로(getViewState의 ORDER BY) 위치로 또 표시할 필요가 없다.
+  //
   // 그리는 쪽과 선택 인덱스가 이 순서를 함께 쓰므로, 여기가 유일한 정렬 기준이어야 한다.
-  function todayGroups(list, { now = new Date() } = {}) {
-    const urgent = [];
-    const rest = [];
-    for (const it of list) (isUrgent(it, now) ? urgent : rest).push(it);
-
-    const groups = [];
-    if (urgent.length) {
-      urgent.sort((a, b) => String(a.due).localeCompare(String(b.due))); // 가장 오래 지난 것부터
-      groups.push({ key: 'urgent', label: '지금 — 지연 · 오늘 마감', items: urgent });
-    }
+  function todayGroups(list) {
     const byProject = new Map(); // 첫 등장 순서 = 그룹 순서
-    for (const it of rest) {
+    for (const it of list) {
       const pid = it.project_id ?? 0;
       if (!byProject.has(pid)) byProject.set(pid, []);
       byProject.get(pid).push(it);
     }
-    for (const [pid, items] of byProject) {
-      groups.push({ key: `p${pid}`, pid, label: items[0].project_name ?? '미지정', items });
+    return [...byProject].map(([pid, items]) => ({
+      key: `p${pid}`,
+      pid,
+      label: items[0].project_name ?? '미지정',
+      items,
+    }));
+  }
+
+  // 일정을 시간 축에 늘어놓고 "지금"이 어디쯤인지 끼워 넣는다.
+  // 종일 일정은 놓일 시각이 없으므로 축에서 빼내 위에 따로 세운다.
+  // 반환 순서가 곧 그리는 순서다 — 축 선이 이 순서를 따라 이어진다.
+  function timeline(events = [], now = Date.now()) {
+    const allDay = events.filter((e) => e.all_day);
+    const timed = events
+      .filter((e) => !e.all_day)
+      .slice()
+      .sort((a, b) => new Date(a.start_at ?? a.start) - new Date(b.start_at ?? b.start));
+    if (!timed.length) return { allDay, rows: [] };
+
+    const rows = [];
+    let placed = false;
+    for (const ev of timed) {
+      const start = new Date(ev.start_at ?? ev.start).getTime();
+      // 아직 시작하지 않은 첫 일정 앞이 "지금"의 자리다
+      if (!placed && start > now) {
+        rows.push({ type: 'now' });
+        placed = true;
+      }
+      rows.push({ type: 'event', ev });
     }
-    return groups;
+    if (!placed) rows.push({ type: 'now' }); // 남은 일정이 없으면 축의 끝
+    return { allDay, rows };
   }
 
   function dayOf(ts) {
@@ -170,7 +187,6 @@
     dueBadge,
     elapsedDays,
     matches,
-    isUrgent,
     todayGroups,
     dayOf,
     hhmm,
@@ -178,6 +194,7 @@
     eventTime,
     eventRelative,
     humanSpan,
+    timeline,
     historyDays,
     dayLabel,
     settingDisplay,

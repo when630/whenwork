@@ -50,6 +50,9 @@ const SMOKE = process.argv.includes('--smoke');
 
 // 스모크에서 렌더러 안에서 돌리는 점검. 탭을 한 바퀴 돌리고 검색·완료 기록까지 열어보므로
 // "특정 화면에서만 터지는" 오류도 앱을 눈으로 보지 않고 잡힌다.
+//
+// ※ 이 문자열은 템플릿 리터럴이다 — 안에서 `${...}`를 쓰면 렌더러가 아니라 **여기서** 보간되어
+//   ReferenceError로 모듈 초기화가 깨진다(앱이 뜨지 않고 매달린다). 문자열은 +로 잇는다.
 const SMOKE_PROBE = `(async () => {
   const errors = [];
   window.addEventListener('error', (e) => errors.push('error: ' + e.message));
@@ -73,7 +76,26 @@ const SMOKE_PROBE = `(async () => {
       { start_at: new Date(now).toISOString(), end_at: new Date(now).toISOString(), title: '종일 것', all_day: true },
     ];
     switchTab('today');
-    if (!document.querySelector('.cal-strip .cal')) throw new Error('일정 띠가 그려지지 않았다');
+    if (!document.querySelector('.tl .tl-row')) throw new Error('일정 타임라인이 그려지지 않았다');
+    if (!document.querySelector('.tl-row.tl-now')) throw new Error('"지금" 표시가 없다');
+    if (!document.querySelector('.tl-allday')) throw new Error('종일 일정이 그려지지 않았다');
+    // 축과 점이 어긋나는 건 눈으로만 보이고 단위 테스트로는 안 잡힌다 — 좌표를 직접 견준다
+    const geom = [...document.querySelectorAll('.tl-row')].map(function (r) {
+      const d = r.querySelector('.tl-dot').getBoundingClientRect();
+      const rowLeft = r.getBoundingClientRect().left;
+      return {
+        dot: d.left + d.width / 2 - rowLeft,
+        line: parseFloat(getComputedStyle(r, '::before').left) + 0.5,
+      };
+    });
+    for (const g of geom) {
+      if (!(Math.abs(g.dot - g.line) <= 0.5)) {
+        throw new Error('축이 점과 어긋난다: 점 ' + g.dot.toFixed(1) + ' vs 선 ' + g.line.toFixed(1));
+      }
+    }
+    if (new Set(geom.map(function (g) { return Math.round(g.dot * 10); })).size > 1) {
+      throw new Error('행마다 점 위치가 다르다: ' + geom.map(function (g) { return g.dot.toFixed(1); }).join(','));
+    }
   });
   await step('history', () => openHistory(7));
   await step('history:close', () => closeHistory());

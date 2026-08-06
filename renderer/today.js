@@ -56,7 +56,10 @@ const $ = (id) => document.getElementById(id);
 // 계산은 view.js에 있다 (DOM을 만지지 않는 부분 — 테스트 대상)
 const {
   dueBadge,
-  elapsedDays,
+  waitMeta,
+  issueBadge,
+  focusEvent,
+  captureContext,
   matches,
   todayGroups,
   hhmm,
@@ -319,7 +322,13 @@ function renderResume() {
   pname.append(dot, document.createTextNode(p.name));
   head.append(back, pname);
   const card = resume.data?.card;
-  if (card) head.append(el('span', 'gen-at', `✦ ${fmtWhen(card.generated_at)} 생성`));
+  if (card) {
+    const gen = el('span', 'gen-at', `✦ ${fmtWhen(card.generated_at)} 생성`);
+    // 카드를 만든 뒤로 쌓인 커밋 — 시각만 보고는 카드가 낡았는지 알 수 없다(R를 누를 근거)
+    const fresh = resume.data?.fresh ?? 0;
+    if (fresh) gen.append(el('span', 'stale-n', `이후 커밋 ${fresh}`));
+    head.append(gen);
+  }
   body.append(head);
 
   const rbody = el('div', 'rbody');
@@ -377,14 +386,17 @@ function renderResume() {
 
   // 3단: 내 이슈 (작성·할당)
   const issSec = el('div');
-  issSec.append(el('div', 'sec-h', '내 이슈·PR — 작성·할당·리뷰 요청 (Enter/O 브라우저)'));
+  issSec.append(el('div', 'sec-h', '내 이슈·PR — 작성·할당·리뷰 요청 (Enter/O 브라우저 · T 할 일로)'));
   const issues = data?.issues ?? [];
+  const promoted = new Set(data?.promoted ?? []);
   if (issues.length === 0) issSec.append(el('div', 'sync-note', '이슈·PR 없음 또는 동기화 전'));
   issues.forEach((i, idx) => {
     const row = el('div', 'issue' + (idx === resume.sel ? ' selected' : ''));
     row.append(el('span', 'st ' + i.state), el('span', 'prov', i.provider === 'github' ? 'GH' : 'GL'));
     if (i.kind === 'pr') row.append(el('span', 'kind', i.provider === 'gitlab' ? 'MR' : 'PR'));
     row.append(el('span', 'num', `#${i.number}`), el('span', 'tt', i.title));
+    // 이미 오늘 할 일로 세운 이슈 — 다시 T를 눌러도 두 줄이 되지 않는다는 표시
+    if (promoted.has(i.url)) row.append(el('span', 'asg todo', '할 일'));
     if (i.draft) row.append(el('span', 'asg draft', '초안'));
     if (i.relation === 'reviewer') row.append(el('span', 'asg rev', '리뷰'));
     else if (i.relation !== 'author') row.append(el('span', 'asg', '할당'));
@@ -412,10 +424,13 @@ async function openResume(projectId) {
   if (view !== 'resume' || resume.projectId !== projectId) return;
   if (synced.ok) resume.data = synced;
   render();
-  // 카드가 없거나 24시간 넘게 묵었으면 자동 재생성 (일 1회 정책).
+  // 카드가 없거나, 24시간 넘게 묵었고 **그 뒤로 새 커밋이 있으면** 자동 재생성.
+  // 커밋이 없으면 같은 자료로 같은 카드를 다시 만드는 것뿐이라 기다릴 값이 없다
+  // (main의 백그라운드 선갱신도 같은 기준을 쓴다 — 보통은 여기 오기 전에 이미 갱신돼 있다).
   // 방금 실패했다면(서버 혼잡 등) 쿨다운 동안은 자동으로 다시 매달리지 않는다 — R로 직접 재시도.
   const card = resume.data?.card;
-  const stale = !card || Date.now() - new Date(card.generated_at).getTime() > 24 * 3600 * 1000;
+  const aged = card && Date.now() - new Date(card.generated_at).getTime() > 24 * 3600 * 1000;
+  const stale = !card || (aged && (resume.data?.fresh ?? 0) > 0);
   const cooling = resume.data?.retryAfter && resume.data.retryAfter > Date.now();
   if (stale && !resume.generating && !cooling) await regenerate(projectId);
   else if (stale && cooling && !card) {
@@ -464,9 +479,19 @@ function itemRow(it, idx) {
   const row = el('div', 'item' + (idx === sel ? ' selected' : '') + (it.done_at ? ' done' : ''));
   row.append(el('div', 'cb'), el('div', 't', it.title));
   const badge = dueBadge(it.due);
-  if (badge) {
+  const isu = issueBadge(it);
+  if (badge || isu) {
     const meta = el('div', 'meta');
-    meta.append(el('span', 'due ' + badge.cls, badge.text));
+    if (badge) meta.append(el('span', 'due ' + badge.cls, badge.text));
+    // 이슈에서 세운 할 일 — 원본이 닫히면 여기서 알려주고, 완료는 Space로 사람이 찍는다
+    if (isu) {
+      const tag = el('span', 'isu ' + isu.cls, isu.text);
+      tag.onclick = (ev) => {
+        ev.stopPropagation();
+        window.whenwork.openUrl(it.issue_url);
+      };
+      meta.append(tag);
+    }
     row.append(meta);
   }
   if (tab === 'inbox') {
@@ -480,18 +505,20 @@ function itemRow(it, idx) {
       s.append(el('span', 'badge-ai', '✦ AI'), chip, el('span', 'act', 'Enter 확정'));
       row.append(s);
     }
-    if (it.context?.fg) {
+    const ctxText = captureContext(it);
+    if (ctxText) {
       const ctx = el('div', 'ctx');
-      ctx.append(window.ICONS.context(), document.createTextNode(` 캡처 당시: ${it.context.fg}`));
+      ctx.append(window.ICONS.context(), document.createTextNode(` ${ctxText}`));
       row.append(ctx);
     }
   }
   if (it.note) row.append(el('div', 'ctx', `↳ ${it.note}`));
   if (tab === 'waiting') {
-    const days = elapsedDays(it.captured_at);
+    const w = waitMeta(it);
     const meta = el('div', 'wait-meta');
     meta.append(document.createTextNode(`→ ${it.waiting_for || '(미지정)'} · `));
-    meta.append(el('span', 'elapsed' + (days >= 5 ? ' hot' : ''), `경과 ${days}일`));
+    meta.append(el('span', 'elapsed' + (w.hot ? ' hot' : ''), w.label));
+    if (w.nudges) meta.append(el('span', 'nudge-n', `재촉 ${w.nudges}회`));
     row.append(meta);
   }
   row.onclick = () => {
@@ -889,6 +916,7 @@ function renderFooter() {
   if (view === 'resume') {
     add('R', '다시 생성');
     add('Enter', '이슈 열기');
+    add('T', '할 일로');
     add('Esc', '뒤로');
     return;
   }
@@ -927,11 +955,14 @@ function renderFooter() {
     add('W', '대기');
   } else if (tab === 'waiting') {
     add('Space', '회신 옴');
+    add('P', '재촉함');
     add('N', '메모');
   } else {
     add('Space', '완료');
     add('D', '마감');
     add('F', dueOnly ? '전체' : '마감만');
+    // 후속을 붙일 회의가 실제로 있을 때만 — 일정 없는 날까지 힌트를 늘리지 않는다
+    if (focusEvent(state?.events ?? [])) add('M', '회의 후속');
     add('H', '기록');
   }
   add('E', '제목');
@@ -940,6 +971,30 @@ function renderFooter() {
   add('/', '검색');
   add('Enter', '재개 카드');
   add('Esc', filter ? '검색 해제' : '닫기');
+}
+
+// ── 회의 후속 캡처 (M)
+//
+// 회의는 할 일을 낳는데, 그것을 적을 유일하게 온전한 시점은 끝난 직후다.
+// 퀵캡처와 같은 방식으로 연달아 던지게 하고(빈 입력이면 끝), 회의 제목을 맥락으로 붙여
+// 인박스 AI 분류가 그걸 근거로 프로젝트를 고르게 한다.
+// 알림으로 부르지는 않는다 — 알림은 아침 브리핑 하나뿐이다(오픈이슈 #3).
+async function captureFollowUp() {
+  const ev = focusEvent(state?.events ?? []);
+  if (!ev) return toast('방금 끝났거나 진행 중인 일정이 없습니다');
+  let n = 0;
+  for (;;) {
+    const title = await promptText(
+      `"${clip(ev.title, 28)}" 후속 할 일${n ? ` — ${n}건 담음` : ''} (비우면 끝)`
+    );
+    if (!title) break;
+    const res = await window.whenwork.captureFollowUp(title, { title: ev.title });
+    if (!res.ok) break;
+    n++;
+  }
+  if (!n) return;
+  toast(`후속 ${n}건을 인박스에 담았습니다 — 인박스에서 A로 분류`);
+  return refresh();
 }
 
 // ── 동작
@@ -1071,6 +1126,24 @@ document.addEventListener('keydown', async (e) => {
       case 'O':
         if (issues[resume.sel]) window.whenwork.openUrl(issues[resume.sel].url);
         return;
+      case 't':
+      case 'T': {
+        // 이슈를 오늘 할 일로 세운다 — 열린 이슈가 재개 카드 안에만 있으면 오늘 뷰에서 놓친다
+        const i = issues[resume.sel];
+        if (!i) return;
+        e.preventDefault();
+        const res = await window.whenwork.promoteIssue(resume.projectId, { url: i.url, title: i.title });
+        if (!res.ok) return toast('할 일로 세우지 못했습니다');
+        toast(res.created ? `오늘 할 일로 — "${clip(i.title, 30)}"` : '이미 할 일로 서 있습니다');
+        if (res.created) {
+          const fresh = await window.whenwork.resumeGet(resume.projectId, false);
+          if (view === 'resume' && fresh.ok) {
+            resume.data = fresh;
+            render();
+          }
+        }
+        return;
+      }
     }
     return;
   }
@@ -1234,7 +1307,7 @@ document.addEventListener('keydown', async (e) => {
   // 항목 탭 (오늘·인박스·대기)
   const it = selectedItem();
   // 다이얼로그를 여는 키는 기본 동작을 먼저 끊는다 (그 글자가 입력창에 찍히지 않게)
-  if (['e', 'w', 'd', 'n'].includes(e.key.toLowerCase())) e.preventDefault();
+  if (['e', 'w', 'd', 'n', 'm'].includes(e.key.toLowerCase())) e.preventDefault();
   switch (e.key) {
     case 'Enter':
       // 인박스에서 AI 제안이 있으면 Enter가 곧 확정 — 없으면 재개 카드로
@@ -1297,6 +1370,25 @@ document.addEventListener('keydown', async (e) => {
       }
       return;
     }
+    case 'o':
+    case 'O':
+      // 이슈에서 세운 할 일은 원본으로 건너갈 수 있어야 한다 (재개 카드의 O와 같은 뜻)
+      if (it?.issue_url) window.whenwork.openUrl(it.issue_url);
+      return;
+    case 'm':
+    case 'M':
+      if (tab !== 'today') return;
+      return captureFollowUp();
+    case 'p':
+    case 'P': {
+      // 재촉 — 대기 탭에서만. 경과 시계가 지금부터 다시 돌아 브리핑도 그 기준으로 알린다
+      if (tab !== 'waiting' || !it) return;
+      e.preventDefault();
+      const res = await window.whenwork.nudge(it.id);
+      if (!res.ok) return toast('재촉을 기록하지 못했습니다');
+      toast(`재촉 ${res.count}회째 — "${clip(it.title)}" · 경과를 지금부터 다시 셉니다`);
+      return refresh();
+    }
     case 'h':
     case 'H':
       e.preventDefault();
@@ -1345,6 +1437,20 @@ document.addEventListener('keydown', async (e) => {
 setInterval(() => {
   if (view === 'list' && tab === 'today' && !dlgResolve && state?.events?.length) render();
 }, 60_000);
+
+// 백그라운드로 만들던 카드가 완성됐다 — 그 카드를 열어둔 채 스켈레톤을 보고 있었으면 채워준다.
+// 열람 수(KPI)는 늘리지 않는다(log=false).
+window.whenwork.onCardDone(async (projectId) => {
+  if (view !== 'resume' || resume?.projectId !== projectId) return;
+  const res = await window.whenwork.resumeGet(projectId, false);
+  if (view !== 'resume' || resume?.projectId !== projectId) return;
+  if (res.ok) {
+    resume.data = res;
+    resume.generating = !!res.generating;
+    resume.error = null;
+  }
+  render();
+});
 
 window.whenwork.onRefresh(refresh);
 // 트레이에서 리뷰를 만들면 그 탭을 바로 열어준다

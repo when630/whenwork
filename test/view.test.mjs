@@ -258,3 +258,86 @@ test('설정한 값이 있으면 그대로 보여준다', () => {
   assert.equal(VIEW.settingDisplay({ key: 'notifyEnabled', kind: 'bool' }, values), '꺼짐');
   assert.equal(VIEW.settingDisplay({ key: 'notifyEnabled', kind: 'bool' }, {}), '켜짐'); // 기본은 켜짐
 });
+
+// ── 대기 재촉 (재촉하면 경과 시계가 그때부터 다시 돈다)
+test('재촉 전에는 부탁한 날부터, 재촉 후에는 재촉한 날부터 센다', () => {
+  const now = new Date(2026, 7, 10).getTime();
+  const plain = VIEW.waitMeta({ captured_at: new Date(2026, 7, 3) }, now);
+  assert.equal(plain.label, '경과 7일');
+  assert.equal(plain.hot, true); // 5일 넘음
+  const nudged = VIEW.waitMeta(
+    { captured_at: new Date(2026, 7, 3), nudged_at: new Date(2026, 7, 9), nudge_count: 2 },
+    now
+  );
+  assert.equal(nudged.label, '재촉 후 1일');
+  assert.equal(nudged.hot, false); // 방금 찔렀으니 아직 급하지 않다
+  assert.equal(nudged.nudges, 2);
+});
+
+test('재촉 경계는 브리핑과 같은 5일이다', () => {
+  const now = new Date(2026, 7, 10).getTime();
+  assert.equal(VIEW.waitMeta({ captured_at: new Date(2026, 7, 5) }, now).hot, true); // 5일
+  assert.equal(VIEW.waitMeta({ captured_at: new Date(2026, 7, 6) }, now).hot, false); // 4일
+  assert.equal(VIEW.STALE_WAITING_DAYS, 5);
+});
+
+// ── 이슈에서 세운 할 일
+test('이슈 배지는 종류·번호를 달고, 닫히면 그 사실을 앞세운다', () => {
+  const base = { issue_url: 'https://x/1', issue_number: 12, issue_provider: 'github' };
+  assert.deepEqual(VIEW.issueBadge({ ...base, issue_state: 'open' }), { text: '이슈 #12', cls: '' });
+  assert.deepEqual(VIEW.issueBadge({ ...base, issue_state: 'closed' }), { text: '이슈 #12 닫힘', cls: 'closed' });
+  assert.deepEqual(VIEW.issueBadge({ ...base, issue_kind: 'pr', issue_state: 'merged' }), {
+    text: 'PR #12 머지됨',
+    cls: 'closed',
+  });
+  assert.equal(VIEW.issueBadge({ ...base, issue_kind: 'pr', issue_provider: 'gitlab', issue_state: 'open' }).text, 'MR #12');
+});
+
+test('이슈에서 온 것이 아니면 배지가 없다', () => {
+  assert.equal(VIEW.issueBadge({ title: '손으로 적은 일' }), null);
+  assert.equal(VIEW.issueBadge(null), null);
+});
+
+test('아직 동기화되지 않아 상태를 모르면 닫혔다고 하지 않는다', () => {
+  assert.deepEqual(VIEW.issueBadge({ issue_url: 'https://x/1', issue_number: 3 }), { text: '이슈 #3', cls: '' });
+});
+
+// ── 회의 후속 캡처가 붙을 일정 고르기
+const mtg = (h, m, endH, o = {}) => ({
+  start_at: new Date(2026, 7, 6, h, m),
+  end_at: new Date(2026, 7, 6, endH, m),
+  title: `${h}시 회의`,
+  ...o,
+});
+
+test('진행 중인 회의가 있으면 그것이 먼저다', () => {
+  const now = new Date(2026, 7, 6, 14, 30).getTime();
+  const picked = VIEW.focusEvent([mtg(10, 0, 11), mtg(14, 0, 15), mtg(16, 0, 17)], now);
+  assert.equal(picked.title, '14시 회의');
+});
+
+test('진행 중인 것이 없으면 가장 최근에 끝난 회의', () => {
+  const now = new Date(2026, 7, 6, 15, 30).getTime();
+  const picked = VIEW.focusEvent([mtg(10, 0, 11), mtg(14, 0, 15), mtg(16, 0, 17)], now);
+  assert.equal(picked.title, '14시 회의');
+});
+
+test('끝난 지 오래된 회의와 종일 일정은 고르지 않는다', () => {
+  const now = new Date(2026, 7, 6, 18, 0).getTime();
+  assert.equal(VIEW.focusEvent([mtg(10, 0, 11)], now), null); // 7시간 전
+  assert.equal(VIEW.focusEvent([{ ...mtg(9, 0, 10), all_day: true }], now), null);
+  assert.equal(VIEW.focusEvent([], now), null);
+});
+
+test('앞으로 있을 회의는 아직 후속을 낳지 않았다', () => {
+  const now = new Date(2026, 7, 6, 13, 0).getTime();
+  assert.equal(VIEW.focusEvent([mtg(14, 0, 15)], now), null);
+});
+
+// ── 캡처 맥락
+test('회의 후속은 창 제목보다 회의를 앞세운다', () => {
+  assert.equal(VIEW.captureContext({ context: { meeting: '주간회의', fg: 'Chrome' } }), '회의 후속: 주간회의');
+  assert.equal(VIEW.captureContext({ context: { fg: 'VS Code' } }), '캡처 당시: VS Code');
+  assert.equal(VIEW.captureContext({ context: null }), null);
+  assert.equal(VIEW.captureContext(undefined), null);
+});

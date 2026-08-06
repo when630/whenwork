@@ -16,8 +16,10 @@ contextBridge.exposeInMainWorld('whenwork', {
   rename: (id, title) => ipcRenderer.invoke('item:rename', id, title),
   setDue: (id, text) => ipcRenderer.invoke('item:due', id, text),
   setNote: (id, note) => ipcRenderer.invoke('item:note', id, note),
+  nudge: (id) => ipcRenderer.invoke('item:nudge', id),
   classifyInbox: () => ipcRenderer.invoke('inbox:classify'),
   historyGet: (days) => ipcRenderer.invoke('history:get', days),
+  captureFollowUp: (title, meeting) => ipcRenderer.invoke('capture:followUp', title, meeting),
   remove: (id) => ipcRenderer.invoke('item:remove', id),
   restore: (id) => ipcRenderer.invoke('item:restore', id),
 
@@ -29,10 +31,13 @@ contextBridge.exposeInMainWorld('whenwork', {
   projectMove: (id, dir) => ipcRenderer.invoke('project:move', id, dir),
 
   // ── 재개 카드 (M2)
-  resumeGet: (projectId) => ipcRenderer.invoke('resume:get', projectId),
+  resumeGet: (projectId, log) => ipcRenderer.invoke('resume:get', projectId, log),
   resumeSync: (projectId) => ipcRenderer.invoke('resume:sync', projectId),
   resumeGenerate: (projectId) => ipcRenderer.invoke('resume:generate', projectId),
+  // 백그라운드로 만들어진 카드가 완성됐다는 신호 (열어둔 채 기다리는 경우)
+  onCardDone: (cb) => ipcRenderer.on('card:done', (_e, projectId) => cb(projectId)),
   openUrl: (url) => ipcRenderer.send('open:url', url),
+  promoteIssue: (projectId, issue) => ipcRenderer.invoke('issue:promote', projectId, issue),
 
   // ── 주간 리뷰 (M3)
   reviewGet: (weekOffset) => ipcRenderer.invoke('review:get', weekOffset),

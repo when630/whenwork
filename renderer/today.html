@@ -119,6 +119,15 @@
   }
   .due.today { color: var(--warning); background: rgba(224,175,104,.1); }
   .due.over { color: var(--danger); background: rgba(247,118,142,.1); }
+  /* 이슈에서 세운 할 일 — 원본이 닫히면 색이 바뀌어 "이제 체크해도 된다"를 알린다 */
+  .isu {
+    font-size: 11px; font-family: var(--font-mono); cursor: pointer;
+    color: var(--text-secondary); background: var(--bg-inset);
+    border-radius: 99px; padding: 1px 8px;
+  }
+  .isu:hover { color: var(--accent); }
+  .isu.closed { color: var(--success); background: rgba(158,206,106,.12); }
+  .issue .asg.todo { color: var(--accent); background: var(--accent-dim); }
   .ctx, .wait-meta { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; }
   .suggest { display: flex; gap: 6px; align-items: center; width: 100%; margin-left: 23px; font-size: var(--fs-xs); }
   .suggest .act { color: var(--text-muted); }
@@ -138,6 +147,11 @@
   .toast .spin { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid var(--ai-dim); border-top-color: var(--ai); border-radius: 99px; animation: rot .8s linear infinite; vertical-align: -1px; }
   .elapsed { font-family: var(--font-mono); }
   .elapsed.hot { color: var(--danger); }
+  /* 재촉 횟수 — 같은 사람을 세 번 찌르고 있다는 사실이 경과일보다 중요할 때가 있다 */
+  .nudge-n {
+    margin-left: 8px; font-family: var(--font-mono); font-size: 10px;
+    color: var(--ai); background: var(--ai-dim); border-radius: 99px; padding: 1px 7px;
+  }
 
   .numlegend {
     margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-4) 0;
@@ -266,6 +280,12 @@
   .rhead .pname { font-weight: 700; font-size: var(--fs-lg); display: flex; align-items: center; gap: 9px; }
   .rhead .pname .dot { width: 9px; height: 9px; border-radius: 99px; }
   .rhead .gen-at { margin-left: auto; font-size: var(--fs-xs); color: var(--text-muted); }
+  /* 카드 생성 후 쌓인 커밋 수 — 카드가 낡았다는 유일한 객관적 신호다 */
+  .rhead .gen-at .stale-n {
+    margin-left: 8px; font-family: var(--font-mono);
+    color: var(--warning); background: rgba(224,175,104,.12);
+    border-radius: 99px; padding: 1px 8px;
+  }
   .rbody { display: flex; flex-direction: column; gap: var(--sp-4); }
   .badge-ai {
     display: inline-flex; align-items: center; gap: 4px;

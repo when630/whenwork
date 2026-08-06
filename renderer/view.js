@@ -30,6 +30,35 @@
     return Math.max(0, Math.floor((now - new Date(ts).getTime()) / DAY_MS));
   }
 
+  // 오래 기다린 것으로 치는 경계. main/brief.mjs의 STALE_WAITING_DAYS와 같은 값이어야
+  // 화면의 빨간 글씨와 아침 브리핑이 같은 항목을 가리킨다.
+  const STALE_WAITING_DAYS = 5;
+
+  // 대기 항목의 상태 한 줄. **재촉한 뒤로는 경과를 재촉 시점부터 다시 센다** —
+  // 처음 부탁한 날로만 세면 어제 재촉한 건과 열흘째 방치한 건이 같은 숫자로 보인다.
+  function waitMeta(it, now = Date.now()) {
+    const nudged = it.nudged_at ?? null;
+    const days = elapsedDays(nudged ?? it.captured_at, now);
+    return {
+      days,
+      nudges: Number(it.nudge_count ?? 0),
+      hot: days >= STALE_WAITING_DAYS,
+      label: nudged ? `재촉 후 ${days}일` : `경과 ${days}일`,
+    };
+  }
+
+  // 이슈에서 세운 할 일에 붙는 표식. 원본이 닫혔으면 그 사실이 가장 중요하다 —
+  // 다만 알리기만 하고 완료 처리는 사람이 한다. 앱이 대신 체크하기 시작하면
+  // item이 더 이상 "사람 입력이 원본"(6절)이 아니게 된다.
+  function issueBadge(it) {
+    if (!it?.issue_url) return null;
+    const kind = it.issue_kind === 'pr' ? (it.issue_provider === 'gitlab' ? 'MR' : 'PR') : '이슈';
+    const head = [kind, it.issue_number ? `#${it.issue_number}` : ''].filter(Boolean).join(' ');
+    if (it.issue_state === 'merged') return { text: `${head} 머지됨`, cls: 'closed' };
+    if (it.issue_state && it.issue_state !== 'open') return { text: `${head} 닫힘`, cls: 'closed' };
+    return { text: head, cls: '' };
+  }
+
   // 검색은 눈에 보이는 글자 전부를 훑는다 — 제목만 보면 "누구를 기다리는 것"을 찾을 수 없다.
   // 낱말이 여럿이면 모두 포함해야 한다(AND).
   function matches(row, q) {
@@ -91,6 +120,31 @@
     }
     if (!placed) rows.push({ type: 'now' }); // 남은 일정이 없으면 축의 끝
     return { allDay, rows };
+  }
+
+  // "방금 그 회의" — 후속 할 일을 붙일 일정을 고른다.
+  // 진행 중인 것이 우선이고, 없으면 가장 최근에 끝난 것. 끝난 지 오래됐으면(cutoffMin)
+  // 후속을 적을 시점이 지난 것이라 고르지 않는다. 종일 일정은 후속을 낳는 자리가 아니다.
+  function focusEvent(events = [], now = Date.now(), cutoffMin = 180) {
+    const at = (e, key) => new Date(e[`${key}_at`] ?? e[key] ?? e.start_at ?? e.start).getTime();
+    const timed = events.filter((e) => !e.all_day);
+    const live = timed.find((e) => at(e, 'start') <= now && at(e, 'end') > now);
+    if (live) return live;
+    let best = null;
+    for (const e of timed) {
+      const end = at(e, 'end');
+      if (end > now || now - end > cutoffMin * 60000) continue;
+      if (!best || end > at(best, 'end')) best = e;
+    }
+    return best;
+  }
+
+  // 캡처 당시의 맥락 한 줄. 회의 후속으로 담은 것은 그 회의를 밝힌다 —
+  // 인박스를 정리할 때 "이게 왜 여기 있지"를 푸는 유일한 단서다.
+  function captureContext(it) {
+    if (it?.context?.meeting) return `회의 후속: ${it.context.meeting}`;
+    if (it?.context?.fg) return `캡처 당시: ${it.context.fg}`;
+    return null;
   }
 
   function dayOf(ts) {
@@ -186,6 +240,11 @@
   root.VIEW = {
     dueBadge,
     elapsedDays,
+    waitMeta,
+    issueBadge,
+    focusEvent,
+    captureContext,
+    STALE_WAITING_DAYS,
     matches,
     todayGroups,
     dayOf,

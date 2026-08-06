@@ -62,6 +62,20 @@ ALTER TABLE item ADD COLUMN IF NOT EXISTS note text;
 -- 되돌릴 수 있는 창(PURGE_DAYS)이 지나면 물리 삭제한다.
 ALTER TABLE item ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 
+-- 대기(waiting-for)는 "기다리는 중"에서 멈추면 추적만 하고 아무 일도 일어나지 않는다.
+-- 재촉한 시점을 남겨 경과 시계를 그때부터 다시 세고, 횟수도 남긴다 —
+-- 세 번 재촉해도 회신이 없으면 기다리기를 접거나 다른 경로로 가야 한다는 판단 재료다.
+ALTER TABLE item ADD COLUMN IF NOT EXISTS nudged_at timestamptz;
+ALTER TABLE item ADD COLUMN IF NOT EXISTS nudge_count int NOT NULL DEFAULT 0;
+
+-- 이슈 트래커의 할 일과 로컬 todo는 따로 산다 — 열린 이슈가 오늘 뷰에 서지 않으면
+-- "오늘 무엇을 하나"를 두 곳에서 봐야 한다. 승격한 todo는 원본 URL만 들고 있을 뿐이고
+-- 이슈 자체는 여전히 읽기 전용 캐시다(D7) — 앱이 이슈를 고치는 일은 없다.
+ALTER TABLE item ADD COLUMN IF NOT EXISTS issue_url text;
+-- 같은 이슈를 두 번 세우지 않는다. 지웠거나 이미 끝낸 것은 다시 세울 수 있게 조건을 건다.
+CREATE UNIQUE INDEX IF NOT EXISTS item_issue_uniq ON item (issue_url)
+  WHERE issue_url IS NOT NULL AND deleted_at IS NULL AND done_at IS NULL;
+
 -- issue 테이블은 PR/MR까지 담는다. GitHub는 이슈와 PR이 번호를 공유하지만 GitLab의
 -- issue iid와 MR iid는 별개 공간이라 kind 없이는 서로를 덮어쓴다 — 유일성을 kind까지 넣어 다시 잡는다.
 ALTER TABLE issue ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'issue';
@@ -276,6 +290,34 @@ export function createDb(config = {}) {
     return rows;
   }
 
+  // 이슈를 로컬 todo로 세운다. 원본은 손대지 않고 URL만 들고 있는다(D7).
+  // 이미 서 있으면 만들지 않고 그 사실만 알린다 — 같은 일이 오늘 뷰에 두 줄로 서면 안 된다.
+  async function promoteIssue(projectId, { url, title }) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      'SELECT id FROM item WHERE issue_url = $1 AND deleted_at IS NULL AND done_at IS NULL',
+      [url]
+    );
+    if (rows.length) return { created: false };
+    await pool.query(
+      `INSERT INTO item (id, project_id, kind, title, captured_at, source, issue_url)
+       VALUES (gen_random_uuid(), $1, 'todo', $2, now(), 'issue', $3)`,
+      [projectId, title, url]
+    );
+    return { created: true };
+  }
+
+  // 이미 todo로 서 있는 이슈들 — 재개 카드에서 「할 일」 표식을 붙이는 데 쓴다
+  async function promotedIssueUrls(projectId) {
+    const { rows } = await pool.query(
+      `SELECT issue_url FROM item
+        WHERE project_id = $1 AND issue_url IS NOT NULL
+          AND deleted_at IS NULL AND done_at IS NULL`,
+      [projectId]
+    );
+    return rows.map((r) => r.issue_url);
+  }
+
   async function getDoneItems(projectId, days = 7) {
     const { rows } = await pool.query(
       `SELECT title, done_at FROM item
@@ -295,6 +337,36 @@ export function createDb(config = {}) {
     return rows[0] ?? null;
   }
 
+  // 카드를 만든 뒤로 새로 들어온 커밋 수. 0이면 근거 자료가 그대로라 다시 만들어도 같은 카드가 나온다 —
+  // 화면의 신선도 표시와 백그라운드 갱신 판단이 같은 값을 본다.
+  async function newActivityCount(projectId, since) {
+    if (!since) return 0;
+    const { rows } = await pool.query(
+      'SELECT count(*) FROM activity WHERE project_id = $1 AND occurred_at > $2',
+      [projectId, since]
+    );
+    return Number(rows[0].count);
+  }
+
+  // 백그라운드로 미리 만들어 둘 카드의 대상 — 카드가 묵었고(staleHours) 그 뒤로 커밋이 들어온 프로젝트.
+  // 커밋이 없으면 제외하는 이유는 두 가지다: 같은 자료로 같은 카드를 다시 만드는 낭비이고,
+  // `claude -p`가 구독 한도를 공유하기 때문이다(오픈이슈 #4).
+  async function projectsNeedingCard(staleHours = 24) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT p.id, p.name, c.generated_at,
+              (SELECT count(*) FROM activity a
+                WHERE a.project_id = p.id
+                  AND (c.generated_at IS NULL OR a.occurred_at > c.generated_at)) AS fresh
+         FROM project p LEFT JOIN resume_card c ON c.project_id = p.id
+        WHERE p.status = 'active'
+          AND (c.generated_at IS NULL OR c.generated_at < now() - ($1 || ' hours')::interval)
+        ORDER BY p.sort, p.id`,
+      [String(staleHours)]
+    );
+    return rows.filter((r) => Number(r.fresh) > 0).map((r) => ({ ...r, fresh: Number(r.fresh) }));
+  }
+
   async function saveResumeCard(projectId, card) {
     await pool.query(
       `INSERT INTO resume_card (project_id, last_work, stuck_point, next_action, generated_at)
@@ -311,10 +383,16 @@ export function createDb(config = {}) {
     const items = await pool.query(
       `SELECT i.id, i.project_id, p.name AS project_name, i.kind, i.title, i.due,
               i.waiting_for, i.captured_at, i.done_at, i.context, i.note,
-              i.suggested_project_id, s.name AS suggested_project_name
+              i.nudged_at, i.nudge_count, i.issue_url,
+              i.suggested_project_id, s.name AS suggested_project_name,
+              -- 승격한 이슈가 그 사이 닫혔으면 화면에서 알려준다(자동 완료하지는 않는다 —
+              -- item은 사람 입력이 원본이라 앱이 대신 체크하지 않는다)
+              iss.state AS issue_state, iss.number AS issue_number,
+              iss.provider AS issue_provider, iss.kind AS issue_kind
        FROM item i
        LEFT JOIN project p ON p.id = i.project_id
        LEFT JOIN project s ON s.id = i.suggested_project_id
+       LEFT JOIN issue iss ON iss.url = i.issue_url
        WHERE i.deleted_at IS NULL
          AND (i.done_at IS NULL OR i.done_at > now() - interval '12 hours')
        ORDER BY i.due NULLS LAST, i.captured_at`
@@ -344,6 +422,15 @@ export function createDb(config = {}) {
 
   async function setDue(id, due) {
     await pool.query('UPDATE item SET due = $2 WHERE id = $1', [id, due]);
+  }
+
+  // 재촉 기록 — 경과 시계를 지금부터 다시 센다. 돌려주는 횟수는 화면 알림에 쓴다.
+  async function nudgeItem(id) {
+    const { rows } = await pool.query(
+      'UPDATE item SET nudged_at = now(), nudge_count = nudge_count + 1 WHERE id = $1 RETURNING nudge_count',
+      [id]
+    );
+    return rows[0]?.nudge_count ?? 0;
   }
 
   async function setNote(id, note) {
@@ -412,7 +499,7 @@ export function createDb(config = {}) {
       [from, to]
     );
     const waiting = await pool.query(
-      `SELECT p.name AS project, i.title, i.waiting_for, i.captured_at
+      `SELECT p.name AS project, i.title, i.waiting_for, i.captured_at, i.nudged_at, i.nudge_count
        FROM item i LEFT JOIN project p ON p.id = i.project_id
        WHERE i.kind = 'waiting' AND i.done_at IS NULL AND i.deleted_at IS NULL
        ORDER BY i.captured_at`
@@ -429,12 +516,30 @@ export function createDb(config = {}) {
        WHERE start_at >= $1 AND start_at < $2 ORDER BY start_at`,
       [from, to]
     );
+    // 그 주의 숫자. KPI(9절)가 event·item에 쌓이기만 하고 볼 창구가 없었다 —
+    // 화면을 따로 만들지 않고 회고할 때 한 줄로 보이게 한다.
+    const stats = await pool.query(
+      `SELECT
+         (SELECT count(*) FROM item
+           WHERE deleted_at IS NULL AND captured_at >= $1 AND captured_at < $2) AS captured,
+         (SELECT count(*) FROM item
+           WHERE deleted_at IS NULL AND done_at >= $1 AND done_at < $2) AS done,
+         (SELECT count(*) FROM activity WHERE occurred_at >= $1 AND occurred_at < $2) AS commits,
+         (SELECT count(*) FROM event
+           WHERE kind = 'resume_open' AND at >= $1 AND at < $2) AS resume_open,
+         (SELECT count(*) FROM event
+           WHERE kind = 'project_switch' AND at >= $1 AND at < $2) AS switches,
+         (SELECT coalesce(sum(extract(epoch FROM (end_at - start_at))) / 3600, 0) FROM cal_event
+           WHERE all_day = false AND start_at >= $1 AND start_at < $2) AS meeting_hours`,
+      [from, to]
+    );
     return {
       done: done.rows,
       commits: commits.rows,
       waiting: waiting.rows,
       openTodos: openTodos.rows,
       events: events.rows,
+      stats: Object.fromEntries(Object.entries(stats.rows[0]).map(([k, v]) => [k, Number(v)])),
     };
   }
 
@@ -506,8 +611,9 @@ export function createDb(config = {}) {
          count(*) FILTER (WHERE kind = 'todo' AND due < current_date)   AS overdue,
          count(*) FILTER (WHERE kind = 'todo' AND due = current_date)   AS due_today,
          count(*) FILTER (WHERE kind = 'inbox')                          AS inbox,
+         -- 재촉한 건은 그때부터 다시 센다 — 처음 부탁한 날로 세면 방금 재촉한 것까지 묶여 나온다
          count(*) FILTER (WHERE kind = 'waiting'
-                            AND captured_at < now() - ($1 || ' days')::interval) AS stale_waiting
+                            AND coalesce(nudged_at, captured_at) < now() - ($1 || ' days')::interval) AS stale_waiting
        FROM item
        WHERE deleted_at IS NULL AND done_at IS NULL`,
       [String(staleDays)]
@@ -566,9 +672,13 @@ export function createDb(config = {}) {
     getActivities,
     upsertIssues,
     getIssues,
+    promoteIssue,
+    promotedIssueUrls,
     getDoneItems,
     getResumeCard,
     saveResumeCard,
+    newActivityCount,
+    projectsNeedingCard,
     completeItem,
     uncompleteItem,
     assignProject,
@@ -579,6 +689,7 @@ export function createDb(config = {}) {
     purgeDeleted,
     setDue,
     setNote,
+    nudgeItem,
     setSuggestions,
     getInbox,
     logEvent,

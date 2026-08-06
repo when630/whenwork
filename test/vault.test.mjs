@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { writeWeekly, weeklyPath, guessVaultRoot } from '../main/vault.mjs';
+import { writeWeekly, weeklyPath, guessVaultRoot, statsLine } from '../main/vault.mjs';
 
 const week = { year: 2026, week: 32 };
 const range = { label: '2026-08-03 ~ 2026-08-09' };
@@ -87,4 +87,26 @@ test('마커 없는 기존 파일에는 아래에 덧붙인다', () => {
   const text = fs.readFileSync(file, 'utf8');
   assert.match(text, /원래 있던 내용/);
   assert.match(text, /새 초안/);
+});
+
+// ── 주간 지표 한 줄 (사실 데이터라 AI를 거치지 않는다)
+test('지표는 인용 한 줄로, 기본 셋은 0이어도 적는다', () => {
+  const line = statsLine({ captured: 12, done: 7, commits: 41 });
+  assert.equal(line, '> 캡처 12 · 완료 7 · 커밋 41');
+  assert.equal(statsLine({}), '> 캡처 0 · 완료 0 · 커밋 0');
+  assert.equal(statsLine(), '> 캡처 0 · 완료 0 · 커밋 0');
+});
+
+test('있을 때만 붙는 항목 — 열지 않은 카드·전환 없는 주는 적지 않는다', () => {
+  const line = statsLine({ captured: 3, done: 2, commits: 9, resume_open: 5, switches: 2 });
+  assert.match(line, /재개 카드 5회/);
+  assert.match(line, /프로젝트 전환 2회/);
+  assert.ok(!statsLine({ captured: 1, done: 1, commits: 1 }).includes('재개 카드'));
+});
+
+test('회의 시간은 30분 미만이면 생략하고 소수 한 자리로 적는다', () => {
+  assert.match(statsLine({ meeting_hours: 3.46 }), /회의 3\.5시간/);
+  assert.match(statsLine({ meeting_hours: 0.5 }), /회의 0\.5시간/);
+  assert.ok(!statsLine({ meeting_hours: 0.2 }).includes('회의'));
+  assert.ok(!statsLine({}).includes('회의'));
 });

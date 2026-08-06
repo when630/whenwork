@@ -25,7 +25,7 @@ import { collectProject } from './collect.mjs';
 import { syncProjectIssues } from './issues.mjs';
 import { generateResumeCard, classifyInbox, generateWeeklyReview } from './ai.mjs';
 import { parseCaptureToken, parseDue, isoWeek, weekRange } from './parse.mjs';
-import { writeWeekly, weeklyPath, guessVaultRoot } from './vault.mjs';
+import { writeWeekly, weeklyPath, guessVaultRoot, statsLine } from './vault.mjs';
 import { writeBackup } from './backup.mjs';
 import { syncCalendar, maskUrl, calendarRange } from './calendar.mjs';
 import {
@@ -95,6 +95,30 @@ const SMOKE_PROBE = `(async () => {
     }
     if (new Set(geom.map(function (g) { return Math.round(g.dot * 10); })).size > 1) {
       throw new Error('행마다 점 위치가 다르다: ' + geom.map(function (g) { return g.dot.toFixed(1); }).join(','));
+    }
+  });
+  // 이슈에서 세운 할 일과 재촉한 대기 — 실제 데이터가 없어도 그리는 경로는 밟아 둔다.
+  // (state를 직접 갈아끼우므로 이 뒤로는 화면 데이터가 진짜가 아니다 — 마지막에 둔다)
+  await step('item-badges', () => {
+    if (!state || !state.online) return;
+    var day = 86400000;
+    state.today = [{
+      id: 'smoke-1', project_id: null, kind: 'todo', title: '이슈에서 온 일',
+      issue_url: 'https://example.invalid/1', issue_number: 7,
+      issue_provider: 'github', issue_state: 'closed',
+    }];
+    state.waiting = [{
+      id: 'smoke-2', project_id: null, kind: 'waiting', title: '회신 대기', waiting_for: '아무개',
+      captured_at: new Date(Date.now() - 6 * day).toISOString(),
+      nudged_at: new Date(Date.now() - day).toISOString(), nudge_count: 2,
+    }];
+    switchTab('today');
+    if (!document.querySelector('.isu.closed')) throw new Error('닫힌 이슈 배지가 그려지지 않았다');
+    switchTab('waiting');
+    if (!document.querySelector('.nudge-n')) throw new Error('재촉 횟수가 그려지지 않았다');
+    var el = document.querySelector('.elapsed');
+    if (el.textContent.indexOf('재촉 후') !== 0) {
+      throw new Error('재촉 뒤로는 그때부터 세야 한다: ' + el.textContent);
     }
   });
   await step('history', () => openHistory(7));
@@ -174,6 +198,9 @@ async function collectAll() {
   } finally {
     collecting = false;
   }
+  // 새로 긁은 커밋을 근거로 카드를 미리 만들어 둔다. collecting을 푼 뒤에 부르는 이유는
+  // claude -p가 몇 분씩 걸릴 수 있어 그동안 「지금 수집」이 막히면 안 되기 때문이다.
+  prewarmCards().catch(() => {});
 }
 
 // ── 주간 리뷰 초안 (D5·오픈이슈 #1)
@@ -206,7 +233,8 @@ async function makeWeeklyReview(weekOffset = 0, { notify: useNotification = fals
     const range = { label: w.label };
     notify('초안 생성 중… (claude -p)');
     const material = await db.weeklyMaterial(w.from, w.to);
-    const body = await generateWeeklyReview(range, material);
+    // 지표는 사실이라 AI를 거칠 이유가 없다 — 초안 맨 위에 한 줄로 앱이 직접 붙인다
+    const body = `${statsLine(material.stats)}\n\n${await generateWeeklyReview(range, material)}`;
     const root = vaultRoot();
     let saved = null;
     if (root) {
@@ -647,6 +675,22 @@ ipcMain.handle('capture:save', async (_e, title) => {
   return { ok: true, dbOnline, pending: queue.count() };
 });
 
+// 회의 후속 캡처 — 회의는 할 일을 낳는데 그 경로가 손 입력뿐이었다.
+// 캡처 경로는 퀵캡처와 같다(큐 선기록, D1) — 맥락만 창 제목 대신 회의 제목이다.
+ipcMain.handle('capture:followUp', async (_e, title, meeting) => {
+  const text = String(title ?? '').trim();
+  if (!text) return { ok: false };
+  queue.append({
+    id: crypto.randomUUID(),
+    title: text,
+    captured_at: new Date().toISOString(),
+    context: { meeting: String(meeting?.title ?? '').slice(0, 200) },
+  });
+  flush();
+  refreshTrayMenu();
+  return { ok: true, pending: queue.count() };
+});
+
 ipcMain.handle('today:getState', async () => {
   dbOnline = await db.online().catch(() => false);
   if (!dbOnline) return { online: false, pending: queue.count() };
@@ -688,6 +732,28 @@ for (const [ch, fn] of Object.entries(itemOps)) {
     }
   });
 }
+
+// 이슈를 오늘 할 일로 세운다 — 원본 이슈는 그대로 두고 로컬 todo만 만든다(D7)
+ipcMain.handle('issue:promote', async (_e, projectId, issue) => {
+  try {
+    const res = await db.promoteIssue(projectId, {
+      url: String(issue?.url ?? ''),
+      title: String(issue?.title ?? '').slice(0, 300),
+    });
+    return { ok: true, ...res };
+  } catch {
+    return { ok: false };
+  }
+});
+
+// 재촉 — 몇 번째인지를 화면에 돌려줘야 해서 itemOps(ok만 반환)와 따로 둔다
+ipcMain.handle('item:nudge', async (_e, id) => {
+  try {
+    return { ok: true, count: await db.nudgeItem(id) };
+  } catch {
+    return { ok: false };
+  }
+});
 
 // 마감일은 "오늘/내일/8·12" 같은 말로 받는다 — 못 알아들으면 되묻게 ok:false를 돌려준다
 ipcMain.handle('item:due', async (_e, id, text) => {
@@ -735,24 +801,31 @@ const cardFailure = new Map();
 
 async function resumePayload(projectId) {
   const failedAt = cardFailure.get(projectId) ?? 0;
+  const card = await db.getResumeCard(projectId);
   return {
     ok: true,
-    card: await db.getResumeCard(projectId),
+    card,
+    // 카드를 만든 뒤로 쌓인 커밋 수 — 카드가 얼마나 낡았는지는 시각보다 이 숫자가 정확하다
+    fresh: card ? await db.newActivityCount(projectId, card.generated_at) : 0,
     activities: await db.getActivities(projectId, 10),
     issues: await db.getIssues(projectId, 12), // 이슈에 PR/MR까지 섞이므로 조금 넉넉하게
+    promoted: await db.promotedIssueUrls(projectId), // 이미 할 일로 세운 이슈
     generating: generatingCards.has(projectId),
     retryAfter: failedAt + CARD_COOLDOWN_MS > Date.now() ? failedAt + CARD_COOLDOWN_MS : null,
   };
 }
 
-ipcMain.handle('resume:get', async (_e, projectId) => {
+// log=false는 화면을 다시 채우려는 호출이다 — 열람 수(KPI)를 부풀리지 않는다
+ipcMain.handle('resume:get', async (_e, projectId, log = true) => {
   try {
     // KPI: 카드 열람 수와 프로젝트 전환 수 (9절)
-    db.logEvent('resume_open', String(projectId));
-    if (lastOpenedProject !== null && lastOpenedProject !== projectId) {
-      db.logEvent('project_switch', `${lastOpenedProject}->${projectId}`);
+    if (log) {
+      db.logEvent('resume_open', String(projectId));
+      if (lastOpenedProject !== null && lastOpenedProject !== projectId) {
+        db.logEvent('project_switch', `${lastOpenedProject}->${projectId}`);
+      }
+      lastOpenedProject = projectId;
     }
-    lastOpenedProject = projectId;
     return await resumePayload(projectId);
   } catch {
     return { ok: false };
@@ -773,12 +846,13 @@ ipcMain.handle('resume:sync', async (_e, projectId) => {
   }
 });
 
-ipcMain.handle('resume:generate', async (_e, projectId) => {
-  if (generatingCards.has(projectId)) return { ok: false, busy: true };
+// 카드 한 장을 실제로 만든다 — 화면의 R와 백그라운드 선갱신이 같은 경로를 쓴다.
+async function buildResumeCard(projectId) {
+  if (generatingCards.has(projectId)) throw new Error('busy');
   generatingCards.add(projectId);
   try {
     const p = await findProject(projectId);
-    if (!p) return { ok: false };
+    if (!p) throw new Error('프로젝트를 찾을 수 없습니다');
     const view = await db.getViewState();
     const card = await generateResumeCard(p, {
       activities: await db.getActivities(projectId, 15),
@@ -788,12 +862,49 @@ ipcMain.handle('resume:generate', async (_e, projectId) => {
     });
     await db.saveResumeCard(projectId, card);
     cardFailure.delete(projectId);
-    return await resumePayload(projectId);
   } catch (err) {
     cardFailure.set(projectId, Date.now());
-    return { ok: false, error: String(err?.message ?? err) };
+    throw err;
   } finally {
     generatingCards.delete(projectId);
+    // 백그라운드로 만드는 동안 사용자가 그 카드를 열어놓았을 수 있다 — 스켈레톤에 갇히지 않게 알린다
+    if (todayWin && !todayWin.isDestroyed()) todayWin.webContents.send('card:done', projectId);
+  }
+}
+
+// 카드를 **열 때가 아니라 수집 뒤에** 미리 만들어 둔다. 열어서 30초를 기다리면
+// "프로젝트 열기 전에 카드부터 본다"(M2 완료 판정)는 습관이 붙지 않는다.
+// 대상은 커밋이 새로 들어온 프로젝트뿐이고(projectsNeedingCard), 한 번에 한 장씩 만든다.
+const CARD_STALE_HOURS = 24;
+let prewarming = false;
+async function prewarmCards() {
+  if (prewarming) return;
+  prewarming = true;
+  try {
+    for (const t of await db.projectsNeedingCard(CARD_STALE_HOURS)) {
+      if (generatingCards.has(t.id)) continue;
+      const failedAt = cardFailure.get(t.id) ?? 0;
+      if (failedAt + CARD_COOLDOWN_MS > Date.now()) continue; // 방금 실패한 것은 쉬게 둔다
+      try {
+        await buildResumeCard(t.id);
+      } catch {
+        // 실패는 조용히 — 다음 수집 주기에 다시 시도한다 (사용자가 R로 직접 만들 수도 있다)
+      }
+    }
+  } catch {
+    // DB가 꺼져 있는 등 — 다음 주기에
+  } finally {
+    prewarming = false;
+  }
+}
+
+ipcMain.handle('resume:generate', async (_e, projectId) => {
+  if (generatingCards.has(projectId)) return { ok: false, busy: true };
+  try {
+    await buildResumeCard(projectId);
+    return await resumePayload(projectId);
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) };
   }
 });
 

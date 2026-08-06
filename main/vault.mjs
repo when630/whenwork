@@ -74,6 +74,19 @@ function frontmatter(week, range) {
   ].join('\n');
 }
 
+// 주간 지표 한 줄. 사실 데이터라 AI를 거치지 않고 앱이 직접 적는다 —
+// 초안 본문 맨 위에 인용 블록으로 서므로 볼트 파일과 앱의 리뷰 탭 양쪽에 같이 보인다.
+// 지표 전용 화면을 만들지 않는 이유는 1인용 도구에서 이 숫자는 회고할 때만 쓸모가 있어서다.
+export function statsLine(s = {}) {
+  const n = (v) => Number(v ?? 0);
+  const parts = [`캡처 ${n(s.captured)}`, `완료 ${n(s.done)}`, `커밋 ${n(s.commits)}`];
+  if (n(s.resume_open)) parts.push(`재개 카드 ${n(s.resume_open)}회`);
+  if (n(s.switches)) parts.push(`프로젝트 전환 ${n(s.switches)}회`);
+  const hours = Math.round(n(s.meeting_hours) * 10) / 10;
+  if (hours >= 0.5) parts.push(`회의 ${hours}시간`);
+  return `> ${parts.join(' · ')}`;
+}
+
 // 마커 블록을 갈아끼운다. 파일이 없으면 프론트매터와 함께 새로 만든다.
 export function writeWeekly(file, body, { week, range, generatedAt = new Date() }) {
   const stamp = `> 자동 생성: ${generatedAt.toISOString().slice(0, 16).replace('T', ' ')} · 기간 ${range.label}`;

@@ -101,7 +101,12 @@ export function buildClassifyPrompt(items, projects) {
   lines.push('');
   lines.push('## 항목');
   for (const it of items) {
-    const ctx = it.context?.fg ? ` [캡처 당시 창: ${it.context.fg}]` : '';
+    // 회의 후속으로 담은 것은 회의 제목이 가장 강한 근거다 — 창 제목보다 앞세운다
+    const ctx = it.context?.meeting
+      ? ` [회의 "${it.context.meeting}"의 후속]`
+      : it.context?.fg
+        ? ` [캡처 당시 창: ${it.context.fg}]`
+        : '';
     lines.push(`- id=${it.id} ${it.title}${ctx}`);
   }
   lines.push('');
@@ -146,9 +151,15 @@ export function buildWeeklyPrompt(range, material) {
   lines.push('## 커밋');
   lines.push(byProject(material.commits, (r) => r.summary));
   lines.push('');
-  lines.push('## 아직 기다리는 것');
+  lines.push('## 아직 기다리는 것 (여러 번 재촉했는데도 회신이 없는 건은 기다리는 중이 아니라 막힌 것으로 다룬다)');
   lines.push(material.waiting.length
-    ? material.waiting.map((w) => `- ${w.title} → ${w.waiting_for ?? '(미지정)'}`).join('\n')
+    ? material.waiting
+        .map((w) => {
+          const n = Number(w.nudge_count ?? 0);
+          const nudge = n ? ` (재촉 ${n}회, 마지막 ${fmtWhen(w.nudged_at)})` : '';
+          return `- ${w.title} → ${w.waiting_for ?? '(미지정)'}${nudge}`;
+        })
+        .join('\n')
     : '- (없음)');
   lines.push('');
   // 회의에 시간을 쓴 주는 커밋이 적은 게 정상이다 — 그 맥락 없이 보면 회고가 어긋난다

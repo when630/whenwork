@@ -172,11 +172,14 @@ export function createDb(config = {}) {
         );
         projectId = rows[0]?.id ?? null;
       }
+      // 약어가 어느 프로젝트도 가리키지 않으면(오타) 토큰을 제목에 되돌린다 —
+      // 조용히 떼어내면 인박스에서 "왜 여기 있지"를 풀 단서가 사라진다
+      const title = e.abbr && !projectId ? `${e.title} #${e.abbr}` : e.title;
       await pool.query(
         `INSERT INTO item (id, project_id, kind, title, captured_at, source, context)
          VALUES ($1, $2, $3, $4, $5, 'manual', $6)
          ON CONFLICT (id) DO NOTHING`,
-        [e.id, projectId, projectId ? 'todo' : 'inbox', e.title, e.captured_at, e.context ?? null]
+        [e.id, projectId, projectId ? 'todo' : 'inbox', title, e.captured_at, e.context ?? null]
       );
     }
   }
@@ -413,9 +416,14 @@ export function createDb(config = {}) {
     await pool.query('UPDATE item SET done_at = NULL WHERE id = $1', [id]);
   }
 
-  async function assignProject(id, projectId) {
+  // 프로젝트 지정. 인박스에서 부르면 그것이 곧 "할 일로 세운다"는 뜻이라 kind도 바꾸지만,
+  // 대기 항목에 부를 때는 kind를 건드리면 안 된다 — 프로젝트만 붙이려던 조작이
+  // 대기 해제가 되어 항목이 대기 탭에서 사라진다.
+  async function assignProject(id, projectId, keepKind = false) {
     await pool.query(
-      "UPDATE item SET project_id = $2, kind = 'todo', suggested_project_id = NULL WHERE id = $1",
+      keepKind
+        ? 'UPDATE item SET project_id = $2, suggested_project_id = NULL WHERE id = $1'
+        : "UPDATE item SET project_id = $2, kind = 'todo', suggested_project_id = NULL WHERE id = $1",
       [id, projectId]
     );
   }

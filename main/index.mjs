@@ -65,6 +65,48 @@ const SMOKE_PROBE = `(async () => {
     await new Promise((r) => setTimeout(r, 60));
   }
   await step('search', () => { openSearch(); closeSearch(false); });
+  // 검색 중 Tab — 예전에는 기본 동작으로 입력 포커스만 빠지고 searchOn이 남아
+  // 그 뒤 모든 키가 삼켜졌다(Esc·Enter·화살표 말고는 무반응). 눌러서 상태로 확인한다.
+  await step('search:tab', () => {
+    switchTab('today');
+    openSearch();
+    filter = '없을만한검색어';
+    document.getElementById('searchIn').value = filter;
+    const before = tab;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    if (searchOn) throw new Error('검색 중 Tab을 눌렀는데 검색 상태가 남았다');
+    if (tab === before) throw new Error('검색 중 Tab이 탭을 옮기지 않았다: ' + tab);
+    if (filter !== '없을만한검색어') throw new Error('Tab이 필터를 지웠다 — 탭을 넘어 유지돼야 한다');
+    closeSearch(false);
+  });
+  // 프로젝트 번호 띠 — 1~9를 쓰는 탭에서만 스크롤 밖 고정 자리에 서고, 이름 칩도 번호를 단다
+  await step('legend', () => {
+    if (!state || !state.online || !state.projects.length) return;
+    var band = document.getElementById('numlegend');
+    switchTab('inbox');
+    if (!band.classList.contains('show')) throw new Error('인박스에서 번호 띠가 보이지 않는다');
+    if (!band.querySelector('b')) throw new Error('번호 띠에 번호가 없다');
+    switchTab('settings');
+    if (band.classList.contains('show')) throw new Error('설정 탭에서는 번호 띠를 감춰야 한다');
+    switchTab('today');
+    var gchip = document.querySelector('.group-h .chip:not(.cal-chip)');
+    if (gchip && !gchip.querySelector('.pn')) throw new Error('오늘 탭 그룹 칩에 번호가 없다');
+  });
+  // 하단 힌트는 몇 칸으로 줄여두고 나머지는 ?(전체 키맵)로 본다 — 다시 길어지지 않게 재 둔다
+  await step('keys', () => {
+    switchTab('today');
+    var hints = document.getElementById('hints');
+    if (hints.children.length > 6) throw new Error('하단 힌트가 너무 많다: ' + hints.children.length);
+    if (hints.scrollWidth > hints.clientWidth + 1) {
+      throw new Error('하단 힌트가 잘린다: ' + hints.scrollWidth + ' > ' + hints.clientWidth);
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
+    var panel = document.getElementById('keys');
+    if (!panel.classList.contains('show')) throw new Error('?로 전체 키맵이 열리지 않았다');
+    if (!panel.querySelector('kbd')) throw new Error('전체 키맵이 비어 있다');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    if (panel.classList.contains('show')) throw new Error('Esc로 전체 키맵이 닫히지 않았다');
+  });
   // 캘린더가 붙지 않은 환경에서도 일정 띠 렌더 경로는 밟아 본다 (스모크는 빈 설정으로 돈다)
   await step('cal-strip', () => {
     if (!state || !state.online) return;
@@ -108,7 +150,8 @@ const SMOKE_PROBE = `(async () => {
       issue_provider: 'github', issue_state: 'closed',
     }];
     state.waiting = [{
-      id: 'smoke-2', project_id: null, kind: 'waiting', title: '회신 대기', waiting_for: '아무개',
+      id: 'smoke-2', project_id: 1, project_name: '스모크', kind: 'waiting',
+      title: '회신 대기', waiting_for: '아무개',
       captured_at: new Date(Date.now() - 6 * day).toISOString(),
       nudged_at: new Date(Date.now() - day).toISOString(), nudge_count: 2,
     }];
@@ -116,6 +159,8 @@ const SMOKE_PROBE = `(async () => {
     if (!document.querySelector('.isu.closed')) throw new Error('닫힌 이슈 배지가 그려지지 않았다');
     switchTab('waiting');
     if (!document.querySelector('.nudge-n')) throw new Error('재촉 횟수가 그려지지 않았다');
+    // 프로젝트 표시가 없으면 대기 탭에서 1~9로 지정해도 화면이 그대로다
+    if (!document.querySelector('.wait-meta .chip')) throw new Error('대기 항목의 프로젝트가 그려지지 않았다');
     var el = document.querySelector('.elapsed');
     if (el.textContent.indexOf('재촉 후') !== 0) {
       throw new Error('재촉 뒤로는 그때부터 세야 한다: ' + el.textContent);
@@ -132,6 +177,36 @@ const SMOKE_PROBE = `(async () => {
   };
 })()`;
 
+// 퀵캡처 렌더러 점검. 창 폭이 560px로 고정이라 힌트가 하나 늘면 안내가 조용히 잘리고,
+// `#약어` 피드백은 이 창에만 있으므로 실제로 쳐 보지 않으면 깨진 것을 알 수 없다.
+const CAPTURE_PROBE = `(() => {
+  const errors = [];
+  const foot = document.querySelector('.foot');
+  if (foot.scrollWidth > foot.clientWidth + 1) {
+    errors.push('푸터가 폭을 넘었다: ' + foot.scrollWidth + ' > ' + foot.clientWidth);
+  }
+  projects = [{ abbr: 'gw', name: 'GoWrite' }];
+  const type = function (v) {
+    input.value = v;
+    input.dispatchEvent(new Event('input'));
+    return msg.textContent;
+  };
+  const hit = type('복사버튼 추가 #gw');
+  if (hit.indexOf('GoWrite') < 0) errors.push('아는 약어인데 프로젝트를 알려주지 않았다: ' + hit);
+  const miss = type('복사버튼 추가 #gwx');
+  if (miss.indexOf('없는 약어') < 0) errors.push('없는 약어를 알려주지 않았다: ' + miss);
+  const none = type('복사버튼 추가');
+  if (none.indexOf('인박스') < 0) errors.push('토큰이 없으면 기본 안내로 돌아와야 한다: ' + none);
+  // 가장 긴 저장 안내가 들어가는지 — 힌트가 늘면 여기가 먼저 잘린다
+  msg.className = 'msg ok';
+  msg.textContent = '✓ 서식갤러리로 저장 · 이번에 3건';
+  if (msg.scrollWidth > msg.clientWidth + 1) {
+    errors.push('저장 안내가 잘린다: ' + msg.scrollWidth + ' > ' + msg.clientWidth);
+  }
+  type('');
+  return errors;
+})()`;
+
 let tray = null;
 let captureWin = null;
 let todayWin = null;
@@ -140,8 +215,27 @@ let hotkeyOk = false;
 let dbOnline = false;
 // 폴더 선택 같은 네이티브 다이얼로그가 뜨면 창이 blur된다 — 그때 창을 숨기면 안 된다
 let suppressHide = false;
-// 단축키를 누른 "그 순간"의 포그라운드 창 — 팝업이 뜨면 포그라운드가 우리가 되므로 먼저 잡는다
+
+// ── 캡처 컨텍스트
+//
+// 창을 열 때 미리 긁어둔다(PowerShell 기동에 300ms쯤 걸려 저장을 기다리게 할 수 없다).
+// 우리 창을 후보에서 빼는 건 context.mjs가 하므로 팝업이 뜬 뒤에 실행돼도 답은 같다.
+// 그래도 못 받은 경우(입력이 300ms보다 빨랐다)는 방금 받아둔 값으로 대신한다 —
+// 퀵캡처는 blur되면 닫히므로 그 값은 사실상 같은 세션의 같은 창이다.
+const FG_CACHE_MS = 120_000;
 let pendingContext = Promise.resolve(null);
+let lastForeground = null; // { title, at }
+
+function trackForeground() {
+  pendingContext = foregroundTitle().then((title) => {
+    if (title) lastForeground = { title, at: Date.now() };
+    return title;
+  });
+}
+
+function cachedForeground() {
+  return lastForeground && Date.now() - lastForeground.at < FG_CACHE_MS ? lastForeground.title : null;
+}
 
 // 스모크는 실사용 인스턴스와 부딪히지 않게 격리한다 — 안 그러면 단일 인스턴스 락에 걸려
 // 아무것도 검증하지 않고 종료 코드 0으로 끝난다(캐시 점유 오류만 남는다).
@@ -226,8 +320,8 @@ async function makeWeeklyReview(weekOffset = 0, { notify: useNotification = fals
   };
   try {
     if (!(await db.online())) {
-      notify('DB가 꺼져 있어 만들 수 없습니다.');
-      return { ok: false, error: 'DB가 꺼져 있습니다' };
+      notify('DB 꺼짐 — 만들 수 없음');
+      return { ok: false, error: 'DB 꺼짐' };
     }
     const w = weekOf(weekOffset);
     const range = { label: w.label };
@@ -259,7 +353,7 @@ async function makeWeeklyReview(weekOffset = 0, { notify: useNotification = fals
     return { ok: true, review: await db.getReview(w.week.year, w.week.week), ...w, label: w.label };
   } catch (err) {
     const msg = String(err?.message ?? err).slice(0, 160);
-    notify(`실패: ${msg}`);
+    notify(`실패 — ${msg}`);
     return { ok: false, error: msg };
   } finally {
     reviewing = false;
@@ -360,7 +454,7 @@ async function syncCalendarNow() {
   if (!url || syncingCalendar) return { ok: false, skipped: true };
   syncingCalendar = true;
   try {
-    if (!(await db.online().catch(() => false))) return { ok: false, error: 'DB가 꺼져 있습니다' };
+    if (!(await db.online().catch(() => false))) return { ok: false, error: 'DB 꺼짐' };
     const res = await syncCalendar(db, url);
     lastCalendarError = null;
     settings.set('lastCalendarSync', new Date().toISOString());
@@ -396,7 +490,7 @@ async function backupNow() {
   if (backingUp) return { ok: false, busy: true };
   backingUp = true;
   try {
-    if (!(await db.online())) return { ok: false, error: 'DB가 꺼져 있습니다' };
+    if (!(await db.online())) return { ok: false, error: 'DB 꺼짐' };
     const dir = settings.get('backupDir') || BACKUP_DIR_DEFAULT;
     const file = writeBackup(dir, await db.exportAll());
     settings.set('lastBackup', new Date().toISOString());
@@ -520,13 +614,30 @@ function getCaptureWin() {
   return captureWin;
 }
 
+// 퀵캡처가 약어 목록을 알아야 "#gw"가 어느 프로젝트인지 **그 자리에서** 알려줄 수 있다.
+// 약어를 타이핑하는 곳은 이 창뿐인데 정작 확인할 화면(번호 띠·프로젝트 탭)은 그때 볼 수 없었다.
+// DB가 꺼져 있으면 마지막 목록으로 답한다 — 캡처 경로에 DB를 끌어들이지 않는다(D1).
+let abbrHints = [];
+async function refreshAbbrHints() {
+  try {
+    const rows = await db.getProjects();
+    abbrHints = rows.filter((p) => p.abbr).map((p) => ({ abbr: p.abbr, name: p.name }));
+  } catch {
+    // 못 읽으면 이전 목록을 그대로 쓴다
+  }
+  return abbrHints;
+}
+
 function showCapture() {
-  pendingContext = foregroundTitle(); // 팝업이 포커스를 뺏기 전에 먼저
+  trackForeground(); // 저장 시점에 기다리지 않게 미리
   const win = getCaptureWin();
   placeWindow(win, 'captureBounds', { centerY: false });
-  win.webContents.send('capture:reset');
+  win.webContents.send('capture:reset', abbrHints); // 우선 캐시로 열고
   win.show();
   win.focus();
+  refreshAbbrHints().then((list) => {
+    if (!win.isDestroyed()) win.webContents.send('capture:projects', list); // 새 목록이 오면 갈아끼운다
+  });
 }
 
 function getTodayWin() {
@@ -611,7 +722,7 @@ function refreshTrayMenu() {
           const res = await backupNow();
           new Notification({
             title: 'WHENWORK 백업',
-            body: res.ok ? `저장됨 — ${path.basename(res.file)}` : `실패: ${res.error ?? '잠시 뒤 다시'}`,
+            body: res.ok ? `저장됨 — ${path.basename(res.file)}` : `실패 — ${res.error ?? '원인 불명'}`,
           }).show();
         },
       },
@@ -662,7 +773,9 @@ function refreshTrayMenu() {
 ipcMain.handle('capture:save', async (_e, title) => {
   const { title: text, abbr } = parseCaptureToken(title);
   if (!text) return { ok: false };
-  const fg = await Promise.race([pendingContext, new Promise((r) => setTimeout(() => r(null), 300))]);
+  const fg =
+    (await Promise.race([pendingContext, new Promise((r) => setTimeout(() => r(null), 300))])) ??
+    cachedForeground();
   queue.append({
     id: crypto.randomUUID(),
     title: text,
@@ -710,7 +823,7 @@ ipcMain.handle('history:get', async (_e, days = 7) => {
 const itemOps = {
   'item:complete': (id) => db.completeItem(id),
   'item:uncomplete': (id) => db.uncompleteItem(id),
-  'item:assign': (id, projectId) => db.assignProject(id, projectId),
+  'item:assign': (id, projectId, keepKind) => db.assignProject(id, projectId, keepKind),
   'item:toWaiting': (id, who) => db.toWaiting(id, who),
   'item:rename': (id, title) => db.renameItem(id, title),
   'item:remove': (id) => db.removeItem(id),
@@ -852,7 +965,7 @@ async function buildResumeCard(projectId) {
   generatingCards.add(projectId);
   try {
     const p = await findProject(projectId);
-    if (!p) throw new Error('프로젝트를 찾을 수 없습니다');
+    if (!p) throw new Error('프로젝트 없음');
     const view = await db.getViewState();
     const card = await generateResumeCard(p, {
       activities: await db.getActivities(projectId, 15),
@@ -971,10 +1084,25 @@ app.whenReady().then(async () => {
         } catch (err) {
           probe = { errors: [String(err?.message ?? err)] };
         }
+        // 퀵캡처 창도 만들어 그려 본다 (show하지 않으므로 화면에는 나타나지 않는다)
+        let capture = null;
+        try {
+          const cap = getCaptureWin();
+          if (cap.webContents.isLoading()) {
+            await new Promise((r) => cap.webContents.once('did-finish-load', r));
+          }
+          capture = await cap.webContents.executeJavaScript(CAPTURE_PROBE);
+        } catch (err) {
+          capture = [String(err?.message ?? err)];
+        }
         const ok =
-          probe?.view === true && probe?.tabs > 0 && probe?.body >= 0 && probe?.errors?.length === 0;
+          probe?.view === true &&
+          probe?.tabs > 0 &&
+          probe?.body >= 0 &&
+          probe?.errors?.length === 0 &&
+          capture?.length === 0;
         console.log(
-          `SMOKE_${ok ? 'OK' : 'FAIL'} hotkey=${hotkeyOk} pending=${queue.count()} renderer=${JSON.stringify(probe)}`
+          `SMOKE_${ok ? 'OK' : 'FAIL'} hotkey=${hotkeyOk} pending=${queue.count()} renderer=${JSON.stringify(probe)} capture=${JSON.stringify(capture)}`
         );
         quitting = true;
         app.exit(ok ? 0 : 1);

@@ -4,14 +4,17 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('whenwork', {
   // ── 퀵캡처
   save: (title) => ipcRenderer.invoke('capture:save', title),
-  onReset: (cb) => ipcRenderer.on('capture:reset', () => cb()),
+  // 열 때마다 초기화 — 프로젝트 약어 목록을 함께 받아 "#gw → GoWrite"를 그 자리에서 보여준다
+  onReset: (cb) => ipcRenderer.on('capture:reset', (_e, projects) => cb(projects)),
+  onProjects: (cb) => ipcRenderer.on('capture:projects', (_e, projects) => cb(projects)),
 
   // ── 오늘 뷰
   getState: () => ipcRenderer.invoke('today:getState'),
   onRefresh: (cb) => ipcRenderer.on('today:refresh', () => cb()),
   complete: (id) => ipcRenderer.invoke('item:complete', id),
   uncomplete: (id) => ipcRenderer.invoke('item:uncomplete', id),
-  assign: (id, projectId) => ipcRenderer.invoke('item:assign', id, projectId),
+  // keepKind — 대기 항목에 프로젝트만 붙일 때(대기를 풀지 않는다)
+  assign: (id, projectId, keepKind) => ipcRenderer.invoke('item:assign', id, projectId, keepKind),
   toWaiting: (id, who) => ipcRenderer.invoke('item:toWaiting', id, who),
   rename: (id, title) => ipcRenderer.invoke('item:rename', id, title),
   setDue: (id, text) => ipcRenderer.invoke('item:due', id, text),

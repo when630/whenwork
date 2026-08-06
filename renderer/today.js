@@ -136,6 +136,25 @@ function projColor(p) {
   return PROJ_COLORS[idx >= 0 ? idx % PROJ_COLORS.length : 0];
 }
 
+// 인박스·오늘·대기 탭의 1~9는 프로젝트 탭 순서다. 그 번호를 이름 옆에 늘 붙여
+// "GoWrite가 1번"을 눈으로 익게 한다 — 번호만 따로 적어두면 아무도 외우지 않는다.
+function projNum(pid) {
+  const i = state?.projects?.findIndex((x) => x.id === pid) ?? -1;
+  return i >= 0 && i < 9 ? String(i + 1) : null;
+}
+
+// 프로젝트 이름 칩 — 색점 · 번호 · 이름. 쓰이는 곳이 셋이라 한 곳에서 만든다.
+function projChip(pid, name) {
+  const chip = el('span', 'chip');
+  const dot = el('span', 'dot');
+  dot.style.background = projColor(pid);
+  chip.append(dot);
+  const n = projNum(pid);
+  if (n) chip.append(el('b', 'pn', n));
+  chip.append(document.createTextNode(name ?? ''));
+  return chip;
+}
+
 function fmtDate(d = new Date()) {
   return `${d.getMonth() + 1}/${d.getDate()} (${'일월화수목금토'[d.getDay()]})`;
 }
@@ -194,7 +213,7 @@ function renderHistory() {
   }
   const days = historyDays(history.data);
   if (!days.length) {
-    body.append(el('div', 'empty', '이 기간에 완료한 항목도 커밋도 없습니다'));
+    body.append(el('div', 'empty', '이 기간에 완료한 항목도 커밋도 없음'));
     return;
   }
 
@@ -256,6 +275,67 @@ function renderSearch() {
   $('searchCnt').textContent = filter ? `${list.length}건` : '';
 }
 
+// ── 전체 키맵 (?)
+//
+// 하단 힌트는 그 화면에서 지금 쓸 것 네 칸으로 줄이고, 나머지는 여기서 본다.
+// 열 칸이 넘어가면 아무것도 읽히지 않는다 — 관심별로 모아두면 오히려 배우기 쉽다.
+const KEYMAP = [
+  ['이동', [['↑↓', 'jk 이동'], ['Home/End', '처음·끝'], ['PgUp/PgDn', '10줄'], ['Tab', '탭 전환'], ['/', '검색'], ['Esc', '닫기']]],
+  ['항목', [['Space', '완료'], ['E', '제목'], ['D', '마감'], ['N', '메모'], ['W', '대기로'], ['X', '삭제'], ['U', '되돌리기'], ['1~9', '프로젝트'], ['O', '이슈 원본'], ['Enter', '재개 카드']]],
+  ['오늘', [['F', '마감만'], ['H', '완료 기록'], ['M', '회의 후속']]],
+  ['인박스', [['A', 'AI 분류'], ['Enter', '제안 확정']]],
+  ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
+  ['프로젝트', [['N', '추가'], ['E', '이름'], ['A', '약어'], ['R', '리포'], ['Shift+↑↓', '순서'], ['X', '보관']]],
+  ['재개 카드', [['R', '다시 생성'], ['Enter/O', '브라우저'], ['T', '할 일로'], ['PgUp/PgDn', '스크롤']]],
+  ['리뷰', [['G', '초안 생성'], ['←→', '주 이동'], ['O', '볼트에서 열기']]],
+  ['설정', [['Enter', '변경'], ['X', '기본값'], ['B', '백업'], ['C', '캘린더'], ['O', 'settings.json']]],
+  ['퀵캡처', [['Ctrl+Alt+Space', '열기·닫기'], ['#약어', '프로젝트 지정'], ['Tab', '오늘 뷰']]],
+];
+
+let keysOpen = false;
+
+function openKeys() {
+  const body = $('keysBody');
+  body.replaceChildren();
+  for (const [group, keys] of KEYMAP) {
+    body.append(el('div', 'g', group));
+    const ks = el('div', 'ks');
+    for (const [key, label] of keys) {
+      const s = el('span');
+      s.append(el('kbd', null, key), document.createTextNode(' ' + label));
+      ks.append(s);
+    }
+    body.append(ks);
+  }
+  keysOpen = true;
+  $('keys').classList.add('show');
+}
+
+function closeKeys() {
+  keysOpen = false;
+  $('keys').classList.remove('show');
+}
+
+// ── 프로젝트 번호 띠
+//
+// 1~9로 프로젝트를 지정할 수 있는 탭에서만, 스크롤 밖 고정 자리에 세운다.
+// 약어(#gw)를 함께 적는 이유는 캡처 토큰과 같은 어휘를 한자리에서 익히게 하려는 것이다.
+const NUM_TABS = ['today', 'inbox', 'waiting'];
+
+function renderLegend() {
+  const band = $('numlegend');
+  const on = view === 'list' && NUM_TABS.includes(tab) && !!state?.online && !!state?.projects?.length;
+  band.classList.toggle('show', on);
+  band.replaceChildren();
+  if (!on) return;
+  state.projects.slice(0, 9).forEach((p, i) => {
+    const s = el('span');
+    s.append(el('b', null, String(i + 1)), document.createTextNode(p.name));
+    if (p.abbr) s.append(el('span', 'ab', `#${p.abbr}`));
+    band.append(s);
+  });
+}
+
 function openSearch() {
   if (tab === 'review' || tab === 'settings' || view !== 'list') return; // 목록이 있는 화면에서만
   searchOn = true;
@@ -293,6 +373,7 @@ function render() {
     renderTabs();
     renderBody();
   }
+  renderLegend();
   renderFooter();
   body.scrollTop = keep;
   keepSelectionVisible();
@@ -434,7 +515,7 @@ async function openResume(projectId) {
   const cooling = resume.data?.retryAfter && resume.data.retryAfter > Date.now();
   if (stale && !resume.generating && !cooling) await regenerate(projectId);
   else if (stale && cooling && !card) {
-    resume.error = '직전 생성이 실패해 잠시 쉬는 중입니다 — R로 다시 시도할 수 있습니다';
+    resume.error = '직전 생성 실패로 잠시 쉬는 중 — R로 다시 시도';
     render();
   }
 }
@@ -498,11 +579,11 @@ function itemRow(it, idx) {
     if (it.suggested_project_id) {
       // AI 제안은 사람 입력과 늘 구분해서 보여준다 (✦ 보라)
       const s = el('div', 'suggest');
-      const chip = el('span', 'chip');
-      const dot = el('span', 'dot');
-      dot.style.background = projColor(it.suggested_project_id);
-      chip.append(dot, document.createTextNode(it.suggested_project_name ?? ''));
-      s.append(el('span', 'badge-ai', '✦ AI'), chip, el('span', 'act', 'Enter 확정'));
+      s.append(
+        el('span', 'badge-ai', '✦ AI'),
+        projChip(it.suggested_project_id, it.suggested_project_name),
+        el('span', 'act', 'Enter 확정')
+      );
       row.append(s);
     }
     const ctxText = captureContext(it);
@@ -519,6 +600,8 @@ function itemRow(it, idx) {
     meta.append(document.createTextNode(`→ ${it.waiting_for || '(미지정)'} · `));
     meta.append(el('span', 'elapsed' + (w.hot ? ' hot' : ''), w.label));
     if (w.nudges) meta.append(el('span', 'nudge-n', `재촉 ${w.nudges}회`));
+    // 어느 프로젝트의 대기인지 — 이 표시가 없어서 1~9로 프로젝트를 지정해도 화면이 그대로였다
+    if (it.project_name) meta.append(projChip(it.project_id, it.project_name));
     row.append(meta);
   }
   row.onclick = () => {
@@ -574,8 +657,8 @@ function renderReview() {
   } else {
     const e = el('div', 'empty');
     const hint = el('div');
-    hint.append(el('kbd', null, 'G'), document.createTextNode(' 로 이 주의 초안을 만듭니다'));
-    e.append(el('div', 'big', '◎'), el('div', null, '아직 만든 초안이 없습니다'), hint);
+    hint.append(el('kbd', null, 'G'), document.createTextNode(' 로 이 주의 초안 만들기'));
+    e.append(el('div', 'big', '◎'), el('div', null, '아직 만든 초안 없음'), hint);
     e.style.height = '260px';
     box.append(e);
   }
@@ -614,7 +697,7 @@ async function generateReview() {
   review.generating = false;
   if (res.ok) await loadReview();
   else {
-    review.error = res.busy ? '이미 생성 중입니다' : (res.error ?? 'claude -p 응답 없음');
+    review.error = res.busy ? '이미 생성 중' : (res.error ?? 'claude -p 응답 없음');
     render();
   }
 }
@@ -683,7 +766,7 @@ async function runBackup() {
   toast('백업 중…', { spinner: true, holdMs: 0 });
   const res = await window.whenwork.backupNow();
   if (res.ok) toast(`백업 저장 — ${res.file}`);
-  else toast(res.busy ? '이미 백업 중입니다' : `백업 실패 — ${res.error ?? '알 수 없는 오류'}`);
+  else toast(res.busy ? '이미 백업 중' : `백업 실패 — ${res.error ?? '원인 불명'}`);
   return loadSettings();
 }
 
@@ -691,8 +774,8 @@ async function runCalendarSync() {
   toast('캘린더 동기화 중…', { spinner: true, holdMs: 0 });
   const res = await window.whenwork.calendarSync();
   if (res.ok) toast(`캘린더 — 일정 ${res.count}건`);
-  else if (res.skipped) toast('캘린더 URL이 설정되지 않았습니다');
-  else toast(`캘린더 실패 — ${res.error ?? '알 수 없는 오류'}`, { holdMs: 6000 });
+  else if (res.skipped) toast('캘린더 URL 미설정');
+  else toast(`캘린더 실패 — ${res.error ?? '원인 불명'}`, { holdMs: 6000 });
   await loadSettings();
   return refresh();
 }
@@ -720,14 +803,14 @@ async function editSetting(f) {
     const url = await promptText(`${f.label} — 전체 주소를 붙여넣기 (비우면 사용 안 함)`, '');
     if (url === null) return;
     if (url && !/^https:\/\/script\.google\.com\//.test(url)) {
-      return toast('Apps Script 웹앱 주소(https://script.google.com/...)를 넣어주세요');
+      return toast('Apps Script 주소가 아님 — https://script.google.com/… 으로 시작');
     }
     await window.whenwork.settingsSet(f.key, url || null);
     await loadSettings();
     if (!url) return toast(`${f.label} — 해제`);
     toast('캘린더 확인 중…', { spinner: true, holdMs: 0 });
     const res = await window.whenwork.calendarSync();
-    toast(res.ok ? `캘린더 연결됨 — 일정 ${res.count}건` : `캘린더 실패 — ${res.error ?? '알 수 없음'}`, {
+    toast(res.ok ? `캘린더 연결됨 — 일정 ${res.count}건` : `캘린더 실패 — ${res.error ?? '원인 불명'}`, {
       holdMs: 6000,
     });
     await loadSettings();
@@ -740,7 +823,7 @@ async function editSetting(f) {
     return loadSettings();
   }
   const m = raw.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return toast('시각은 HH:MM 형식으로 입력하세요');
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return toast('시각 형식이 아님 — HH:MM');
   await window.whenwork.settingsSet(f.key, `${String(Number(m[1])).padStart(2, '0')}:${m[2]}`);
   return loadSettings();
 }
@@ -763,8 +846,8 @@ function renderBody() {
     const e = el('div', 'empty');
     e.append(
       el('div', 'big', '⏳'),
-      el('div', null, 'DB 대기 중 — Docker의 whenwork-db가 켜지면 자동 동기화됩니다'),
-      el('div', null, `로컬 큐 ${state.pending}건 보관 중 (캡처는 계속 됩니다)`)
+      el('div', null, 'DB 대기 중 — Docker의 whenwork-db가 켜지면 자동 동기화'),
+      el('div', null, `로컬 큐 ${state.pending}건 보관 중 · 캡처는 계속 가능`)
     );
     body.append(e);
     return;
@@ -825,11 +908,11 @@ function renderBody() {
     if (filter) {
       const hint = el('div');
       hint.append(el('kbd', null, 'Esc'), document.createTextNode(' 로 검색 해제'));
-      e.append(el('div', 'big', '◎'), el('div', null, `"${filter}"에 맞는 항목이 없습니다`), hint);
+      e.append(el('div', 'big', '◎'), el('div', null, `"${filter}"에 맞는 항목 없음`), hint);
     } else if (tab === 'projects') {
       const hint = el('div');
-      hint.append(el('kbd', null, 'N'), document.createTextNode(' 으로 프로젝트를 추가하세요'));
-      e.append(el('div', 'big', '◎'), el('div', null, '프로젝트가 없습니다'), hint);
+      hint.append(el('kbd', null, 'N'), document.createTextNode(' 으로 추가'));
+      e.append(el('div', 'big', '◎'), el('div', null, '프로젝트 없음'), hint);
     } else {
       const hint = el('div');
       hint.append(document.createTextNode('생각나면 '));
@@ -837,8 +920,8 @@ function renderBody() {
         if (i) hint.append(document.createTextNode('+'));
         hint.append(el('kbd', null, k));
       });
-      hint.append(document.createTextNode(' 로 던져두세요'));
-      e.append(el('div', 'big', '◎'), el('div', null, '항목이 없습니다'), hint);
+      hint.append(document.createTextNode(' 로 던져두기'));
+      e.append(el('div', 'big', '◎'), el('div', null, '항목 없음'), hint);
     }
     body.append(e);
     return;
@@ -870,11 +953,7 @@ function renderBody() {
     let idx = 0;
     for (const g of todayView()) {
       const h = el('div', 'group-h');
-      const chip = el('span', 'chip');
-      const dot = el('span', 'dot');
-      dot.style.background = projColor(g.pid);
-      chip.append(dot, document.createTextNode(g.label));
-      h.append(chip);
+      h.append(projChip(g.pid, g.label));
       body.append(h);
       for (const it of g.items) body.append(itemRow(it, idx++));
     }
@@ -882,15 +961,6 @@ function renderBody() {
     list.forEach((it, idx) => body.append(itemRow(it, idx)));
   }
 
-  if (tab === 'inbox' && state.projects.length) {
-    const legend = el('div', 'numlegend');
-    state.projects.slice(0, 9).forEach((p, i) => {
-      const s = el('span');
-      s.append(el('b', null, String(i + 1)), document.createTextNode(' ' + p.name));
-      legend.append(s);
-    });
-    body.append(legend);
-  }
 }
 
 function renderFooter() {
@@ -901,6 +971,8 @@ function renderFooter() {
     ? state.pending ? `동기화 중 — 큐 ${state.pending}건` : '동기화됨'
     : `DB 대기 — 큐 ${state?.pending ?? 0}건`;
 
+  // 지금 화면에서 자주 쓰는 것만 — 나머지는 ?(전체 키맵)에서 본다.
+  // 힌트가 열 칸을 넘어가면 결국 아무것도 읽히지 않는다.
   const hints = $('hints');
   hints.replaceChildren();
   const add = (key, label) => {
@@ -911,66 +983,42 @@ function renderFooter() {
   if (view === 'history') {
     add('↑↓', '스크롤');
     add('Esc', '뒤로');
-    return;
-  }
-  if (view === 'resume') {
+  } else if (view === 'resume') {
     add('R', '다시 생성');
     add('Enter', '이슈 열기');
     add('T', '할 일로');
     add('Esc', '뒤로');
-    return;
-  }
-  add('Tab', '탭');
-  if (tab === 'review') {
+  } else if (tab === 'review') {
     add('G', review.data?.review ? '다시 생성' : '생성');
-    add('↑↓', '스크롤');
     add('←→', '주 이동');
     if (review.data?.review?.file) add('O', '볼트에서 열기');
-    add('Esc', '닫기');
-    return;
-  }
-  if (tab === 'settings') {
+  } else if (tab === 'settings') {
     add('Enter', '변경');
     add('X', '기본값으로');
     add('B', '지금 백업');
-    if (cfg?.values?.calendarUrl) add('C', '캘린더 동기화');
-    add('O', 'settings.json');
-    add('Esc', '닫기');
-    return;
-  }
-  if (tab === 'projects') {
+  } else if (tab === 'projects') {
     add('N', '추가');
     add('E', '이름');
-    add('A', '약어');
     add('R', '리포');
-    add('Shift+↕', '순서');
-    add('X', '보관');
-    add('/', '검색');
-    add('Esc', filter ? '검색 해제' : '닫기');
-    return;
-  }
-  if (tab === 'inbox') {
+  } else if (tab === 'inbox') {
     add('A', 'AI 분류');
     add('1~9', '프로젝트');
-    add('W', '대기');
+    add('W', '대기로');
   } else if (tab === 'waiting') {
     add('Space', '회신 옴');
     add('P', '재촉함');
-    add('N', '메모');
+    add('1~9', '프로젝트');
   } else {
     add('Space', '완료');
+    add('E', '제목');
     add('D', '마감');
-    add('F', dueOnly ? '전체' : '마감만');
-    // 후속을 붙일 회의가 실제로 있을 때만 — 일정 없는 날까지 힌트를 늘리지 않는다
+    add('W', '대기로');
+    // 후속을 붙일 회의가 실제로 있을 때만 — 붙일 자리가 없는 날까지 힌트를 늘리지 않는다
     if (focusEvent(state?.events ?? [])) add('M', '회의 후속');
-    add('H', '기록');
   }
-  add('E', '제목');
-  add('X', '삭제');
-  if (deleted.length) add('U', '되돌리기');
-  add('/', '검색');
-  add('Enter', '재개 카드');
-  add('Esc', filter ? '검색 해제' : '닫기');
+  // Esc의 뜻이 바뀌는 순간만 알린다 (평소엔 창 닫기라 관습으로 안다)
+  if (filter && view === 'list') add('Esc', '검색 해제');
+  add('?', '전체 키');
 }
 
 // ── 회의 후속 캡처 (M)
@@ -981,7 +1029,7 @@ function renderFooter() {
 // 알림으로 부르지는 않는다 — 알림은 아침 브리핑 하나뿐이다(오픈이슈 #3).
 async function captureFollowUp() {
   const ev = focusEvent(state?.events ?? []);
-  if (!ev) return toast('방금 끝났거나 진행 중인 일정이 없습니다');
+  if (!ev) return toast('방금 끝났거나 진행 중인 일정 없음');
   let n = 0;
   for (;;) {
     const title = await promptText(
@@ -993,7 +1041,7 @@ async function captureFollowUp() {
     n++;
   }
   if (!n) return;
-  toast(`후속 ${n}건을 인박스에 담았습니다 — 인박스에서 A로 분류`);
+  toast(`후속 ${n}건 — 인박스에서 A로 분류`);
   return refresh();
 }
 
@@ -1044,6 +1092,12 @@ async function moveProject(dir) {
   await refresh();
 }
 
+// Tab 순환의 다음 탭. 검색 중에도 같은 순서로 옮겨야 하므로 한 곳에 둔다.
+function nextTabKey(shift) {
+  const i = TABS.findIndex((t) => t.key === tab);
+  return TABS[(i + (shift ? TABS.length - 1 : 1)) % TABS.length].key;
+}
+
 // 짧은 알림 — 오래 걸리는 AI 작업의 진행 상태를 보여준다
 let toastTimer = null;
 function toast(text, { spinner = false, holdMs = 2400 } = {}) {
@@ -1087,9 +1141,29 @@ document.addEventListener('keydown', async (e) => {
     else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       closeSearch(true);
+    } else if (e.key === 'Tab') {
+      // 필터를 걸어둔 채 탭을 옮기는 게 검색의 목적이다(11절) — 여기서 처리하지 않으면
+      // 기본 동작(포커스 이동)으로 입력창에서 커서만 빠지고 searchOn이 남아 모든 키가 삼켜진다.
+      e.preventDefault();
+      closeSearch(true);
+      switchTab(nextTabKey(e.shiftKey));
     }
     e.stopPropagation();
     return;
+  }
+
+  // 전체 키맵 — 어느 화면에서든 ?로 열고, 열려 있는 동안은 읽는 데만 쓴다
+  if (keysOpen) {
+    if (e.key === 'Escape' || e.key === '?') {
+      e.preventDefault();
+      closeKeys();
+    }
+    e.stopPropagation();
+    return;
+  }
+  if (e.key === '?') {
+    e.preventDefault();
+    return openKeys();
   }
 
   // 완료 기록 — 읽기만 하는 화면이라 스크롤과 닫기만 있다
@@ -1133,8 +1207,8 @@ document.addEventListener('keydown', async (e) => {
         if (!i) return;
         e.preventDefault();
         const res = await window.whenwork.promoteIssue(resume.projectId, { url: i.url, title: i.title });
-        if (!res.ok) return toast('할 일로 세우지 못했습니다');
-        toast(res.created ? `오늘 할 일로 — "${clip(i.title, 30)}"` : '이미 할 일로 서 있습니다');
+        if (!res.ok) return toast('할 일로 세우기 실패');
+        toast(res.created ? `오늘 할 일로 — "${clip(i.title, 30)}"` : '이미 할 일에 있음');
         if (res.created) {
           const fresh = await window.whenwork.resumeGet(resume.projectId, false);
           if (view === 'resume' && fresh.ok) {
@@ -1156,11 +1230,9 @@ document.addEventListener('keydown', async (e) => {
     case '/':
       e.preventDefault();
       return openSearch();
-    case 'Tab': {
+    case 'Tab':
       e.preventDefault();
-      const i = TABS.findIndex((t) => t.key === tab);
-      return switchTab(TABS[(i + (e.shiftKey ? TABS.length - 1 : 1)) % TABS.length].key);
-    }
+      return switchTab(nextTabKey(e.shiftKey));
   }
 
   // 리뷰 탭 — 목록이 아니라 문서라 조작이 다르다 (↑↓·j·k까지 스크롤로 쓴다)
@@ -1323,7 +1395,7 @@ document.addEventListener('keydown', async (e) => {
       const text = await promptText('마감일 — 오늘 / 내일 / +3 / 8-12 / 2026-08-12 (비우면 해제)', it.due ? String(it.due).slice(0, 10) : '');
       if (text === null) return;
       const res = await window.whenwork.setDue(it.id, text);
-      if (!res.ok) toast('날짜를 알아듣지 못했습니다 — 오늘 / 내일 / +3 / 8-12 형식');
+      if (!res.ok) toast('날짜 형식이 아님 — 오늘 / 내일 / +3 / 8-12');
       return refresh();
     }
     case 'n':
@@ -1339,8 +1411,8 @@ document.addEventListener('keydown', async (e) => {
       if (tab !== 'inbox') return;
       toast('인박스 분류 중… (claude -p)', { spinner: true, holdMs: 0 });
       const res = await window.whenwork.classifyInbox();
-      if (res.ok) toast(res.suggested ? `${res.total}건 중 ${res.suggested}건 제안 — Enter로 확정` : '제안할 만한 항목이 없습니다');
-      else if (res.busy) toast('이미 분류 중입니다');
+      if (res.ok) toast(res.suggested ? `${res.total}건 중 ${res.suggested}건 제안 — Enter로 확정` : '제안할 항목 없음');
+      else if (res.busy) toast('이미 분류 중');
       else toast('분류 실패 — claude -p 응답 없음');
       return refresh();
     }
@@ -1385,8 +1457,8 @@ document.addEventListener('keydown', async (e) => {
       if (tab !== 'waiting' || !it) return;
       e.preventDefault();
       const res = await window.whenwork.nudge(it.id);
-      if (!res.ok) return toast('재촉을 기록하지 못했습니다');
-      toast(`재촉 ${res.count}회째 — "${clip(it.title)}" · 경과를 지금부터 다시 셉니다`);
+      if (!res.ok) return toast('재촉 기록 실패');
+      toast(`재촉 ${res.count}회째 — "${clip(it.title)}"`);
       return refresh();
     }
     case 'h':
@@ -1400,7 +1472,7 @@ document.addEventListener('keydown', async (e) => {
       dueOnly = !dueOnly;
       sel = 0;
       resetScroll = true;
-      toast(dueOnly ? '마감 있는 것만 봅니다' : '오늘 탭 — 전체를 봅니다');
+      toast(dueOnly ? '마감 있는 것만' : '전체');
       return render();
     }
     case 'x':
@@ -1414,7 +1486,7 @@ document.addEventListener('keydown', async (e) => {
     case 'u':
     case 'U': {
       const last = deleted.pop();
-      if (!last) return toast('되돌릴 삭제가 없습니다');
+      if (!last) return toast('되돌릴 삭제 없음');
       await window.whenwork.restore(last.id);
       toast(`되돌림 — "${clip(last.title)}"`);
       return refresh();
@@ -1424,10 +1496,11 @@ document.addEventListener('keydown', async (e) => {
       const n = Number(e.key);
       if (n >= 1 && n <= 9 && it) {
         const p = state.projects[n - 1];
-        if (p) {
-          await window.whenwork.assign(it.id, p.id);
-          await refresh();
-        }
+        if (!p) return;
+        // 대기 탭에서는 프로젝트만 바꾼다 — kind까지 todo로 돌리면 대기에서 사라진다.
+        // 결과는 행의 프로젝트 칩으로 바로 보이므로 따로 알리지 않는다.
+        await window.whenwork.assign(it.id, p.id, tab === 'waiting');
+        await refresh();
       }
     }
   }

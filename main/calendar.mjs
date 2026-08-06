@@ -63,8 +63,8 @@ export async function fetchCalendar(url, { now = new Date(), timeoutMs = 20_000,
     if (!res.ok) {
       throw new Error(
         res.status === 401 || res.status === 403
-          ? '웹앱이 로그인을 요구합니다 — 배포의 액세스 권한을 "모든 사용자"로 바꾸세요'
-          : `웹앱이 HTTP ${res.status}를 돌려줬습니다`
+          ? '웹앱이 로그인 요구 — 배포 액세스 권한을 "모든 사용자"로'
+          : `웹앱 HTTP ${res.status}`
       );
     }
     let payload;
@@ -73,8 +73,8 @@ export async function fetchCalendar(url, { now = new Date(), timeoutMs = 20_000,
     } catch {
       throw new Error(
         /액세스|로그인|sign in|<html/i.test(text)
-          ? '일정 대신 로그인 페이지가 왔습니다 — 배포의 액세스 권한을 "모든 사용자"로 바꾸세요'
-          : '웹앱 응답이 JSON이 아닙니다'
+          ? '일정 대신 로그인 페이지 — 배포 액세스 권한을 "모든 사용자"로'
+          : '웹앱 응답이 JSON이 아님'
       );
     }
     if (payload?.error) throw new Error(String(payload.error).slice(0, 160));

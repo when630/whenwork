@@ -129,6 +129,8 @@
   .isu.closed { color: var(--success); background: rgba(158,206,106,.12); }
   .issue .asg.todo { color: var(--accent); background: var(--accent-dim); }
   .ctx, .wait-meta { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; }
+  /* 대기 항목의 프로젝트 — 경과·재촉 뒤에 붙는다 */
+  .wait-meta .chip { margin-left: 8px; vertical-align: 1px; }
   .suggest { display: flex; gap: 6px; align-items: center; width: 100%; margin-left: 23px; font-size: var(--fs-xs); }
   .suggest .act { color: var(--text-muted); }
   .badge-ai {
@@ -153,13 +155,20 @@
     color: var(--ai); background: var(--ai-dim); border-radius: 99px; padding: 1px 7px;
   }
 
+  /* ── 프로젝트 번호 띠
+     1~9가 무엇인지는 스크롤과 무관하게 늘 같은 자리에 있어야 한다 — 목록 끝에 한 번 적는
+     방식으로는 항목이 쌓이면 화면 밖으로 밀려 결국 아무도 못 본다. */
   .numlegend {
-    margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-4) 0;
-    border-top: 1px dashed var(--border);
-    font-size: var(--fs-xs); color: var(--text-muted);
-    display: flex; gap: 12px; flex-wrap: wrap;
+    display: none; flex: none; flex-wrap: wrap; gap: var(--sp-3);
+    padding: 6px var(--sp-5);
+    border-top: 1px solid var(--border); background: var(--bg-raised);
+    font-size: var(--fs-xs); color: var(--text-secondary);
   }
-  .numlegend b { font-family: var(--font-mono); color: var(--text-secondary); }
+  .numlegend.show { display: flex; }
+  .numlegend b { font-family: var(--font-mono); color: var(--accent); margin-right: 5px; }
+  .numlegend .ab { font-family: var(--font-mono); color: var(--text-muted); margin-left: 5px; }
+  /* 이름 칩에도 같은 번호를 달아 눈으로 익게 한다 (오늘 탭 그룹·대기 행·AI 제안) */
+  .chip .pn { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
 
   /* 프로젝트 탭 */
   .proj-num { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); flex: none; width: 14px; text-align: right; margin-top: 3px; }
@@ -383,6 +392,24 @@
   }
   .rv-file:hover { color: var(--accent); text-decoration: underline; }
 
+  /* ── 전체 키맵 (?)
+     하단 힌트를 네 칸으로 줄인 대신 나머지 키는 여기서 한 번에 본다 —
+     힌트가 열 칸을 넘어가면 결국 아무것도 읽히지 않는다. */
+  #keys {
+    display: none; position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(560px, calc(100% - 32px)); max-height: 78vh; overflow-y: auto;
+    background: var(--bg-raised); border: 1px solid var(--border-focus);
+    border-radius: var(--r-md); padding: var(--sp-4) var(--sp-5) var(--sp-5);
+    box-shadow: var(--shadow-pop); z-index: 11;
+  }
+  #keys.show { display: block; }
+  #keys .kh { display: flex; align-items: baseline; font-weight: 700; margin-bottom: var(--sp-3); }
+  #keys .kh span { margin-left: auto; font-size: var(--fs-xs); font-weight: 400; color: var(--text-muted); }
+  #keys .kbody { display: grid; grid-template-columns: 76px 1fr; gap: var(--sp-2) var(--sp-3); align-items: baseline; }
+  #keys .g { font-size: var(--fs-xs); color: var(--text-muted); }
+  #keys .ks { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: var(--fs-sm); color: var(--text-secondary); }
+  #keys .ks span { white-space: nowrap; }
+
   /* ── 입력 다이얼로그 (공용) */
   #dlg {
     display: none; position: fixed; left: 50%; top: 38%; transform: translateX(-50%);
@@ -413,10 +440,15 @@
       <span class="cnt" id="searchCnt"></span>
     </div>
     <div class="body" id="body" tabindex="-1"></div>
+    <div class="numlegend" id="numlegend"></div>
     <footer>
       <span class="sync" id="sync"><span class="led"></span><span id="syncText">동기화됨</span></span>
       <span class="foot-hints" id="hints"></span>
     </footer>
+  </div>
+  <div id="keys">
+    <div class="kh">키<span>? · Esc 로 닫기</span></div>
+    <div class="kbody" id="keysBody"></div>
   </div>
   <div id="dlg">
     <label id="dlgLabel"></label>

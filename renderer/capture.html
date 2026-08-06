@@ -35,6 +35,8 @@
   .msg { text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .msg.ok { color: var(--success); }
   .msg.warn { color: var(--warning); }
+  /* 치는 동안 알려주는 #약어 상태 — 저장(초록)과 구분해 악센트로 */
+  .msg.hint { color: var(--accent); font-family: var(--font-mono); }
 </style>
 </head>
 <body>
@@ -46,6 +48,7 @@
     <div class="foot">
       <div class="hints">
         <span><kbd>Enter</kbd> 저장</span>
+        <span><kbd>#약어</kbd> 프로젝트</span>
         <span><kbd>Tab</kbd> 앱 열기</span>
         <span><kbd>Esc</kbd> 닫기</span>
       </div>

@@ -10,9 +10,9 @@ const DEFAULT_TIMEOUT_MS = 300_000;
 function friendlyError(text) {
   const s = String(text ?? '').trim();
   if (!s) return null;
-  if (/529|overloaded/i.test(s)) return 'Claude 서버가 혼잡합니다 (529) — 잠시 뒤 다시 시도하세요';
-  if (/rate limit|usage limit|quota/i.test(s)) return '구독 사용량 한도에 걸렸습니다 — 잠시 뒤 다시 시도하세요';
-  if (/not logged in|authentication|unauthorized/i.test(s)) return 'Claude 로그인이 필요합니다 — 터미널에서 `claude` 실행 후 로그인';
+  if (/529|overloaded/i.test(s)) return 'Claude 서버 혼잡 (529) — 잠시 뒤 다시';
+  if (/rate limit|usage limit|quota/i.test(s)) return '구독 사용량 한도 — 잠시 뒤 다시';
+  if (/not logged in|authentication|unauthorized/i.test(s)) return 'Claude 로그인 필요 — 터미널에서 claude 실행';
   return s.split('\n')[0].slice(0, 160);
 }
 
@@ -23,18 +23,18 @@ function claudeP(prompt, timeoutMs = DEFAULT_TIMEOUT_MS) {
     let err = '';
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error(`claude -p 응답이 없어 ${Math.round(timeoutMs / 1000)}초에서 중단했습니다`));
+      reject(new Error(`claude -p 무응답 — ${Math.round(timeoutMs / 1000)}초에서 중단`));
     }, timeoutMs);
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (err += d));
     child.on('error', (e) => {
       clearTimeout(timer);
-      reject(new Error(e.code === 'ENOENT' ? 'claude 실행 파일을 찾을 수 없습니다' : String(e.message ?? e)));
+      reject(new Error(e.code === 'ENOENT' ? 'claude 실행 파일 없음' : String(e.message ?? e)));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code === 0) return resolve(out);
-      reject(new Error(friendlyError(err || out) ?? `claude가 종료 코드 ${code}로 끝났습니다`));
+      reject(new Error(friendlyError(err || out) ?? `claude 종료 코드 ${code}`));
     });
     child.stdin.write(prompt, 'utf8');
     child.stdin.end();

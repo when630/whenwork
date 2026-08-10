@@ -29,3 +29,17 @@ test('포그라운드 하나만 보지 않고 z-order를 따라 내려간다', (
   assert.match(s, /GetWindowThreadProcessId/);
   assert.match(s, /DWMWA_CLOAKED/); // 클로킹된 유령 창을 고르면 엉뚱한 맥락이 남는다
 });
+
+test('z-order를 훑을 때는 항상 위인 창을 건너뛴다', () => {
+  // topmost 창은 z-order에서 일반 창보다 전부 앞에 선다. 건너뛰지 않으면 항상 위로 띄워둔 앱
+  // 하나가 폴백의 영구 정답이 되어 컨텍스트가 다시 상수가 된다(실사용 5건 전부 "Claude Office").
+  const s = psScript(1);
+  assert.match(s, /WS_EX_TOPMOST = 0x8/);
+  assert.match(s, /skipTopmost && \(ex & WS_EX_TOPMOST\)/);
+  assert.match(s, /Usable\(h, skip, true\)/);
+});
+
+test('포그라운드가 이미 실제 창이면 항상 위여도 그대로 쓴다', () => {
+  // 항상 위인 창을 직접 눌러 쓰던 중이라면 그게 맞는 답이다 — 여기서 빼면 정답을 버린다
+  assert.match(psScript(1), /Usable\(fg, skip, false\)/);
+});

@@ -7,6 +7,14 @@
 //   노이즈만 들어갔다. 그래서 **우리 프로세스가 가진 창을 후보에서 빼고** z-order에서
 //   가장 위인 실제 창을 고른다. 시점에 의존하지 않으므로 창을 띄운 뒤에 실행돼도 답이 같다.
 //
+// ※ 그런데 그 폴백은 **항상 위(WS_EX_TOPMOST) 창에 걸려 또 상수가 됐다.** z-order는 topmost
+//   창 전부를 일반 창보다 앞에 세우므로, 항상 위로 띄워둔 앱이 하나라도 있으면 아래로 내려갈 일이
+//   없다 — 실사용에서 우리 창을 뺀 뒤 캡처 5건이 전부 "Claude Office"(항상 위로 상주하는 다른
+//   앱)로 남았다. 우리 창 제외는 상수를 하나에서 다른 하나로 옮겼을 뿐이었다. 그래서 **폴백에서는
+//   topmost도 건너뛴다** — 남는 것 중 가장 위가 곧 직전에 쓰던 일반 창이다.
+//   포그라운드가 이미 실제 창일 때는 그 판정을 적용하지 않는다. 항상 위인 창을 직접 눌러 쓰는
+//   중이었다면 그게 맞는 답이고, 여기서 빼면 멀쩡한 정답을 버리게 된다.
+//
 // PowerShell 5.1의 출력 인코딩은 코드페이지(cp949)를 타서 한글 창 제목이 깨진다 —
 // UTF-8 바이트를 Base64로 감싸 받아 Node에서 푼다.
 import { execFile } from 'node:child_process';
@@ -35,6 +43,7 @@ public class FG {
   const uint GW_HWNDNEXT = 2;
   const int GWL_EXSTYLE = -20;
   const int WS_EX_TOOLWINDOW = 0x80;
+  const int WS_EX_TOPMOST = 0x8;
   const int DWMWA_CLOAKED = 14;
 
   static string Title(IntPtr h) {
@@ -45,23 +54,26 @@ public class FG {
     return sb.ToString();
   }
 
-  static bool Usable(IntPtr h, uint skip) {
+  static bool Usable(IntPtr h, uint skip, bool skipTopmost) {
     if (h == IntPtr.Zero || !IsWindowVisible(h)) return false;
     uint pid = 0;
     GetWindowThreadProcessId(h, out pid);
     if (pid == 0 || pid == skip) return false;
-    if ((GetWindowLong(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0) return false;
+    int ex = GetWindowLong(h, GWL_EXSTYLE);
+    if ((ex & WS_EX_TOOLWINDOW) != 0) return false;
+    if (skipTopmost && (ex & WS_EX_TOPMOST) != 0) return false;
     int cloaked = 0;
     if (DwmGetWindowAttribute(h, DWMWA_CLOAKED, out cloaked, 4) == 0 && cloaked != 0) return false;
     return Title(h).Length > 0;
   }
 
-  // 포그라운드가 우리 창이 아니면 그게 답이고, 우리 창이면 z-order를 따라 내려가며 첫 실제 창을 찾는다
+  // 포그라운드가 우리 창이 아니면 그게 답이고(항상 위인 창이어도 그렇다),
+  // 우리 창이면 z-order를 따라 내려가며 첫 실제 창을 찾는다 — 이때는 항상 위인 창을 건너뛴다.
   public static string Pick(uint skip) {
     IntPtr fg = GetForegroundWindow();
-    if (Usable(fg, skip)) return Title(fg);
+    if (Usable(fg, skip, false)) return Title(fg);
     for (IntPtr h = GetTopWindow(IntPtr.Zero); h != IntPtr.Zero; h = GetWindow(h, GW_HWNDNEXT)) {
-      if (Usable(h, skip)) return Title(h);
+      if (Usable(h, skip, true)) return Title(h);
     }
     return "";
   }

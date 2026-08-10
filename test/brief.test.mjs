@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { briefDecision, briefingLines, dayKey } from '../main/brief.mjs';
+import { briefDecision, briefingLines, reviewDue, dayKey } from '../main/brief.mjs';
 
 const at = (h, m = 0) => new Date(2026, 7, 5, h, m);
 
@@ -69,4 +69,72 @@ test('일정만 있어도 알린다', () => {
 test('챙길 게 없으면 빈 배열 — 호출부가 알림을 생략한다', () => {
   assert.deepEqual(briefingLines({ overdue: 0, due_today: 0, stale_waiting: 0, inbox: 0 }), []);
   assert.deepEqual(briefingLines({}), []);
+});
+
+// ── 마감을 쓰지 않는 주에도 말이 있어야 한다 (실사용에서 8/7~8/10 브리핑이 통째로 침묵했다)
+
+test('급한 게 하나도 없으면 손에 든 할 일을 대신 말한다', () => {
+  assert.deepEqual(briefingLines({ open_todo: 7, oldest_todo_days: 5 }), [
+    '할 일 7건 (가장 오래된 건 5일째)',
+  ]);
+});
+
+test('오늘내일 담은 것에는 날짜를 붙이지 않는다', () => {
+  assert.deepEqual(briefingLines({ open_todo: 2, oldest_todo_days: 1 }), ['할 일 2건']);
+  assert.deepEqual(briefingLines({ open_todo: 1, oldest_todo_days: 0 }), ['할 일 1건']);
+});
+
+test('급한 게 있으면 할 일 총계는 빠진다 — 지연은 이미 그 안에 있다', () => {
+  assert.deepEqual(briefingLines({ overdue: 2, open_todo: 7, oldest_todo_days: 9 }), ['지연 2건']);
+});
+
+test('할 일이 0건이면 여전히 조용하다', () => {
+  assert.deepEqual(briefingLines({ open_todo: 0, oldest_todo_days: 0 }), []);
+});
+
+test('지난주 리뷰는 맨 뒤에 한 마디로 붙는다', () => {
+  assert.deepEqual(briefingLines({ overdue: 1 }, { review: 'ready' }), [
+    '지연 1건',
+    '지난주 리뷰 준비됨',
+  ]);
+  assert.deepEqual(briefingLines({}, { review: 'pending' }), ['지난주 리뷰 아직']);
+});
+
+// ── reviewDue — 주가 끝난 뒤에 다시 만든다
+
+const END = new Date(2026, 7, 10); // 32주의 상한 = 8/10(월) 0시
+const mon = (h = 9) => new Date(2026, 7, 10, h);
+
+test('주가 끝났는데 리뷰가 없으면 만든다', () => {
+  assert.equal(reviewDue({ now: mon(), weekEnd: END }), true);
+});
+
+test('그 주가 끝나기 전에 만든 초안은 낡은 것으로 본다', () => {
+  // 실제로 32주 리뷰가 8/5(수)에 만들어진 채 주가 끝나도 그대로였다
+  assert.equal(reviewDue({ now: mon(), weekEnd: END, generatedAt: new Date(2026, 7, 5, 17) }), true);
+});
+
+test('주가 끝난 뒤에 만든 것은 그대로 둔다', () => {
+  assert.equal(reviewDue({ now: mon(11), weekEnd: END, generatedAt: mon(10) }), false);
+});
+
+test('아직 끝나지 않은 주는 건드리지 않는다', () => {
+  assert.equal(reviewDue({ now: new Date(2026, 7, 9, 23), weekEnd: END }), false);
+});
+
+test('월요일 이른 시각에도 지난주는 이미 끝나 있다', () => {
+  // weekEnd가 자정으로 정규화되지 않으면 월요일 오전 내내 막힌다
+  assert.equal(reviewDue({ now: mon(0), weekEnd: END }), true);
+});
+
+test('실패한 날은 더 두드리지 않는다 — AI 호출이 붙어 있다', () => {
+  const now = mon();
+  assert.equal(reviewDue({ now, weekEnd: END, lastTry: dayKey(now) }), false);
+  assert.equal(reviewDue({ now, weekEnd: END, lastTry: '2026-08-09' }), true);
+});
+
+test('값이 깨졌으면 다시 만드는 쪽으로, 어느 주인지 모르면 손대지 않는다', () => {
+  assert.equal(reviewDue({ now: mon(), weekEnd: END, generatedAt: '뭐라고?' }), true);
+  assert.equal(reviewDue({ now: mon(), weekEnd: null }), false);
+  assert.equal(reviewDue({ now: mon(), weekEnd: '뭐라고?' }), false);
 });

@@ -691,6 +691,10 @@ export function createDb(config = {}) {
          count(*) FILTER (WHERE due < current_date)   AS overdue,
          count(*) FILTER (WHERE due = current_date)   AS due_today,
          count(*) FILTER (WHERE kind = 'inbox')                          AS inbox,
+         -- 마감이 없어도 손에 든 것은 셀 수 있다 (brief.mjs의 폴백이 쓴다)
+         count(*) FILTER (WHERE kind = 'todo')                           AS open_todo,
+         coalesce(max(current_date - captured_at::date)
+                    FILTER (WHERE kind = 'todo'), 0)                     AS oldest_todo_days,
          -- 재촉한 건은 그때부터 다시 센다 — 처음 부탁한 날로 세면 방금 재촉한 것까지 묶여 나온다
          count(*) FILTER (WHERE kind = 'waiting'
                             AND coalesce(nudged_at, captured_at) < now() - ($1 || ' days')::interval) AS stale_waiting

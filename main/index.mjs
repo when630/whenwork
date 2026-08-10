@@ -31,6 +31,7 @@ import { syncCalendar, maskUrl, calendarRange } from './calendar.mjs';
 import {
   briefDecision,
   briefingLines,
+  reviewDue,
   dayKey,
   NOTIFY_AT_DEFAULT,
   STALE_WAITING_DAYS,
@@ -507,6 +508,46 @@ ipcMain.handle('review:openFile', async (_e, file) => {
   return { ok: !err };
 });
 
+const weekTag = (w) => `${w.year}-W${String(w.week).padStart(2, '0')}`;
+
+// ── 지난주 리뷰를 스스로 만든다. 백업과 같은 이유다(12.6) — 사람이 누르기를 기다렸더니
+// 그 주 수요일에 만든 32주 초안이 주가 끝난 뒤에도 그대로 남았다. 알림 설정과 무관하게 돌고,
+// 카드를 미리 데워두는 것(prewarmCards)과 같은 뜻이다: 열었을 때 이미 있어야 읽는 습관이 붙는다.
+// 판단은 main/brief.mjs의 reviewDue (테스트 대상).
+async function maybeReview() {
+  if (reviewing) return;
+  const w = weekOf(-1);
+  const lastTry = settings.get('lastReviewTry');
+  // 값싼 조건부터 — 오늘 이미 실패했거나 아직 끝나지 않은 주면 DB를 건드리지 않는다.
+  // 같은 함수를 두 번 부르는 이유는 규칙을 여기에 베껴 쓰지 않기 위해서다.
+  if (!reviewDue({ weekEnd: w.to, lastTry })) return;
+  if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 — 시도로 치지 않는다
+  const existing = await db.getReview(w.week.year, w.week.week).catch(() => null);
+  if (!reviewDue({ weekEnd: w.to, generatedAt: existing?.generated_at, lastTry })) return;
+  const res = await makeWeeklyReview(-1);
+  if (res.busy) return;
+  if (res.ok) {
+    settings.remove('lastReviewError'); // 지난 실패는 성공으로 지운다
+    refreshTrayMenu();
+    return; // 만들었다고 따로 알리지는 않는다 — 아침 브리핑이 대신 전한다
+  }
+  settings.set('lastReviewTry', dayKey()); // 실패한 날은 더 두드리지 않는다 (AI 호출이 붙어 있다)
+  settings.set('lastReviewError', res.error ?? '원인 불명');
+  refreshTrayMenu();
+}
+
+// 브리핑에 붙일 리뷰 한 마디. 한 주에 한 번만 — 매일 붙으면 잔소리가 된다.
+// 태그는 알림을 실제로 띄운 뒤에 찍는다(호출부) — 띄우지 못한 아침을 썼다고 치면 그 주는 조용해진다.
+async function reviewNotice() {
+  const w = weekOf(-1);
+  const tag = weekTag(w.week);
+  if (settings.get('lastReviewNotice') === tag) return null;
+  if (new Date() < w.to) return null; // 아직 끝나지 않은 주를 두고 할 말은 없다
+  const existing = await db.getReview(w.week.year, w.week.week).catch(() => null);
+  const fresh = existing?.generated_at && new Date(existing.generated_at) >= w.to;
+  return { tag, state: fresh ? 'ready' : 'pending' };
+}
+
 // ── 설정
 //
 // DB가 꺼져 있어도 봐야 하는 화면이라(접속 정보 확인) DB 경로를 타지 않는다.
@@ -524,6 +565,7 @@ ipcMain.handle('settings:get', () => ({
   defaults: { notifyAt: NOTIFY_AT_DEFAULT, backupDir: BACKUP_DIR_DEFAULT },
   lastBackup: settings.get('lastBackup'),
   lastBackupError: settings.get('lastBackupError'),
+  lastReviewError: settings.get('lastReviewError'),
   db: {
     host: dbConfig.host ?? '127.0.0.1',
     port: dbConfig.port ?? 5433,
@@ -670,14 +712,20 @@ async function maybeBrief() {
   }
   if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 다시 시도한다
   try {
+    // 리뷰를 먼저 세운다 — 아침에 켠 날은 둘이 같은 박자로 시작해서, 기다리지 않으면
+    // 브리핑이 늘 "아직"이라고 말하게 된다. 생성 중이거나 이미 있으면 바로 돌아온다.
+    await maybeReview().catch(() => {});
+    const notice = await reviewNotice().catch(() => null);
     const parts = briefingLines(await db.briefing(STALE_WAITING_DAYS), {
       events: await todayEvents(),
+      review: notice?.state ?? null,
     });
     settings.set('lastBriefing', today);
     if (!parts.length) return; // 챙길 게 없으면 조용히
     const note = new Notification({ title: '오늘 WHENWORK', body: parts.join(' · ') });
     note.on('click', () => showToday());
     note.show();
+    if (notice) settings.set('lastReviewNotice', notice.tag);
   } catch {
     // 브리핑 실패는 조용히 — 다음 날 다시
   }
@@ -858,6 +906,7 @@ function refreshTrayMenu() {
   const lastCollect = settings.get('lastCollect');
   const lastBackup = settings.get('lastBackup');
   const backupError = settings.get('lastBackupError');
+  const reviewError = settings.get('lastReviewError');
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '오늘 뷰', click: toggleToday },
@@ -902,6 +951,8 @@ function refreshTrayMenu() {
             : '백업 이력 없음',
         enabled: false,
       },
+      // 성공은 리뷰 탭에 결과물로 남는다 — 여기서는 못 만든 것만 말한다
+      ...(reviewError ? [{ label: `주간 리뷰 실패 — ${reviewError}`, enabled: false }] : []),
       { type: 'separator' },
       {
         label: '로그인 시 자동 시작',
@@ -1266,6 +1317,9 @@ app.whenReady().then(async () => {
     setInterval(maybeBrief, BRIEFING_CHECK_MS);
     setTimeout(maybeBackup, COLLECT_DELAY_MS); // 백업도 같은 박자로 — 시각은 따지지 않는다
     setInterval(maybeBackup, BRIEFING_CHECK_MS);
+    // 리뷰도 마찬가지로 자립한다 — 브리핑을 꺼둔 날에도, 브리핑이 먼저 돌지 않은 날에도
+    setTimeout(maybeReview, COLLECT_DELAY_MS);
+    setInterval(maybeReview, BRIEFING_CHECK_MS);
     // 캘린더는 git보다 자주 바뀐다 — 6시간 주기와 따로 돈다
     setInterval(syncCalendarNow, CALENDAR_MS);
   }

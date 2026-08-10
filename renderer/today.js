@@ -847,6 +847,12 @@ function renderSettings() {
   );
   backup.onclick = runBackup;
   dbSec.append(backup);
+  // 리뷰는 스스로 만들어진다 — 그래서 못 만든 날은 말해줘야 한다. 조용하면 만들어진 줄 안다.
+  if (cfg.lastReviewError) {
+    const rv = el('div', 'rv-file');
+    rv.append(window.ICONS.context(), document.createTextNode(` 주간 리뷰 실패 — ${cfg.lastReviewError}`));
+    dbSec.append(rv);
+  }
   if (cfg.values.calendarUrl) {
     const c = cfg.calendar ?? {};
     const cal = el('div', 'rv-file');

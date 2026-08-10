@@ -61,10 +61,29 @@ export function briefingLines(
   // 한꺼번에 0이 되어 브리핑이 통째로 침묵했다 — 열린 할 일이 11건 있던 아침에도 그랬다.
   // 아침에 아무 말이 없으니 앱을 열 이유도 없어졌다. 브리핑이 마감이라는 습관 하나에
   // 얹혀 있던 셈이라, 그것이 비었을 때 대신 말할 것을 둔다(급한 게 있으면 이건 중복이다).
-  if (!parts.length && b.open_todo) {
-    const oldest = Number(b.oldest_todo_days) || 0;
-    const tail = oldest >= STALE_TODO_DAYS ? ` (가장 오래된 건 ${oldest}일째)` : '';
-    parts.push(`할 일 ${b.open_todo}건${tail}`);
+  //
+  // 이 자리에는 **손 입력을 요구하지 않는 것**도 함께 선다. 실사용에서 할 일은 whenwork가 아니라
+  // 이슈로 캡처되고 있었고(같은 날 손 캡처 0건 · 새 이슈 3건), 리포에는 며칠씩 잊힌 stash가 남아
+  // 있었다. 둘 다 사람이 적지 않아도 이미 존재하는 일이라, 아침에 말할 거리가 마감 습관과
+  // 무관해진다. 급한 것이 있는 날에는 붙이지 않는다 — 그날은 이미 할 말이 있다.
+  if (!parts.length) {
+    if (b.open_todo) {
+      const oldest = Number(b.oldest_todo_days) || 0;
+      const tail = oldest >= STALE_TODO_DAYS ? ` (가장 오래된 건 ${oldest}일째)` : '';
+      parts.push(`할 일 ${b.open_todo}건${tail}`);
+    }
+    // 지금 손대는 프로젝트의 열린 이슈만 — 백로그까지 세면 매일 같은 숫자가 뜬다
+    if (b.active_issues) {
+      const who = b.active_issue_projects ? `${b.active_issue_projects} ` : '';
+      parts.push(`${who}이슈 ${b.active_issues}건`);
+    }
+    // 끝내지 않고 둔 자리. 가장 오래된 하나만 말하고 나머지는 곳 수로 줄인다
+    if (b.stale_repos && b.stale_repo_label) {
+      const days = Number(b.oldest_repo_days) || 0;
+      const age = days >= STALE_TODO_DAYS ? ` (${days}일째)` : '';
+      const more = b.stale_repos > 1 ? ` 외 ${b.stale_repos - 1}곳` : '';
+      parts.push(`${b.stale_repo_label}${age}${more}`);
+    }
   }
   // 주간 리뷰는 알림을 따로 갖지 않는다(알림은 아침 브리핑 하나 — 오픈이슈 #3).
   if (review === 'ready') parts.push('지난주 리뷰 준비됨');

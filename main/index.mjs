@@ -22,6 +22,7 @@ import { createSettings } from './settings.mjs';
 import { pickPosition } from './place.mjs';
 import { foregroundTitle } from './context.mjs';
 import { collectProject } from './collect.mjs';
+import { collectRepoStates } from './repo.mjs';
 import { syncProjectIssues } from './issues.mjs';
 import { generateResumeCard, classifyInbox, generateWeeklyReview } from './ai.mjs';
 import { parseCaptureToken, parseDue, isoWeek, weekRange } from './parse.mjs';
@@ -229,6 +230,49 @@ const SMOKE_PROBE = `(async () => {
       throw new Error('행마다 점 위치가 다르다: ' + geom.map(function (g) { return g.dot.toFixed(1); }).join(','));
     }
   });
+  // 이슈 탭의 서브탭 — ←→로 프로젝트를 오간다. 목록이 서브탭 하나만큼으로 좁아지므로
+  // 선택 인덱스가 그리는 것과 어긋나면 엉뚱한 이슈를 T로 담는다. 실제로 키를 눌러 확인한다.
+  await step('issue-subtabs', () => {
+    if (!state || !state.online) return;
+    state.projects = [{ id: 1, name: '가', abbr: 'ga' }, { id: 2, name: '나', abbr: 'na' }];
+    state.issues = [
+      { project_id: 1, project_name: '가', provider: 'github', kind: 'issue', number: 1, title: '활동 중인 것', url: 'https://example.invalid/1', state: 'open', relation: 'author', active: true },
+      { project_id: 2, project_name: '나', provider: 'github', kind: 'issue', number: 2, title: '백로그', url: 'https://example.invalid/2', state: 'open', relation: 'author', active: false },
+      { project_id: 2, project_name: '나', provider: 'github', kind: 'issue', number: 3, title: '백로그 둘', url: 'https://example.invalid/3', state: 'open', relation: 'author', active: false },
+    ];
+    issueSub = null;
+    switchTab('issues');
+    var bar = document.getElementById('subtabs');
+    if (!bar.classList.contains('show')) throw new Error('이슈 탭인데 서브탭 띠가 서지 않았다');
+    var labels = [].map.call(bar.querySelectorAll('.subtab span:first-child'), function (s) { return s.textContent; });
+    if (labels.join(',') !== '지금,가,나') throw new Error('서브탭 차례가 다르다: ' + labels.join(','));
+    if (document.querySelectorAll('.issue').length !== 1) throw new Error('「지금」은 활동 중인 것만 세워야 한다');
+    // →로 옮기면 목록도 함께 좁아져야 한다
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    if (currentIssueTab().label !== '가') throw new Error('→가 서브탭을 옮기지 않았다: ' + currentIssueTab().label);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    if (document.querySelectorAll('.issue').length !== 2) throw new Error('「나」의 이슈 2건이 서지 않았다');
+    if (currentList().length !== 2) throw new Error('선택 목록이 서브탭을 따라오지 않았다');
+    // 끝에서 한 번 더 — 감싸서 첫 자리로 돌아온다
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    if (currentIssueTab().key !== 'now') throw new Error('끝에서 첫 자리로 감싸지 않았다');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    if (currentIssueTab().label !== '나') throw new Error('←가 뒤로 감싸지 않았다');
+    // 다른 탭으로 나가면 띠도 물러난다
+    switchTab('today');
+    if (bar.classList.contains('show')) throw new Error('오늘 탭에서 서브탭 띠가 남았다');
+  });
+  // 리포에 끝내지 않고 둔 자리 — 프로젝트 줄에 그대로 드러난다
+  await step('repo-left', () => {
+    if (!state || !state.online) return;
+    state.repoStates = [
+      { project_id: 1, repo_path: 'D:/x', dirty: 2, ahead: 0, stash_count: 1, stash_at: new Date(Date.now() - 4 * 86400000).toISOString(), label: 'stash 1건 · 작업본 2개' },
+    ];
+    switchTab('projects');
+    var mark = document.querySelector('.proj-left');
+    if (!mark) throw new Error('둔 자리가 프로젝트 줄에 그려지지 않았다');
+    if (mark.textContent.indexOf('4일째') < 0) throw new Error('며칠째인지가 빠졌다: ' + mark.textContent);
+  });
   // 이슈에서 세운 할 일과 재촉한 대기 — 실제 데이터가 없어도 그리는 경로는 밟아 둔다.
   // (state를 직접 갈아끼우므로 이 뒤로는 화면 데이터가 진짜가 아니다 — 마지막에 둔다)
   await step('item-badges', () => {
@@ -388,6 +432,8 @@ async function collectAll() {
     for (const p of await db.getProjects()) {
       if (!p.repo_paths?.length) continue;
       await collectProject(db, p);
+      // 커밋(한 일)과 같은 박자로 "덜 한 일"도 읽는다 — 둘 다 리포가 원본이라 한 번에 훑는다
+      await collectRepoStates(db, p).catch(() => {});
       await syncProjectIssues(db, p);
     }
     settings.set('lastCollect', new Date().toISOString());
@@ -1032,6 +1078,8 @@ ipcMain.handle('today:getState', async () => {
     events: await todayEvents(),
     // 열린 이슈는 재개 카드 안에만 있어 오늘 뷰에서 놓쳤다 — 탭 배지로 건수가 늘 보이게 함께 싣는다
     issues: await db.getOpenIssues().catch(() => []),
+    // 리포에 끝내지 않고 둔 자리 — 프로젝트 탭에서 그 리포 줄에 붙는다
+    repoStates: await db.getRepoStates().catch(() => []),
     ...state,
   };
 });

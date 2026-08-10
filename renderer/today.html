@@ -48,6 +48,23 @@
   .tab.on .n { background: var(--accent-dim); color: var(--accent); }
   .tab:hover:not(.on) { background: var(--bg-raised); }
 
+  /* ── 서브탭: 이슈 탭 안에서 프로젝트를 오간다(←→). 상위 탭과 섞이지 않게 더 작고 납작하게 */
+  .subtabs { display: none; gap: 3px; padding: 7px 14px 0; align-items: center; }
+  .subtabs.show { display: flex; }
+  .subtab {
+    padding: 3px 9px; font-size: var(--fs-xs); color: var(--text-muted);
+    border-radius: 99px; cursor: pointer; display: flex; gap: 5px; align-items: center;
+    border: 1px solid transparent; transition: background .1s, color .1s, border-color .1s;
+  }
+  .subtab .n { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); opacity: .8; }
+  /* 최근 커밋이 난 프로젝트는 이름 앞이 아니라 색으로 드러낸다 — 「지금」과 중복해 읽히지 않게 */
+  .subtab.hot { color: var(--text-secondary); }
+  .subtab.on {
+    color: var(--text-primary); background: var(--bg-hover); border-color: var(--border);
+  }
+  .subtab.on .n { color: var(--accent); opacity: 1; }
+  .subtab:hover:not(.on) { background: var(--bg-raised); }
+
   /* ── 검색 바: 필터가 걸려 있는 동안은 흐리게 남아 상태를 드러낸다 */
   .search {
     display: none; align-items: center; gap: var(--sp-2); flex: none;
@@ -177,6 +194,8 @@
   /* 프로젝트 탭 */
   .proj-num { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); flex: none; width: 14px; text-align: right; margin-top: 3px; }
   .proj-repos { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 22px; font-family: var(--font-mono); }
+  /* 끝내지 않고 둔 자리 — 경고는 아니지만 눈에 걸려야 한다 */
+  .proj-left { width: 100%; font-size: var(--fs-xs); color: var(--warning); margin-left: 22px; }
 
   /* ── 오늘 일정 타임라인
      축(세로선)은 각 행이 자기 높이만큼 그려 이어 붙인다. 좌표를 소수점(50% - 0.5px)으로 두면
@@ -471,6 +490,7 @@
       <input id="searchIn" type="text" maxlength="80" placeholder="제목 · 메모 · 프로젝트 · 대기 상대">
       <span class="cnt" id="searchCnt"></span>
     </div>
+    <div class="subtabs" id="subtabs"></div>
     <div class="body" id="body" tabindex="-1"></div>
     <div class="numlegend" id="numlegend"></div>
     <footer>

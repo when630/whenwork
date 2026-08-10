@@ -372,3 +372,51 @@ test('회의 후속은 창 제목보다 회의를 앞세운다', () => {
   assert.equal(VIEW.captureContext({ context: null }), null);
   assert.equal(VIEW.captureContext(undefined), null);
 });
+
+// ── 이슈 서브탭 (←→)
+const iss = (o) => ({ project_id: 1, project_name: '가', title: '이', active: false, ...o });
+const PROJ = [{ id: 1, name: '가' }, { id: 2, name: '나' }, { id: 3, name: '다' }];
+
+test('「지금」이 맨 앞에 서고 그 뒤는 프로젝트 탭 순서다', () => {
+  const tabs = VIEW.issueTabs(
+    [iss({ project_id: 2, project_name: '나' }), iss({ project_id: 1, active: true })],
+    PROJ
+  );
+  assert.deepEqual(tabs.map((t) => t.key), ['now', 'p1', 'p2']);
+  assert.equal(tabs[0].items.length, 1); // 활동 중인 것만
+  assert.equal(tabs[1].hot, true); // 프로젝트 탭에도 활동 중임이 남는다
+  assert.equal(tabs[2].hot, false);
+});
+
+test('활동 중인 이슈가 없으면 「지금」 자리를 만들지 않는다', () => {
+  // 빈 탭으로 열리면 탭이 있으나 마나다 — 그날은 프로젝트별로 보는 게 맞다
+  const tabs = VIEW.issueTabs([iss({}), iss({ project_id: 2, project_name: '나' })], PROJ);
+  assert.deepEqual(tabs.map((t) => t.key), ['p1', 'p2']);
+});
+
+test('「지금」은 여러 프로젝트를 한자리에 모은다', () => {
+  const tabs = VIEW.issueTabs(
+    [iss({ project_id: 1, active: true }), iss({ project_id: 3, project_name: '다', active: true })],
+    PROJ
+  );
+  assert.equal(tabs[0].key, 'now');
+  assert.equal(tabs[0].items.length, 2);
+});
+
+test('목록에 없는 프로젝트는 뒤로 간다', () => {
+  const tabs = VIEW.issueTabs([iss({ project_id: 9, project_name: '먼' }), iss({})], PROJ);
+  assert.deepEqual(tabs.map((t) => t.key), ['p1', 'p9']);
+});
+
+test('이슈가 없으면 탭도 없다', () => {
+  assert.deepEqual(VIEW.issueTabs([], PROJ), []);
+});
+
+test('고른 탭이 사라지면 첫 자리로 되돌린다', () => {
+  // 수집이 돌아 그 프로젝트의 이슈가 다 닫히면 머물던 탭이 없어진다 —
+  // 그대로 두면 빈 화면이 뜨고 선택 인덱스가 목록과 어긋난다
+  const tabs = VIEW.issueTabs([iss({})], PROJ);
+  assert.equal(VIEW.pickTab(tabs, 'p9').key, 'p1');
+  assert.equal(VIEW.pickTab(tabs, 'p1').key, 'p1');
+  assert.equal(VIEW.pickTab([], 'p1'), null);
+});

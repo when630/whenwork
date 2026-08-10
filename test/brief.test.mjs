@@ -138,3 +138,45 @@ test('값이 깨졌으면 다시 만드는 쪽으로, 어느 주인지 모르면
   assert.equal(reviewDue({ now: mon(), weekEnd: null }), false);
   assert.equal(reviewDue({ now: mon(), weekEnd: '뭐라고?' }), false);
 });
+
+// ── 손 입력을 요구하지 않는 것들 (이슈 · 끝내지 않고 둔 자리)
+test('급한 것이 없으면 지금 손대는 프로젝트의 이슈를 말한다', () => {
+  const lines = briefingLines({ active_issues: 3, active_issue_projects: 'sj·co' });
+  assert.deepEqual(lines, ['sj·co 이슈 3건']);
+});
+
+test('할 일과 이슈는 나란히 선다', () => {
+  const lines = briefingLines({
+    open_todo: 6, oldest_todo_days: 5, active_issues: 3, active_issue_projects: 'sj·co',
+  });
+  assert.deepEqual(lines, ['할 일 6건 (가장 오래된 건 5일째)', 'sj·co 이슈 3건']);
+});
+
+test('급한 것이 있는 날에는 이슈를 붙이지 않는다', () => {
+  // 그날은 이미 할 말이 있다 — 다 붙이면 알림 한 줄이 읽히지 않는다
+  const lines = briefingLines({ overdue: 2, active_issues: 3, active_issue_projects: 'sj', stale_repos: 1 });
+  assert.deepEqual(lines, ['지연 2건']);
+});
+
+test('끝내지 않고 둔 자리는 가장 오래된 하나만 말하고 나머지는 곳 수로 줄인다', () => {
+  assert.deepEqual(
+    briefingLines({ stale_repos: 1, stale_repo_label: 'gw stash 1건', oldest_repo_days: 11 }),
+    ['gw stash 1건 (11일째)']
+  );
+  assert.deepEqual(
+    briefingLines({ stale_repos: 3, stale_repo_label: 'gw stash 1건', oldest_repo_days: 11 }),
+    ['gw stash 1건 (11일째) 외 2곳']
+  );
+});
+
+test('막 생긴 자리에는 날짜를 붙이지 않는다', () => {
+  // 어제 둔 작업본에까지 "1일째"를 붙이면 잔소리가 된다
+  assert.deepEqual(
+    briefingLines({ stale_repos: 1, stale_repo_label: 'ww 작업본 4개', oldest_repo_days: 0 }),
+    ['ww 작업본 4개']
+  );
+});
+
+test('아무것도 없으면 여전히 조용하다', () => {
+  assert.deepEqual(briefingLines({ active_issues: 0, stale_repos: 0 }), []);
+});

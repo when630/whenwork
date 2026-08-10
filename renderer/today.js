@@ -71,6 +71,9 @@ const {
   captureContext,
   matches,
   todayGroups,
+  issueTabs,
+  pickTab,
+  elapsedDays,
   hhmm,
   eventState,
   eventTime,
@@ -188,6 +191,31 @@ function todayView() {
   return todayGroups(list, state.projects ?? []);
 }
 
+// ── 이슈 탭의 서브탭 (←→)
+//
+// 열린 이슈를 한 목록에 다 세우면 백로그가 쏟아진다. 프로젝트별로 나누고, 최근 커밋이 난
+// 프로젝트의 것만 모은 「지금」을 맨 앞에 둔다 — 사람이 적지 않아도 이미 존재하는 일이다.
+let issueSub = null; // 고른 서브탭 key. 목록이 바뀌어 사라지면 pickTab이 첫 자리로 되돌린다
+
+function issueTabList() {
+  return issueTabs(filtered(state?.issues ?? []), state?.projects ?? []);
+}
+
+function currentIssueTab() {
+  return pickTab(issueTabList(), issueSub);
+}
+
+function moveIssueTab(step) {
+  const tabs = issueTabList();
+  if (tabs.length < 2) return;
+  const at = Math.max(0, tabs.findIndex((t) => t.key === currentIssueTab()?.key));
+  // 양 끝에서 감싼다 — 탭이 서넛뿐이라 끝에 부딪히는 쪽이 더 답답하다
+  issueSub = tabs[(at + step + tabs.length) % tabs.length].key;
+  sel = 0;
+  resetScroll = true;
+  render();
+}
+
 // 화면에 그려지는 순서 그대로를 돌려준다.
 // 오늘 탭은 묶어서 그리므로 그 정렬을 여기서 해야 한다 —
 // 안 그러면 선택 강조(그리는 순서)와 실제 대상(원본 순서)이 어긋나 엉뚱한 항목이 지워진다.
@@ -197,7 +225,8 @@ function currentList() {
   if (tab === 'review') return [];
   if (!state?.online) return [];
   if (tab === 'projects') return filtered(state.projects ?? []);
-  if (tab === 'issues') return filtered(state.issues ?? []);
+  // 이슈는 서브탭 하나가 곧 목록이다 — 여기서 좁히지 않으면 선택 인덱스가 그리는 것과 어긋난다
+  if (tab === 'issues') return currentIssueTab()?.items ?? [];
   if (tab === 'today') return todayView().flatMap((g) => g.items);
   return filtered(state[tab] ?? []);
 }
@@ -296,7 +325,7 @@ const KEYMAP = [
   ['오늘', [['F', '마감만'], ['H', '완료 기록'], ['M', '회의 후속']]],
   ['인박스', [['A', 'AI 분류'], ['Enter', '제안 확정']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
-  ['이슈', [['T', '할 일로'], ['Enter/O', '원본'], ['/', '검색']]],
+  ['이슈', [['T', '할 일로'], ['Enter/O', '원본'], ['←→', '프로젝트 이동'], ['/', '검색']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['A', '약어'], ['R', '리포'], ['Shift+↑↓', '순서'], ['X', '보관']]],
   ['재개 카드', [['R', '다시 생성'], ['Enter/O', '브라우저'], ['T', '할 일로'], ['PgUp/PgDn', '스크롤']]],
   ['리뷰', [['G', '초안 생성'], ['←→', '주 이동'], ['O', '볼트에서 열기']]],
@@ -387,6 +416,8 @@ function render() {
     renderTabs();
     renderBody();
   }
+  // 서브탭 띠는 재개 카드·완료 기록에서는 물러나야 한다 — 그 화면들은 탭 자체를 비운다
+  renderSubtabs();
   renderLegend();
   renderFooter();
   body.scrollTop = keep;
@@ -599,6 +630,30 @@ function renderTabs() {
     if (n !== null) node.append(el('span', 'n', String(n)));
     node.onclick = () => switchTab(t.key);
     tabs.append(node);
+  }
+}
+
+// 이슈 탭에서만 서는 두 번째 띠. 프로젝트가 몇 개뿐이라 목록보다 탭이 읽기 빠르다.
+function renderSubtabs() {
+  const bar = $('subtabs');
+  bar.replaceChildren();
+  const on = view === 'list' && tab === 'issues' && state?.online;
+  bar.classList.toggle('show', !!on);
+  if (!on) return;
+  const tabs = issueTabList();
+  const cur = currentIssueTab();
+  for (const t of tabs) {
+    // 「지금」은 프로젝트가 아니라 상태라 색 점을 달지 않는다 — 칩과 구별되어야 한다
+    const node = el('div', 'subtab' + (t.key === cur?.key ? ' on' : '') + (t.hot ? ' hot' : ''));
+    node.append(el('span', null, t.label));
+    node.append(el('span', 'n', String(t.items.length)));
+    node.onclick = () => {
+      issueSub = t.key;
+      sel = 0;
+      resetScroll = true;
+      render();
+    };
+    bar.append(node);
   }
 }
 
@@ -1061,11 +1116,14 @@ function renderBody() {
     return;
   }
 
-  // 이슈 탭 — 읽기 전용 캐시(D7)를 프로젝트별로 늘어놓는다. 여기서 T로 오늘 할 일이 된다.
+  // 이슈 탭 — 읽기 전용 캐시(D7)를 서브탭 하나만큼 늘어놓는다. 여기서 T로 오늘 할 일이 된다.
+  // 서브탭이 이미 프로젝트를 가리키므로 「지금」에서만 프로젝트 머리글을 세운다.
   if (tab === 'issues') {
+    const cur = currentIssueTab();
+    const showGroups = cur?.key === 'now';
     let pid;
     list.forEach((i, idx) => {
-      if (i.project_id !== pid) {
+      if (showGroups && i.project_id !== pid) {
         pid = i.project_id;
         const h = el('div', 'group-h');
         h.append(projChip(pid, i.project_name));
@@ -1096,6 +1154,20 @@ function renderBody() {
       const repos = el('div', 'proj-repos');
       repos.textContent = p.repo_paths?.length ? p.repo_paths.join(' · ') : '연결된 리포 없음 (R로 추가)';
       row.append(repos);
+      // 끝내지 않고 둔 자리 — 커밋으로는 안 잡히는 일이라 프로젝트 줄에 그대로 드러낸다
+      const left = (state?.repoStates ?? []).filter((r) => r.project_id === p.id && r.label);
+      if (left.length) {
+        const mark = el('div', 'proj-left');
+        // 화면은 사실 그대로 보여준다 — 며칠 묵었는지로 거르는 것은 아침 브리핑 쪽 일이다.
+        // 여기서까지 감추면 "방금 뭘 안 했더라"를 확인할 자리가 없어진다.
+        mark.textContent = left
+          .map((r) => {
+            const days = r.stash_at || r.since ? elapsedDays(r.stash_at ?? r.since) : 0;
+            return days >= 1 ? `${r.label} · ${days}일째` : r.label;
+          })
+          .join(' / ');
+        row.append(mark);
+      }
       row.onclick = () => {
         sel = idx;
         render();
@@ -1156,6 +1228,7 @@ function renderFooter() {
   } else if (tab === 'issues') {
     add('T', '할 일로');
     add('Enter', '원본');
+    if (issueTabList().length > 1) add('←→', '프로젝트');
   } else if (tab === 'projects') {
     add('N', '추가');
     add('E', '이름');
@@ -1565,6 +1638,16 @@ document.addEventListener('keydown', async (e) => {
   if (tab === 'issues') {
     const i = currentList()[sel] ?? null;
     switch (e.key) {
+      // ←→로 서브탭(프로젝트)을 오간다. h·l도 받는 것은 리뷰 탭의 주 이동과 같은 손버릇이라서다.
+      // 이 탭에는 H(완료 기록)가 걸려 있지 않아 부딪히지 않는다.
+      case 'ArrowLeft':
+      case 'h':
+        e.preventDefault();
+        return moveIssueTab(-1);
+      case 'ArrowRight':
+      case 'l':
+        e.preventDefault();
+        return moveIssueTab(1);
       case 'Enter':
       case 'o':
       case 'O':

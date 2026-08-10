@@ -237,6 +237,47 @@
 
   // 설정 값 표시. 비어 있으면 무엇이 대신 쓰이는지를 그 자리에 적는다 —
   // "미설정"만 띄우면 볼트에 왜 안 써졌는지 알 수 없다.
+  // 이슈 탭의 서브탭 — [{ key, label, pid, items }]. ←→로 오간다.
+  //
+  // 첫 자리는 **「지금」**(최근 커밋이 난 프로젝트의 열린 이슈). 열린 것을 통째로 늘어놓으면
+  // 백로그가 쏟아진다 — 실측 17건 중 10건이 엿새째 그대로였고 그 사이 손대고 있던 건 3건이었다.
+  // active 판정은 화면이 하지 않는다(SQL이 내려준다) — 아침 브리핑과 같은 기준을 써야 해서다.
+  //
+  // 「지금」이 비면 그 자리를 만들지 않는다. 빈 탭으로 열리면 탭이 있으나 마나이고,
+  // 그날 아무 리포에도 커밋이 없었다는 뜻이라 프로젝트별로 보는 게 맞다.
+  function issueTabs(list = [], projects = []) {
+    const tabs = [];
+    const active = list.filter((i) => i.active);
+    if (active.length) tabs.push({ key: 'now', label: '지금', pid: null, items: active });
+
+    const byProject = new Map();
+    for (const i of list) {
+      const pid = i.project_id ?? 0;
+      if (!byProject.has(pid)) byProject.set(pid, []);
+      byProject.get(pid).push(i);
+    }
+    // 프로젝트 탭 순서(= 1~9 번호)를 따른다 — 갱신 순으로 세우면 자리가 매일 바뀐다
+    const order = new Map(projects.map((p, idx) => [p.id, idx]));
+    const rank = (pid) => (order.has(pid) ? order.get(pid) : Number.MAX_SAFE_INTEGER);
+    for (const [pid, items] of [...byProject].sort((a, b) => rank(a[0]) - rank(b[0]))) {
+      tabs.push({
+        key: `p${pid}`,
+        pid,
+        label: items[0].project_name ?? '미지정',
+        hot: items.some((i) => i.active),
+        items,
+      });
+    }
+    return tabs;
+  }
+
+  // 지금 고른 서브탭. 목록이 바뀌어 그 탭이 사라지면 첫 자리로 되돌린다 —
+  // 없어진 탭에 머물면 빈 화면이 뜨고 선택 인덱스가 목록과 어긋난다.
+  function pickTab(tabs, key) {
+    if (!tabs.length) return null;
+    return tabs.find((t) => t.key === key) ?? tabs[0];
+  }
+
   function settingDisplay(field, values = {}, defaults = {}) {
     const v = values[field.key];
     if (field.kind === 'bool') return v === false ? '꺼짐' : '켜짐';
@@ -258,6 +299,8 @@
     STALE_WAITING_DAYS,
     matches,
     todayGroups,
+    issueTabs,
+    pickTab,
     dayOf,
     hhmm,
     eventState,

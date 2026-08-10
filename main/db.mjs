@@ -1,8 +1,14 @@
 // PostgreSQL 저장소 (D2). DB는 캡처 경로 밖에 있다 — 연결 실패는 조용히 견디고
 // 큐가 쌓아둔 것을 다음 기회에 흘려보낸다.
 import pg from 'pg';
+import { repoStateLabel, nextSince, STALE_REPO_DAYS } from './repo.mjs';
 
 const { Pool } = pg;
+
+// "지금 손대는 프로젝트"의 경계. 며칠 안에 커밋이 있었으면 그 프로젝트의 열린 이슈는
+// 백로그가 아니라 지금 일이다. 사흘로 두는 이유는 월요일 아침에 지난 금요일 작업이
+// 빠지지 않게 하기 위해서다. 화면(이슈 탭)과 아침 브리핑이 이 값을 함께 쓴다.
+export const ACTIVE_PROJECT_DAYS = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS project (
@@ -113,6 +119,26 @@ CREATE TABLE IF NOT EXISTS event (
 );
 CREATE INDEX IF NOT EXISTS event_at ON event (at DESC);
 
+-- 리포의 "끝내지 않은 자리". 커밋이 아니라 **아직 커밋되지 않은 것**을 담는다 —
+-- 손대다 만 작업본·쌓인 stash·안 올린 커밋은 사람이 적지 않아도 이미 존재하는 할 일이다.
+-- 수집 때마다 통째로 덮어쓴다(원본은 리포이고 이건 캐시다). 리포가 사라지면 행도 사라진다.
+CREATE TABLE IF NOT EXISTS repo_state (
+  project_id  int NOT NULL REFERENCES project(id),
+  repo_path   text NOT NULL,
+  branch      text,
+  dirty       int NOT NULL DEFAULT 0,
+  ahead       int NOT NULL DEFAULT 0,
+  stash_count int NOT NULL DEFAULT 0,
+  stash_at    timestamptz,
+  stash_label text,
+  -- 이 리포가 **깨끗하지 않게 된 시점**(연속). 스캔할 때마다 지우고 다시 넣으면 매번 "오늘"이
+  -- 되어 며칠째인지를 셀 수 없다 — 지금 손대는 중인 작업본과 사흘째 방치한 것이 같아 보인다.
+  since       timestamptz,
+  checked_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, repo_path)
+);
+ALTER TABLE repo_state ADD COLUMN IF NOT EXISTS since timestamptz;
+
 -- 주간 리뷰 초안. DB가 원본이고 볼트 파일은 거기서 만든 뷰다(D5) — 앱은 파일 없이도 보여준다.
 CREATE TABLE IF NOT EXISTS review (
   year         int NOT NULL,
@@ -141,6 +167,7 @@ export const EXPORT_TABLES = [
   'resume_card',
   'cal_event',
   'event',
+  'repo_state',
   'review',
 ];
 
@@ -333,20 +360,28 @@ export function createDb(config = {}) {
   // 열린 이슈·PR 전량 — 오늘 뷰의 이슈 탭이 쓴다. 재개 카드 안에만 있으면 오늘 뷰에서 놓친다.
   // 순서는 프로젝트 탭 순서(그룹) → 내 리뷰 대기 → 최근 갱신. 이미 할 일로 세운 것도 목록에는
   // 남기고 표식만 붙인다 — 사라지면 "그 이슈는 어디 갔지"가 된다.
-  async function getOpenIssues(limit = 60) {
+  // active: 최근 activeDays 안에 그 프로젝트에 커밋이 있었는가. 열린 이슈를 통째로 늘어놓으면
+  // 백로그가 쏟아진다(실측 17건 중 10건이 엿새째 그대로였다) — 지금 손대는 곳인지로 가른다.
+  // 판정을 SQL에 두는 이유는 화면과 아침 브리핑이 같은 기준을 써야 하기 때문이다.
+  async function getOpenIssues(limit = 60, activeDays = ACTIVE_PROJECT_DAYS) {
     await ensureSchema();
     const { rows } = await pool.query(
       `SELECT i.project_id, p.name AS project_name, i.provider, i.kind, i.number, i.title,
               i.state, i.relation, i.url, i.draft, i.updated_at, i.synced_at,
-              (t.id IS NOT NULL) AS promoted
+              (t.id IS NOT NULL) AS promoted,
+              coalesce(act.last_commit > now() - ($2 || ' days')::interval, false) AS active,
+              act.last_commit
          FROM issue i
          JOIN project p ON p.id = i.project_id AND p.status = 'active'
          LEFT JOIN item t
            ON t.issue_url = i.url AND t.deleted_at IS NULL AND t.done_at IS NULL
+         LEFT JOIN LATERAL (
+           SELECT max(a.occurred_at) AS last_commit FROM activity a WHERE a.project_id = i.project_id
+         ) act ON true
         WHERE i.state = 'open'
         ORDER BY p.sort, p.id, (i.relation = 'reviewer') DESC, i.updated_at DESC
         LIMIT $1`,
-      [limit]
+      [limit, String(activeDays)]
     );
     return rows;
   }
@@ -682,8 +717,35 @@ export function createDb(config = {}) {
   }
 
   // 아침 브리핑 재료 (오픈이슈 #3) — 지금 챙겨야 하는 것의 건수만 센다
-  async function briefing(staleDays = 5) {
+  async function briefing(staleDays = 5, activeDays = ACTIVE_PROJECT_DAYS) {
     await ensureSchema();
+    // 사람이 적지 않아도 이미 존재하는 일 — 지금 손대는 프로젝트의 열린 이슈와, 리포에
+    // 끝내지 않고 둔 자리(작업본·stash·안 올린 커밋). 둘 다 손 입력을 요구하지 않는다.
+    const extra = await pool.query(
+      `WITH act AS (
+         SELECT project_id, max(occurred_at) AS last_commit FROM activity GROUP BY project_id
+       )
+       SELECT
+         (SELECT count(*) FROM issue i
+            JOIN project p ON p.id = i.project_id AND p.status = 'active'
+            JOIN act ON act.project_id = i.project_id
+           WHERE i.state = 'open'
+             AND act.last_commit > now() - ($1 || ' days')::interval
+             AND NOT EXISTS (SELECT 1 FROM item t
+                              WHERE t.issue_url = i.url AND t.deleted_at IS NULL AND t.done_at IS NULL)
+         ) AS active_issues,
+         (SELECT string_agg(DISTINCT coalesce(p.abbr, p.name), '·')
+            FROM issue i
+            JOIN project p ON p.id = i.project_id AND p.status = 'active'
+            JOIN act ON act.project_id = i.project_id
+           WHERE i.state = 'open'
+             AND act.last_commit > now() - ($1 || ' days')::interval
+             AND NOT EXISTS (SELECT 1 FROM item t
+                              WHERE t.issue_url = i.url AND t.deleted_at IS NULL AND t.done_at IS NULL)
+         ) AS active_issue_projects`,
+      [String(activeDays)]
+    );
+    const stale = await staleRepos();
     const { rows } = await pool.query(
       // 마감은 어느 탭에 있든 챙겨야 한다 — kind='todo'만 세던 동안 인박스·대기 항목의 마감은
       // 화면에 배지로는 뜨는데 아침에는 조용히 빠졌다(D로 넣을 수 있는 곳과 세는 곳이 어긋났다)
@@ -703,7 +765,80 @@ export function createDb(config = {}) {
       [String(staleDays)]
     );
     // count(*)는 bigint라 문자열로 온다 — 숫자로 바꿔 넘긴다
-    return Object.fromEntries(Object.entries(rows[0]).map(([k, v]) => [k, Number(v)]));
+    const counts = Object.fromEntries(Object.entries(rows[0]).map(([k, v]) => [k, Number(v)]));
+    return {
+      ...counts,
+      active_issues: Number(extra.rows[0].active_issues) || 0,
+      active_issue_projects: extra.rows[0].active_issue_projects ?? null,
+      stale_repos: stale.length,
+      oldest_repo_days: stale.length ? stale[0].days : 0,
+      stale_repo_label: stale.length ? `${stale[0].proj} ${stale[0].label}` : null,
+    };
+  }
+
+  // 끝내지 않고 둔 자리 — 오래된 순으로. days는 그 자리가 생긴 뒤 지난 날수다.
+  // 방금 손댄 작업본까지 세면 매일 잔소리가 되므로 호출부에서 경계를 준다.
+  // 끝내지 않고 둔 자리 — 오래된 순으로.
+  //
+  // **며칠 묵은 것만 말한다.** 지금 손대는 중인 작업본은 정상이지 잊힌 자리가 아니라서,
+  // 그대로 세면 일하는 리포마다 매일 같은 소리를 낸다(실측: whenwork 작업본 14개가 곧바로
+  // 브리핑에 올라왔다 — 그 순간 내가 고치고 있던 파일들이었다).
+  // 나이는 stash가 있으면 그 stash가 생긴 날, 없으면 깨끗하지 않게 된 시점(since)으로 잰다.
+  async function staleRepos(minDays = STALE_REPO_DAYS) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT r.project_id, coalesce(p.abbr, p.name) AS proj, r.repo_path, r.branch,
+              r.dirty, r.ahead, r.stash_count, r.stash_at, r.stash_label, r.since,
+              floor(extract(epoch FROM now() - least(coalesce(r.stash_at, r.since), coalesce(r.since, r.stash_at))) / 86400)::int AS days
+         FROM repo_state r
+         JOIN project p ON p.id = r.project_id AND p.status = 'active'
+        WHERE (r.stash_count > 0 OR r.dirty > 0 OR r.ahead > 0)
+          AND least(coalesce(r.stash_at, r.since), coalesce(r.since, r.stash_at)) < now() - ($1 || ' days')::interval
+        ORDER BY least(coalesce(r.stash_at, r.since), coalesce(r.since, r.stash_at))`,
+      [String(minDays)]
+    );
+    return rows.map((r) => ({ ...r, days: Number(r.days) || 0, label: repoStateLabel(r) }));
+  }
+
+  async function saveRepoStates(projectId, states) {
+    await ensureSchema();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // since는 살려서 넘긴다 — 여기서 매번 새로 찍으면 "며칠째"가 늘 오늘이 된다.
+      // 깨끗해진 리포는 시계를 지워, 다음에 다시 지저분해지면 그날부터 센다.
+      const prev = await client.query(
+        'SELECT repo_path, dirty, ahead, stash_count, since FROM repo_state WHERE project_id = $1',
+        [projectId]
+      );
+      const before = new Map(prev.rows.map((r) => [r.repo_path, r]));
+      // 사라진 리포의 행은 남기지 않는다 — 원본은 리포이고 이건 캐시다
+      await client.query('DELETE FROM repo_state WHERE project_id = $1', [projectId]);
+      for (const s of states) {
+        const since = nextSince(before.get(s.repo_path), s);
+        await client.query(
+          `INSERT INTO repo_state (project_id, repo_path, branch, dirty, ahead, stash_count, stash_at, stash_label, since, checked_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())`,
+          [projectId, s.repo_path, s.branch ?? null, s.dirty ?? 0, s.ahead ?? 0,
+            s.stash_count ?? 0, s.stash_at ?? null, s.stash_label ?? null, since]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function getRepoStates() {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT project_id, repo_path, branch, dirty, ahead, stash_count, stash_at, stash_label, since, checked_at
+         FROM repo_state ORDER BY project_id, repo_path`
+    );
+    return rows.map((r) => ({ ...r, label: repoStateLabel(r) }));
   }
 
   async function getReview(year, week) {
@@ -782,6 +917,9 @@ export function createDb(config = {}) {
     replaceCalendar,
     getCalendar,
     briefing,
+    staleRepos,
+    saveRepoStates,
+    getRepoStates,
     getReview,
     saveReview,
     exportAll,

@@ -322,7 +322,7 @@ function renderSearch() {
 const KEYMAP = [
   ['이동', [['↑↓', 'jk 이동'], ['Home/End', '처음·끝'], ['PgUp/PgDn', '10줄'], ['Tab', '탭 전환'], ['/', '검색'], ['Esc', '닫기']]],
   ['항목', [['Space', '완료'], ['E', '제목'], ['D', '마감'], ['N', '메모'], ['W', '대기로'], ['X', '삭제'], ['U', '되돌리기'], ['1~9', '프로젝트'], ['O', '이슈 원본'], ['Enter', '재개 카드']]],
-  ['오늘', [['F', '마감만'], ['H', '완료 기록'], ['M', '회의 후속']]],
+  ['오늘', [['F', '마감만'], ['H', '완료 기록'], ['M', '회의 후속'], ['S', '끝난 듯 → 아직']]],
   ['인박스', [['A', 'AI 분류'], ['Enter', '제안 확정']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['이슈', [['T', '할 일로'], ['Enter/O', '원본'], ['←→', '프로젝트 이동'], ['/', '검색']]],
@@ -682,6 +682,15 @@ function itemRow(it, idx) {
       meta.append(tag);
     }
     row.append(meta);
+  }
+  // 완료 제안 — 커밋·닫힌 이슈가 이미 덮은 것으로 보이는 할 일. 완료는 사람이 찍는다(Space).
+  // 각하(S)한 것은 다시 서지 않고, 체크하고 나면(done) 제안이 할 일을 다한 것이라 접는다.
+  if (tab === 'today' && !it.done_at && it.done_suggested_at && !it.done_suggest_muted_at) {
+    const s = el('div', 'suggest');
+    s.append(el('span', 'badge-ai', '✦ 끝난 듯'));
+    if (it.done_suggest_why) s.append(el('span', null, clip(it.done_suggest_why, 40)));
+    s.append(el('span', 'act', 'Space 완료 · S 아직'));
+    row.append(s);
   }
   if (tab === 'inbox') {
     if (it.suggested_project_id) {
@@ -1754,6 +1763,16 @@ document.addEventListener('keydown', async (e) => {
       );
       return refresh();
     }
+    case 's':
+    case 'S': {
+      // 완료 제안 각하 — "아직 안 끝났다". 각하한 항목은 다시 제안받지 않는다(U로 되돌린다).
+      if (tab !== 'today' || !it?.done_suggested_at || it.done_suggest_muted_at || it.done_at) return;
+      const res = await window.whenwork.doneSuggestMute(it.id, true);
+      if (!res.ok) return toast('각하 실패');
+      undoStack.push({ kind: 'suggestMute', id: it.id, title: it.title });
+      toast(`아직 안 끝남 — "${clip(it.title)}" · U로 되돌리기`);
+      return refresh();
+    }
     case 'h':
     case 'H':
       e.preventDefault();
@@ -1781,6 +1800,7 @@ document.addEventListener('keydown', async (e) => {
       const last = undoStack.pop();
       if (!last) return toast('되돌릴 것 없음');
       if (last.kind === 'nudge') await window.whenwork.nudgeUndo(last.id, last.at, last.count);
+      else if (last.kind === 'suggestMute') await window.whenwork.doneSuggestMute(last.id, false);
       else await window.whenwork.restore(last.id);
       toast(`되돌림 — "${clip(last.title)}"`);
       return refresh();

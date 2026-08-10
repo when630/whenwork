@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('whenwork', {
   classifyInbox: () => ipcRenderer.invoke('inbox:classify'),
   historyGet: (days) => ipcRenderer.invoke('history:get', days),
   captureFollowUp: (title, meeting) => ipcRenderer.invoke('capture:followUp', title, meeting),
+  // 완료 제안 각하("아직 안 끝났다") — muted=false로 부르면 U 되돌리기
+  doneSuggestMute: (id, muted) => ipcRenderer.invoke('item:doneSuggestMute', id, muted),
   remove: (id) => ipcRenderer.invoke('item:remove', id),
   restore: (id) => ipcRenderer.invoke('item:restore', id),
 

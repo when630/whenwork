@@ -24,7 +24,7 @@ import { foregroundTitle } from './context.mjs';
 import { collectProject } from './collect.mjs';
 import { collectRepoStates } from './repo.mjs';
 import { syncProjectIssues } from './issues.mjs';
-import { generateResumeCard, classifyInbox, generateWeeklyReview } from './ai.mjs';
+import { generateResumeCard, classifyInbox, generateWeeklyReview, suggestDoneItems } from './ai.mjs';
 import { parseCaptureToken, parseDue, isoWeek, weekRange } from './parse.mjs';
 import { writeWeekly, weeklyPath, guessVaultRoot, statsLine } from './vault.mjs';
 import { writeBackup, backupDue } from './backup.mjs';
@@ -282,6 +282,8 @@ const SMOKE_PROBE = `(async () => {
       id: 'smoke-1', project_id: null, kind: 'todo', title: '이슈에서 온 일',
       issue_url: 'https://example.invalid/1', issue_number: 7,
       issue_provider: 'github', issue_state: 'closed',
+      // 완료 제안 — 배지·근거·다음 키(Space/S)가 한 줄로 서는지도 여기서 본다
+      done_suggested_at: new Date().toISOString(), done_suggest_why: '원본 이슈 닫힘',
     }];
     state.waiting = [{
       id: 'smoke-2', project_id: 1, project_name: '스모크', kind: 'waiting',
@@ -291,6 +293,12 @@ const SMOKE_PROBE = `(async () => {
     }];
     switchTab('today');
     if (!document.querySelector('.isu.closed')) throw new Error('닫힌 이슈 배지가 그려지지 않았다');
+    // 완료 제안 줄 — 표식·근거·다음 키가 함께 서야 한다 (누르지는 않는다 — 실 DB를 건드린다)
+    var sg = document.querySelector('.item .suggest');
+    if (!sg) throw new Error('완료 제안 줄이 그려지지 않았다');
+    if (sg.textContent.indexOf('끝난 듯') < 0) throw new Error('제안 표식이 없다: ' + sg.textContent);
+    if (sg.textContent.indexOf('원본 이슈 닫힘') < 0) throw new Error('제안 근거가 없다: ' + sg.textContent);
+    if (sg.textContent.indexOf('S 아직') < 0) throw new Error('각하 키 안내가 없다: ' + sg.textContent);
     // 체크박스는 눌러도 되게 생겼으니 실제로 눌려야 한다 (여기서 누르지는 않는다 — 실 DB를 건드린다)
     if (typeof document.querySelector('.item .cb').onclick !== 'function') {
       throw new Error('체크박스에 클릭이 붙어 있지 않다');
@@ -445,7 +453,8 @@ async function collectAll() {
   }
   // 새로 긁은 커밋을 근거로 카드를 미리 만들어 둔다. collecting을 푼 뒤에 부르는 이유는
   // claude -p가 몇 분씩 걸릴 수 있어 그동안 「지금 수집」이 막히면 안 되기 때문이다.
-  prewarmCards().catch(() => {});
+  // 완료 제안은 그 뒤에 잇는다 — claude -p를 겹쳐 부르지 않는다(구독 한도, 오픈이슈 #4).
+  prewarmCards().then(maybeSuggestDone).catch(() => {});
 }
 
 // ── `claude -p` 호출 계량 (오픈이슈 #4)
@@ -1157,6 +1166,54 @@ ipcMain.handle('item:due', async (_e, id, text) => {
   try {
     await db.setDue(id, parsed.value);
     return { ok: true, due: parsed.value };
+  } catch {
+    return { ok: false };
+  }
+});
+
+// ── 완료 제안 (12.11)
+//
+// 실사용에서 완료 체크가 나흘째 0이었다 — 진짜 일은 커밋·이슈에서 끝나고, 앱에 체크하는 것은
+// 이중 장부 정리라 아무도 하지 않는다. 그래서 앱이 거꾸로 제안한다: 원본 이슈가 닫힌 것은
+// 그 자체가 근거라 AI 없이 그대로, 나머지는 최근 커밋·닫힌 이슈를 근거로 claude -p가 고른다.
+// 완료를 찍는 것은 여전히 사람이다(6절) — 앱이 대신 체크하면 item이 사람 입력의 원본이 아니게 된다.
+// 하루 한 번이면 충분하고(근거의 대부분은 어제의 커밋이다), 실패한 날은 더 두드리지 않는다(리뷰와 같은 규칙).
+async function maybeSuggestDone() {
+  const today = dayKey();
+  if (settings.get('lastDoneSuggest') === today || settings.get('lastDoneSuggestTry') === today) return;
+  if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 — 시도로 치지 않는다
+  try {
+    const { todos, commits, closedIssues } = await db.doneSuggestMaterial();
+    const fromIssue = todos
+      .filter((t) => t.issue_state && t.issue_state !== 'open')
+      .map((t) => ({ id: t.id, why: t.issue_state === 'merged' ? '원본 머지됨' : '원본 이슈 닫힘' }));
+    const seen = new Set(fromIssue.map((s) => s.id));
+    // 근거가 있는 프로젝트의 할 일만 묻는다 — 근거 없는 항목까지 물으면 지어내기를 부른다
+    const evidenced = new Set([...commits, ...closedIssues].map((r) => r.project_id));
+    const candidates = todos.filter(
+      (t) => !seen.has(t.id) && t.project_id && evidenced.has(t.project_id)
+    );
+    const fromAi = candidates.length
+      ? await withAiLog('done_suggest', () => suggestDoneItems(candidates, { commits, closedIssues }))
+      : [];
+    const pairs = [...fromIssue, ...fromAi];
+    if (pairs.length) {
+      await db.setDoneSuggestions(pairs);
+      // 창을 열어둔 채였으면 제안 줄이 바로 선다 — 닫혀 있으면 다음에 열 때 refresh가 온다
+      if (todayWin && !todayWin.isDestroyed()) todayWin.webContents.send('today:refresh');
+    }
+    await db.logEvent('done_suggest', `${pairs.length}/${todos.length}`);
+    settings.set('lastDoneSuggest', today);
+  } catch {
+    settings.set('lastDoneSuggestTry', today); // AI 호출이 붙어 있다 — 실패한 날은 쉰다
+  }
+}
+
+// "아직 안 끝났다"는 답 — 각하한 항목은 다시 제안하지 않는다. U로 되돌린다.
+ipcMain.handle('item:doneSuggestMute', async (_e, id, muted = true) => {
+  try {
+    await db.muteDoneSuggest(id, muted);
+    return { ok: true };
   } catch {
     return { ok: false };
   }

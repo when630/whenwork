@@ -180,3 +180,13 @@ test('막 생긴 자리에는 날짜를 붙이지 않는다', () => {
 test('아무것도 없으면 여전히 조용하다', () => {
   assert.deepEqual(briefingLines({ active_issues: 0, stale_repos: 0 }), []);
 });
+
+// ── 완료 제안 (12.11) — 끝난 것으로 보이는데 체크되지 않은 할 일
+test('급한 것이 없으면 끝난 듯한 할 일을 말한다 — 앱을 열면 Space 한 키다', () => {
+  const lines = briefingLines({ open_todo: 6, done_suggest: 2 });
+  assert.deepEqual(lines, ['할 일 6건', '끝난 듯한 할 일 2건']);
+});
+
+test('급한 것이 있는 날에는 완료 제안도 붙이지 않는다', () => {
+  assert.deepEqual(briefingLines({ overdue: 1, done_suggest: 2 }), ['지연 1건']);
+});

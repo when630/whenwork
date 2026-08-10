@@ -72,6 +72,9 @@ export function briefingLines(
       const tail = oldest >= STALE_TODO_DAYS ? ` (가장 오래된 건 ${oldest}일째)` : '';
       parts.push(`할 일 ${b.open_todo}건${tail}`);
     }
+    // 끝난 것으로 보이는데 체크되지 않은 할 일 — 아침의 "정리할 거리"다. 커밋·닫힌 이슈가
+    // 근거라 손 입력을 요구하지 않고, 앱을 열면 Space 한 키로 끝난다(완료 제안, 12.11)
+    if (b.done_suggest) parts.push(`끝난 듯한 할 일 ${b.done_suggest}건`);
     // 지금 손대는 프로젝트의 열린 이슈만 — 백로그까지 세면 매일 같은 숫자가 뜬다
     if (b.active_issues) {
       const who = b.active_issue_projects ? `${b.active_issue_projects} ` : '';

@@ -82,6 +82,15 @@ ALTER TABLE item ADD COLUMN IF NOT EXISTS issue_url text;
 CREATE UNIQUE INDEX IF NOT EXISTS item_issue_uniq ON item (issue_url)
   WHERE issue_url IS NOT NULL AND deleted_at IS NULL AND done_at IS NULL;
 
+-- 완료 제안 — "이미 끝난 것으로 보이는 할 일"의 표식. 실사용에서 완료 체크가 나흘째 0이었다:
+-- 진짜 일은 커밋·이슈에서 끝나고 앱에 체크하는 것은 이중 장부 정리라 아무도 하지 않는다.
+-- 그래서 앱이 커밋·닫힌 이슈를 근거로 거꾸로 제안한다. 제안일 뿐 완료는 사람이 찍는다(6절 —
+-- 앱이 대신 체크하면 item이 더는 사람 입력의 원본이 아니다). AI 생성물이라 언제든 버려도 된다.
+-- muted는 "아직 끝나지 않았다"는 사람의 답 — 같은 항목을 다시 제안해 잔소리가 되지 않게 남긴다.
+ALTER TABLE item ADD COLUMN IF NOT EXISTS done_suggested_at timestamptz;
+ALTER TABLE item ADD COLUMN IF NOT EXISTS done_suggest_why text;
+ALTER TABLE item ADD COLUMN IF NOT EXISTS done_suggest_muted_at timestamptz;
+
 -- issue 테이블은 PR/MR까지 담는다. GitHub는 이슈와 PR이 번호를 공유하지만 GitLab의
 -- issue iid와 MR iid는 별개 공간이라 kind 없이는 서로를 덮어쓴다 — 유일성을 kind까지 넣어 다시 잡는다.
 ALTER TABLE issue ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'issue';
@@ -463,6 +472,7 @@ export function createDb(config = {}) {
       `SELECT i.id, i.project_id, p.name AS project_name, i.kind, i.title, i.due,
               i.waiting_for, i.captured_at, i.done_at, i.context, i.note,
               i.nudged_at, i.nudge_count, i.issue_url,
+              i.done_suggested_at, i.done_suggest_why, i.done_suggest_muted_at,
               i.suggested_project_id, s.name AS suggested_project_name,
               -- 승격한 이슈가 그 사이 닫혔으면 화면에서 알려준다(자동 완료하지는 않는다 —
               -- item은 사람 입력이 원본이라 앱이 대신 체크하지 않는다)
@@ -550,6 +560,59 @@ export function createDb(config = {}) {
     for (const { id, project_id } of pairs) {
       await pool.query('UPDATE item SET suggested_project_id = $2 WHERE id = $1', [id, project_id]);
     }
+  }
+
+  // ── 완료 제안 — "이미 끝난 것으로 보이는 할 일"을 커밋·닫힌 이슈에서 거꾸로 찾는다.
+  //
+  // 후보는 아직 제안받지 않았고 각하되지도 않은 열린 todo뿐이다 — 한 번 답한 항목을
+  // 다시 물으면 잔소리가 된다. 근거는 최근 며칠의 커밋과 닫힌 이슈·PR — 둘 다 손 입력을
+  // 요구하지 않는다(12.10과 같은 방향: 사람이 적지 않아도 이미 존재하는 것에서 가져온다).
+  async function doneSuggestMaterial(days = ACTIVE_PROJECT_DAYS) {
+    await ensureSchema();
+    const todos = await pool.query(
+      `SELECT i.id, i.title, i.project_id, coalesce(p.abbr, p.name) AS project,
+              i.issue_url, iss.state AS issue_state, iss.kind AS issue_kind
+         FROM item i
+         LEFT JOIN project p ON p.id = i.project_id
+         LEFT JOIN issue iss ON iss.url = i.issue_url
+        WHERE i.kind = 'todo' AND i.done_at IS NULL AND i.deleted_at IS NULL
+          AND i.done_suggested_at IS NULL AND i.done_suggest_muted_at IS NULL
+        ORDER BY i.captured_at`
+    );
+    const commits = await pool.query(
+      `SELECT a.project_id, coalesce(p.abbr, p.name) AS project, a.summary, a.occurred_at
+         FROM activity a JOIN project p ON p.id = a.project_id AND p.status = 'active'
+        WHERE a.occurred_at > now() - ($1 || ' days')::interval
+        ORDER BY a.project_id, a.occurred_at DESC`,
+      [String(days)]
+    );
+    const closedIssues = await pool.query(
+      `SELECT i.project_id, coalesce(p.abbr, p.name) AS project, i.kind, i.number, i.title, i.state
+         FROM issue i JOIN project p ON p.id = i.project_id AND p.status = 'active'
+        WHERE i.state <> 'open' AND i.updated_at > now() - ($1 || ' days')::interval
+        ORDER BY i.updated_at DESC`,
+      [String(days)]
+    );
+    return { todos: todos.rows, commits: commits.rows, closedIssues: closedIssues.rows };
+  }
+
+  // 제안 저장 — 그 사이 완료·삭제·각하된 항목에는 덮어쓰지 않는다(사람의 답이 먼저다)
+  async function setDoneSuggestions(pairs) {
+    for (const { id, why } of pairs) {
+      await pool.query(
+        `UPDATE item SET done_suggested_at = now(), done_suggest_why = $2
+          WHERE id = $1 AND done_at IS NULL AND deleted_at IS NULL AND done_suggest_muted_at IS NULL`,
+        [id, why ?? null]
+      );
+    }
+  }
+
+  // 각하("아직 안 끝났다")와 그 되돌리기(U). 제안 내용(why)은 남겨 U가 그대로 살린다.
+  async function muteDoneSuggest(id, muted = true) {
+    await pool.query('UPDATE item SET done_suggest_muted_at = $2 WHERE id = $1', [
+      id,
+      muted ? new Date() : null,
+    ]);
   }
 
   async function getInbox() {
@@ -757,6 +820,9 @@ export function createDb(config = {}) {
          count(*) FILTER (WHERE kind = 'todo')                           AS open_todo,
          coalesce(max(current_date - captured_at::date)
                     FILTER (WHERE kind = 'todo'), 0)                     AS oldest_todo_days,
+         -- 끝난 것으로 보이는데 체크되지 않은 할 일 — 아침에 "정리할 거리"로 말한다
+         count(*) FILTER (WHERE kind = 'todo' AND done_suggested_at IS NOT NULL
+                            AND done_suggest_muted_at IS NULL)           AS done_suggest,
          -- 재촉한 건은 그때부터 다시 센다 — 처음 부탁한 날로 세면 방금 재촉한 것까지 묶여 나온다
          count(*) FILTER (WHERE kind = 'waiting'
                             AND coalesce(nudged_at, captured_at) < now() - ($1 || ' days')::interval) AS stale_waiting
@@ -910,6 +976,9 @@ export function createDb(config = {}) {
     nudgeItem,
     nudgeRestore,
     setSuggestions,
+    doneSuggestMaterial,
+    setDoneSuggestions,
+    muteDoneSuggest,
     getInbox,
     logEvent,
     weeklyMaterial,

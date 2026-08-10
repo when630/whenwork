@@ -126,6 +126,56 @@ export async function classifyInbox(items, projects) {
     .filter((a) => validIds.has(a.id) && validProjects.has(a.project_id));
 }
 
+// ── 완료 제안 — 열린 todo 중 커밋·닫힌 이슈가 이미 덮은 것을 고른다.
+// 제안만 만든다. 완료를 찍는 것은 사람이다(6절 — item은 사람 입력의 원본).
+export function buildDoneSuggestPrompt(todos, { commits = [], closedIssues = [] } = {}) {
+  const byProject = (rows, fmt) => {
+    const groups = new Map();
+    for (const r of rows) {
+      const key = r.project ?? '미지정';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(fmt(r));
+    }
+    return [...groups]
+      .map(([name, lines]) => `### ${name}\n${lines.map((l) => `- ${l}`).join('\n')}`)
+      .join('\n');
+  };
+
+  const lines = [];
+  lines.push('아래 열린 할 일 중 **이미 끝난 것으로 보이는 항목**을 고른다.');
+  lines.push('근거는 최근 커밋과 최근 닫힌 이슈·PR뿐이다. 근거가 그 할 일을 명백히 덮을 때만 고른다 —');
+  lines.push('틀린 제안이 빈 제안보다 나쁘다. 관련 작업이 조금 있었던 정도로는 끝난 것이 아니다.');
+  lines.push('');
+  lines.push('## 열린 할 일');
+  lines.push(todos.map((t) => `- id=${t.id} [${t.project ?? '미지정'}] ${t.title}`).join('\n'));
+  lines.push('');
+  lines.push('## 최근 커밋');
+  lines.push(commits.length ? byProject(commits, (c) => `${fmtWhen(c.occurred_at)} ${c.summary}`) : '- (없음)');
+  lines.push('');
+  lines.push('## 최근 닫힌 이슈·PR');
+  lines.push(closedIssues.length
+    ? closedIssues.map((i) => `- [${i.project}] #${i.number} ${i.title} (${i.state})`).join('\n')
+    : '- (없음)');
+  lines.push('');
+  lines.push('다음 JSON만 출력한다. 설명·코드펜스 금지. 확신 없는 항목은 배열에 넣지 않는다:');
+  lines.push('{"done": [{"id": "항목 id", "why": "근거 한 구절, 명사형 40자 이내 (예: 8/9 커밋 \\"웹훅 재시도 추가\\")"}]}');
+  return lines.join('\n');
+}
+
+// 모델 응답 검증 — 없는 id를 지어내도 DB에 닿지 않게 여기서 거른다 (classifyInbox와 같은 규칙)
+export function parseDoneSuggestions(json, todos) {
+  const validIds = new Set(todos.map((t) => String(t.id)));
+  return (Array.isArray(json?.done) ? json.done : [])
+    .map((d) => ({ id: String(d.id), why: String(d.why ?? '').slice(0, 80) }))
+    .filter((d) => validIds.has(d.id) && d.why);
+}
+
+export async function suggestDoneItems(todos, evidence) {
+  if (!todos.length) return [];
+  const json = extractJson(await claudeP(buildDoneSuggestPrompt(todos, evidence)));
+  return parseDoneSuggestions(json, todos);
+}
+
 // ── 주간 리뷰 초안 (설계 5절)
 export function buildWeeklyPrompt(range, material) {
   const byProject = (rows, fmt) => {

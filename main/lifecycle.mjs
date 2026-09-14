@@ -19,6 +19,7 @@ import { pickPosition } from './place.mjs';
 import { foregroundTitle } from './context.mjs';
 import { guessVaultRoot } from './vault.mjs';
 import { scheduleJobs } from './jobs.mjs';
+import { registerIpc } from './ipc.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -377,6 +378,11 @@ export function bootstrap() {
   const dbConfig = ctx.settings.get('db') ?? {};
   ctx.dbConfig = dbConfig;
   ctx.db = createDb(dbConfig);
+
+  // ipcMain.handle/.on 등록은 원래도 모듈 로드 시점(동기)이었다 — app.whenReady보다 먼저,
+  // ctx를 만든 직후 등록한다. 핸들러 본문의 ctx.jobs.* 호출은 실제 IPC가 올 때(항상
+  // app.whenReady 이후, scheduleJobs(ctx)가 ctx.jobs를 채운 뒤)에야 실행되므로 안전하다.
+  registerIpc(ctx);
 
   // ── 캡처 컨텍스트
   //

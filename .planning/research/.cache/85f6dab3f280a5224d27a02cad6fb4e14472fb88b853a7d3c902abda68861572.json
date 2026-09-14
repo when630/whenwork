@@ -1,0 +1,1 @@
+{"content":"electron-builder mac unsigned config requires identity: null AND hardenedRuntime: false together — enabling hardened runtime without signing prevents the app from launching at all. gatekeeperAssess: false also recommended.","source":"web","provider":"websearch","confidence":"MEDIUM","fetched_at":"2026-09-14T05:01:28.335Z","ttl":86400000,"kind":"web"}

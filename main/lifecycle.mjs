@@ -18,14 +18,11 @@ import { createSettings } from './settings.mjs';
 import { pickPosition } from './place.mjs';
 import { foregroundTitle } from './context.mjs';
 import { guessVaultRoot } from './vault.mjs';
+import { scheduleJobs } from './jobs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const HOTKEY = 'Control+Alt+Space'; // 설계 11절 — Claude 쪽 바인딩은 사용자가 해제함
-const FLUSH_MS = 30_000;
-const COLLECT_MS = 6 * 60 * 60 * 1000; // git·이슈 백그라운드 수집 주기 (설계의 "일 1회"보다 촘촘하게)
-const COLLECT_DELAY_MS = 30_000; // 켜자마자 긁으면 부팅이 무거워진다 — 조금 뒤에
-const PURGE_DAYS = 30; // 소프트 삭제한 항목을 실제로 비우기까지 두는 기간
 const TODAY_W = 880; // 오늘 뷰 — 화면 중앙, 가로 넓게
 const TODAY_H = 680;
 const CAPTURE_H = 88; // 퀵캡처 — 한 줄 입력 + 힌트 푸터에 딱 맞는 높이
@@ -569,7 +566,7 @@ export function bootstrap() {
   function showToday() {
     const win = getTodayWin();
     placeWindow(win, 'todayBounds'); // 옮겨둔 자리가 있으면 거기, 없으면 화면 중앙
-    ctx.flush(); // 열 때 밀린 큐부터
+    ctx.jobs.flush(); // 열 때 밀린 큐부터
     win.webContents.send('today:refresh');
     win.show();
     win.focus();
@@ -602,18 +599,18 @@ export function bootstrap() {
         {
           label: '주간 리뷰 초안 만들기',
           click: async () => {
-            const res = await ctx.makeWeeklyReview(0, { notify: true });
+            const res = await ctx.jobs.makeWeeklyReview(0, { notify: true });
             if (res?.ok) {
               showToday();
               ctx.todayWin?.webContents.send('today:openReview');
             }
           },
         },
-        { label: '지금 수집 (git · 이슈 · PR)', click: () => ctx.collectAll() },
+        { label: '지금 수집 (git · 이슈 · PR)', click: () => ctx.jobs.collectAll() },
         {
           label: '지금 백업',
           click: async () => {
-            const res = await ctx.backupNow();
+            const res = await ctx.jobs.backupNow();
             new Notification({
               title: 'WHENWORK 백업',
               body: res.ok ? `저장됨 — ${path.basename(res.file)}` : `실패 — ${res.error ?? '원인 불명'}`,
@@ -689,28 +686,11 @@ export function bootstrap() {
     // register()는 이미 남이 쓰는 조합이면 조용히 false만 낸다 — 메뉴에 실패를 드러낸다
     ctx.hotkeyOk = globalShortcut.register(HOTKEY, onHotkey);
     refreshTrayMenu();
-    setInterval(ctx.flush, FLUSH_MS);
-    ctx.flush();
+    scheduleJobs(ctx); // 큐 flush·수집·브리핑·백업·리뷰·캘린더 타이머 등록 (main/jobs.mjs)
 
     // 패키징본에서만 자동 시작을 걸어둔다 — 개발 실행(electron.exe)을 등록해봐야 쓸모없다
     if (app.isPackaged && ctx.settings.get('openAtLogin') !== false) {
       app.setLoginItemSettings({ openAtLogin: true, args: [] });
-    }
-
-    if (!SMOKE) {
-      setTimeout(ctx.collectAll, COLLECT_DELAY_MS);
-      setInterval(ctx.collectAll, COLLECT_MS);
-      // 오래 전에 지운 것만 실제로 비운다 — 되돌릴 창을 지난 뒤다
-      setTimeout(() => ctx.db.purgeDeleted(PURGE_DAYS).catch(() => {}), COLLECT_DELAY_MS);
-      setTimeout(ctx.maybeBrief, COLLECT_DELAY_MS); // 켠 직후 한 번 (DB가 붙을 시간을 준다)
-      setInterval(ctx.maybeBrief, ctx.BRIEFING_CHECK_MS);
-      setTimeout(ctx.maybeBackup, COLLECT_DELAY_MS); // 백업도 같은 박자로 — 시각은 따지지 않는다
-      setInterval(ctx.maybeBackup, ctx.BRIEFING_CHECK_MS);
-      // 리뷰도 마찬가지로 자립한다 — 브리핑을 꺼둔 날에도, 브리핑이 먼저 돌지 않은 날에도
-      setTimeout(ctx.maybeReview, COLLECT_DELAY_MS);
-      setInterval(ctx.maybeReview, ctx.BRIEFING_CHECK_MS);
-      // 캘린더는 git보다 자주 바뀐다 — 6시간 주기와 따로 돈다
-      setInterval(ctx.syncCalendarNow, ctx.CALENDAR_MS);
     }
 
     if (SMOKE) {

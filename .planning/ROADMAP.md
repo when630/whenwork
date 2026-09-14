@@ -28,7 +28,17 @@ WHENNOTE(구 WHENWORK)는 1인 개발자 전용으로 돌아가던 트레이 할
   3. 캡처 직후 강제 종료해도 그 캡처가 유실되지 않음을 자동 테스트가 재현해서 증명한다
   4. 앱을 업데이트해도 사용자 개입 없이 저장소 스키마가 최신 버전으로 자동 이행된다
   5. 새 저장소 스키마에는 제거 대상 테이블(activity, issue, resume_card, repo_state, cal_event, review)이 처음부터 만들어지지 않는다
-**Plans**: TBD
+**Plans**: 7 plans (6 waves)
+
+Plans:
+- [ ] 01-01-PLAN.md — main/index.mjs를 lifecycle/ipc/jobs로 3분할 (동작 변경 없는 순수 리팩터, D-08)
+- [ ] 01-02-PLAN.md — [tracer] main/store.mjs 개설 + 캡처→오늘 뷰 한 줄기 배선, 손상·상위버전·이행 전 백업
+- [ ] 01-03-PLAN.md — 큐 재설계(시작 시 1회 반영)와 동기 즉시 반영·재시도·대기 건수 표시
+- [ ] 01-04-PLAN.md — 살아남는 CRUD 전부와 축소된 아침 브리핑 이식
+- [ ] 01-05-PLAN.md — IPC 위임을 store로 교체, 레거시 채널 스텁화·백그라운드 타이머 정리
+- [ ] 01-06-PLAN.md — main/db.mjs·main/backup.mjs 삭제, pg를 devDependencies로 격하
+- [ ] 01-07-PLAN.md — 캡처 직후 강제종료 스모크(두 프로세스 SIGKILL 하네스)
+
 **Research flag**: yes — node:sqlite API(프라그마, 트랜잭션, 동시 접근)가 기존 쿼리 패턴을 충분히 커버하는지 스파이크로 먼저 확인한 뒤 저장소 재작성 전체를 맡길지 결정한다. 부족하면 같은 store.mjs 경계 뒤에서 better-sqlite3로 대체한다
 
 ### Phase 2: 레거시 기능 제거
@@ -95,7 +105,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. 내장 저장소 전환 | 0/TBD | Not started | - |
+| 1. 내장 저장소 전환 | 0/7 | Planned | - |
 | 2. 레거시 기능 제거 | 0/TBD | Not started | - |
 | 3. 내보내기·가져오기·이전 | 0/TBD | Not started | - |
 | 4. 첫 실행·플랫폼 대응 | 0/TBD | Not started | - |

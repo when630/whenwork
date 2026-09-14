@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 1
+current_phase: 01
 current_phase_name: 내장 저장소 전환
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-09-14T07:44:30.918Z"
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-09-14T08:41:47.643Z"
 last_activity: 2026-09-14
-last_activity_desc: ROADMAP.md 작성, 31개 v1 요구사항을 5개 단계에 매핑 완료
-state_head: e4e3976838dca46485e6c2187b55972e7fc76479
+last_activity_desc: Phase 01 execution started
+state_head: 07fdfd1ef7a1a285b2c759503f490d7a464557cd
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-14)
 
 **Core value:** 설치 파일 하나를 받아 실행한 사람이, 다른 것을 아무것도 깔지 않고, 단축키로 던진 할 일을 절대 잃지 않는다.
-**Current focus:** Phase 1 — 내장 저장소 전환
+**Current focus:** Phase 01 — 내장 저장소 전환
 
 ## Current Position
 
-Phase: 1 (내장 저장소 전환) — READY TO EXECUTE
-Plan: 0 of TBD in current phase
+Phase: 01 (내장 저장소 전환) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-09-14 — ROADMAP.md 작성, 31개 v1 요구사항을 5개 단계에 매핑 완료
+Last activity: 2026-09-14 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -54,6 +54,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 54 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -66,6 +71,9 @@ Recent decisions affecting current work:
 - [Phase 1]: main/index.mjs 구조 정리(lifecycle/ipc/jobs 분리)를 저장소 교체보다 먼저 하는 순수 리팩터로 진행 (연구 요약, 안전망으로 기존 테스트 활용)
 - [Phase 2]: 제거 대상 모듈은 새 저장소 스키마에 테이블을 아예 만들지 않는 방식으로, 이전 스크립트가 죽은 테이블을 신경 쓰지 않게 한다
 - [Phase 5]: 공개 리포는 새 저장소·새 히스토리로 시작(캘린더 웹훅 토큰 등 개인 이력 분리)
+- [Phase 01]: main/index.mjs 1479줄을 lifecycle/jobs/ipc 3파일로 D-08 그대로 분할 — 저장소 교체(01-02)보다 먼저, 별도 커밋으로
+- [Phase 01]: index.mjs가 아직 옮기지 않은 코드가 lifecycle.mjs/jobs.mjs 함수를 불러야 할 때는 ctx 필드로 다리를 놓고 다음 태스크에서 정리 — 태스크마다 npm test/smoke로 분할 전과 동일함을 확인
+- [Phase 01]: reviewing/generatingCards/lastCalendarError는 여러 파일이 함께 읽고 써야 해서 jobs.mjs 클로저 대신 ctx 필드로 둠
 
 ### Pending Todos
 
@@ -89,6 +97,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-14T06:41:08.710Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-embedded-storage/01-CONTEXT.md
+Last session: 2026-09-14T08:41:47.629Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None

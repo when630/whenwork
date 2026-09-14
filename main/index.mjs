@@ -1,34 +1,15 @@
 // WHENWORK — 트레이 상주. 퀵캡처(전역 단축키) → 로컬 큐 → PostgreSQL 동기화(D1).
-import {
-  app,
-  BrowserWindow,
-  Tray,
-  Menu,
-  nativeImage,
-  ipcMain,
-  globalShortcut,
-  screen,
-  shell,
-  Notification,
-  dialog,
-} from 'electron';
-import fs from 'node:fs';
+import { app, BrowserWindow, ipcMain, shell, Notification, dialog } from 'electron';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { createQueue } from './queue.mjs';
-import { createDb } from './db.mjs';
-import { createSettings } from './settings.mjs';
-import { pickPosition } from './place.mjs';
-import { foregroundTitle } from './context.mjs';
 import { collectProject } from './collect.mjs';
 import { collectRepoStates } from './repo.mjs';
 import { syncProjectIssues } from './issues.mjs';
 import { generateResumeCard, classifyInbox, generateWeeklyReview, suggestDoneItems } from './ai.mjs';
 import { parseCaptureToken, parseDue, isoWeek, weekRange } from './parse.mjs';
-import { writeWeekly, weeklyPath, guessVaultRoot, statsLine } from './vault.mjs';
+import { writeWeekly, weeklyPath, statsLine } from './vault.mjs';
 import { writeBackup, backupDue } from './backup.mjs';
-import { syncCalendar, maskUrl, calendarRange } from './calendar.mjs';
+import { syncCalendar, maskUrl } from './calendar.mjs';
 import {
   briefDecision,
   briefingLines,
@@ -37,414 +18,36 @@ import {
   NOTIFY_AT_DEFAULT,
   STALE_WAITING_DAYS,
 } from './brief.mjs';
+import { bootstrap } from './lifecycle.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dirname, '..');
-const HOTKEY = 'Control+Alt+Space'; // 설계 11절 — Claude 쪽 바인딩은 사용자가 해제함
-const FLUSH_MS = 30_000;
-const COLLECT_MS = 6 * 60 * 60 * 1000; // git·이슈 백그라운드 수집 주기 (설계의 "일 1회"보다 촘촘하게)
-const COLLECT_DELAY_MS = 30_000; // 켜자마자 긁으면 부팅이 무거워진다 — 조금 뒤에
-const PURGE_DAYS = 30; // 소프트 삭제한 항목을 실제로 비우기까지 두는 기간
-const TODAY_W = 880; // 오늘 뷰 — 화면 중앙, 가로 넓게
-const TODAY_H = 680;
-const CAPTURE_H = 88; // 퀵캡처 — 한 줄 입력 + 힌트 푸터에 딱 맞는 높이
-const SMOKE = process.argv.includes('--smoke');
-
-// 스모크에서 렌더러 안에서 돌리는 점검. 탭을 한 바퀴 돌리고 검색·완료 기록까지 열어보므로
-// "특정 화면에서만 터지는" 오류도 앱을 눈으로 보지 않고 잡힌다.
-//
-// ※ 이 문자열은 템플릿 리터럴이다 — 안에서 `${...}`를 쓰면 렌더러가 아니라 **여기서** 보간되어
-//   ReferenceError로 모듈 초기화가 깨진다(앱이 뜨지 않고 매달린다). 문자열은 +로 잇는다.
-const SMOKE_PROBE = `(async () => {
-  const errors = [];
-  window.addEventListener('error', (e) => errors.push('error: ' + e.message));
-  window.addEventListener('unhandledrejection', (e) => errors.push('reject: ' + ((e.reason && e.reason.message) || e.reason)));
-  const step = async (name, fn) => {
-    try { await fn(); } catch (e) { errors.push(name + ': ' + ((e && e.message) || e)); }
-  };
-  for (const t of ['inbox', 'waiting', 'issues', 'projects', 'review', 'settings', 'today']) {
-    await step('tab:' + t, () => switchTab(t));
-    await new Promise((r) => setTimeout(r, 60));
-  }
-  await step('search', () => { openSearch(); closeSearch(false); });
-  // 검색 중 Tab — 예전에는 기본 동작으로 입력 포커스만 빠지고 searchOn이 남아
-  // 그 뒤 모든 키가 삼켜졌다(Esc·Enter·화살표 말고는 무반응). 눌러서 상태로 확인한다.
-  await step('search:tab', () => {
-    switchTab('today');
-    openSearch();
-    filter = '없을만한검색어';
-    document.getElementById('searchIn').value = filter;
-    const before = tab;
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
-    if (searchOn) throw new Error('검색 중 Tab을 눌렀는데 검색 상태가 남았다');
-    if (tab === before) throw new Error('검색 중 Tab이 탭을 옮기지 않았다: ' + tab);
-    if (filter !== '없을만한검색어') throw new Error('Tab이 필터를 지웠다 — 탭을 넘어 유지돼야 한다');
-    closeSearch(false);
-  });
-  // 프로젝트 번호 띠 — 1~9를 쓰는 탭에서만 스크롤 밖 고정 자리에 서고, 이름 칩도 번호를 단다
-  await step('legend', () => {
-    if (!state || !state.online || !state.projects.length) return;
-    var band = document.getElementById('numlegend');
-    switchTab('inbox');
-    if (!band.classList.contains('show')) throw new Error('인박스에서 번호 띠가 보이지 않는다');
-    if (!band.querySelector('b')) throw new Error('번호 띠에 번호가 없다');
-    switchTab('settings');
-    if (band.classList.contains('show')) throw new Error('설정 탭에서는 번호 띠를 감춰야 한다');
-    switchTab('today');
-    var gchip = document.querySelector('.group-h .chip:not(.cal-chip)');
-    if (gchip && !gchip.querySelector('.pn')) throw new Error('오늘 탭 그룹 칩에 번호가 없다');
-  });
-  // 리뷰 탭에서 이번 주에 → 를 누르면 아무 일도 없어야 한다 —
-  // 자리는 그대로인데 화면을 비우고 다시 불러와서 누를 때마다 깜빡였다
-  await step('review:week', () => {
-    switchTab('review');
-    var sentinel = { year: 2026, week: 32, label: 'x', review: null };
-    review.data = sentinel;
-    var before = review.offset;
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    if (review.offset !== before) throw new Error('이번 주에서 → 로 미래 주로 갔다: ' + review.offset);
-    if (review.data !== sentinel) throw new Error('이번 주에서 → 가 화면을 비웠다 (깜빡임)');
-    if (!document.querySelector('.rv-nav .dim')) throw new Error('갈 데 없는 화살표가 흐려지지 않았다');
-    // 지난 주로 옮길 때도 본문을 비우면 빈 화면이 끼어들어 들썩인다 — 옛 본문을 지고 간다
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-    if (review.offset !== before - 1) throw new Error('← 로 지난 주로 가지 않았다: ' + review.offset);
-    if (review.data !== sentinel) throw new Error('주를 옮기며 본문을 비웠다 (들썩임)');
-    // 로딩 표시는 늦어질 때만 — 몇 ms 스치는 「불러오는 중」이 곧 깜빡임이다
-    if (review.loading) throw new Error('옮긴 즉시 로딩 표시를 켰다 (깜빡임)');
-    // 이번 주는 배지로 붙는다 (제목 뒤 괄호는 주차 숫자와 뒤섞여 읽혔다)
-    review.offset = before;
-    review.loading = false;
-    review.data = { year: 2026, week: 32, label: '2026-08-03 ~ 2026-08-09', review: null };
-    render();
-    if (!document.querySelector('.rv-head .wk .now')) throw new Error('이번 주 배지가 없다');
-    // 기간 줄이 접히면 아래가 들썩인다 — 비어 있어도 자리를 지켜야 한다.
-    // 높이는 **숫자로** 먼저 잡아둔다: 다시 그리면 노드가 떼어져 0이 나온다.
-    var withText = document.querySelector('.rv-head .range').getBoundingClientRect().height;
-    review.data = null;
-    review.loading = true;
-    render();
-    var whileLoading = document.querySelector('.rv-head .range').getBoundingClientRect().height;
-    if (Math.abs(whileLoading - withText) > 1) {
-      throw new Error('불러오는 동안 기간 줄이 접힌다: ' + withText + ' → ' + whileLoading);
-    }
-    review.loading = false;
-  });
-  // 늦어지면 표시는 떠야 한다 — IPC를 늦출 수 없으니 타이머를 직접 걸어 본다
-  await step('review:slow', () => scheduleLoading());
-  await new Promise((r) => setTimeout(r, 260));
-  await step('review:slow-check', () => {
-    if (!review.loading) throw new Error('늦어져도 로딩 표시가 켜지지 않는다');
-    if (!document.querySelector('.rv-head .spin')) throw new Error('로딩 표시가 그려지지 않았다');
-    review.loading = false;
-    render();
-  });
-  // 이슈 탭 — 재개 카드 안에만 있던 열린 이슈를 여기서 본다
-  await step('issues', () => {
-    if (!state || !state.online) return;
-    switchTab('issues');
-    if (document.getElementById('numlegend').classList.contains('show')) {
-      throw new Error('이슈 탭에는 1~9가 없으므로 번호 띠를 감춰야 한다');
-    }
-    if (!state.issues.length) return;
-    if (!document.querySelector('.issue')) throw new Error('열린 이슈가 그려지지 않았다');
-    if (!document.querySelector('.group-h .chip')) throw new Error('이슈가 프로젝트별로 묶이지 않았다');
-    if (typeof document.querySelector('.issue .num').onclick !== 'function') {
-      throw new Error('이슈 번호에 원본 열기가 붙어 있지 않다');
-    }
-  });
-  // 이슈 행은 재개 카드용 음수 마진을 쓰므로 목록 안에서는 항목 행과 좌우가 어긋난다 — 재 둔다
-  await step('issue-align', () => {
-    if (!state || !state.online || !state.issues.length) return;
-    switchTab('today');
-    var item = document.querySelector('.item');
-    if (!item) return;
-    var itemLeft = item.getBoundingClientRect().left;
-    switchTab('issues');
-    var iss = document.querySelector('.issue.in-tab');
-    if (!iss) throw new Error('이슈 탭 행에 in-tab이 붙지 않았다');
-    var d = Math.abs(iss.getBoundingClientRect().left - itemLeft);
-    if (d > 1) throw new Error('이슈 행이 항목 행과 좌우가 어긋난다: ' + d.toFixed(1) + 'px');
-  });
-  // 오늘 탭 그룹 순서 — 마감 순서를 따라가면 자리가 매일 바뀐다(프로젝트 번호가 오름차순이어야 한다)
-  await step('group-order', () => {
-    if (!state || !state.online) return;
-    switchTab('today');
-    var nums = [].slice
-      .call(document.querySelectorAll('.group-h .chip:not(.cal-chip) .pn'))
-      .map(function (n) { return Number(n.textContent); });
-    for (var i = 1; i < nums.length; i++) {
-      if (nums[i] < nums[i - 1]) throw new Error('그룹이 프로젝트 순서로 서지 않았다: ' + nums.join(','));
-    }
-  });
-  // 하단 힌트는 몇 칸으로 줄여두고 나머지는 ?(전체 키맵)로 본다 — 다시 길어지지 않게 재 둔다
-  await step('keys', () => {
-    switchTab('today');
-    var hints = document.getElementById('hints');
-    if (hints.children.length > 6) throw new Error('하단 힌트가 너무 많다: ' + hints.children.length);
-    if (hints.scrollWidth > hints.clientWidth + 1) {
-      throw new Error('하단 힌트가 잘린다: ' + hints.scrollWidth + ' > ' + hints.clientWidth);
-    }
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
-    var panel = document.getElementById('keys');
-    if (!panel.classList.contains('show')) throw new Error('?로 전체 키맵이 열리지 않았다');
-    if (!panel.querySelector('kbd')) throw new Error('전체 키맵이 비어 있다');
-    // 키는 막았는데 마우스가 열려 있으면 뒤쪽 체크박스를 눌러 엉뚱한 항목이 완료된다
-    if (document.querySelector('.app').style.pointerEvents !== 'none') {
-      throw new Error('키맵이 떠 있는 동안 뒤쪽 클릭이 열려 있다');
-    }
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    if (panel.classList.contains('show')) throw new Error('Esc로 전체 키맵이 닫히지 않았다');
-    if (document.querySelector('.app').style.pointerEvents === 'none') {
-      throw new Error('키맵을 닫았는데 클릭이 여전히 막혀 있다');
-    }
-  });
-  // 캘린더가 붙지 않은 환경에서도 일정 띠 렌더 경로는 밟아 본다 (스모크는 빈 설정으로 돈다)
-  await step('cal-strip', () => {
-    if (!state || !state.online) return;
-    const now = Date.now();
-    state.events = [
-      { start_at: new Date(now - 7200000).toISOString(), end_at: new Date(now - 3600000).toISOString(), title: '지난 것', all_day: false },
-      { start_at: new Date(now - 600000).toISOString(), end_at: new Date(now + 600000).toISOString(), title: '진행 중', all_day: false, location: '회의실' },
-      { start_at: new Date(now + 3600000).toISOString(), end_at: new Date(now + 7200000).toISOString(), title: '앞으로', all_day: false },
-      { start_at: new Date(now).toISOString(), end_at: new Date(now).toISOString(), title: '종일 것', all_day: true },
-    ];
-    switchTab('today');
-    if (!document.querySelector('.tl .tl-row')) throw new Error('일정 타임라인이 그려지지 않았다');
-    if (!document.querySelector('.tl-row.tl-now')) throw new Error('"지금" 표시가 없다');
-    if (!document.querySelector('.tl-allday')) throw new Error('종일 일정이 그려지지 않았다');
-    // 축과 점이 어긋나는 건 눈으로만 보이고 단위 테스트로는 안 잡힌다 — 좌표를 직접 견준다
-    const geom = [...document.querySelectorAll('.tl-row')].map(function (r) {
-      const d = r.querySelector('.tl-dot').getBoundingClientRect();
-      const rowLeft = r.getBoundingClientRect().left;
-      return {
-        dot: d.left + d.width / 2 - rowLeft,
-        line: parseFloat(getComputedStyle(r, '::before').left) + 0.5,
-      };
-    });
-    for (const g of geom) {
-      if (!(Math.abs(g.dot - g.line) <= 0.5)) {
-        throw new Error('축이 점과 어긋난다: 점 ' + g.dot.toFixed(1) + ' vs 선 ' + g.line.toFixed(1));
-      }
-    }
-    if (new Set(geom.map(function (g) { return Math.round(g.dot * 10); })).size > 1) {
-      throw new Error('행마다 점 위치가 다르다: ' + geom.map(function (g) { return g.dot.toFixed(1); }).join(','));
-    }
-  });
-  // 이슈 탭의 서브탭 — ←→로 프로젝트를 오간다. 목록이 서브탭 하나만큼으로 좁아지므로
-  // 선택 인덱스가 그리는 것과 어긋나면 엉뚱한 이슈를 T로 담는다. 실제로 키를 눌러 확인한다.
-  await step('issue-subtabs', () => {
-    if (!state || !state.online) return;
-    state.projects = [{ id: 1, name: '가', abbr: 'ga' }, { id: 2, name: '나', abbr: 'na' }];
-    state.issues = [
-      { project_id: 1, project_name: '가', provider: 'github', kind: 'issue', number: 1, title: '활동 중인 것', url: 'https://example.invalid/1', state: 'open', relation: 'author', active: true },
-      { project_id: 2, project_name: '나', provider: 'github', kind: 'issue', number: 2, title: '백로그', url: 'https://example.invalid/2', state: 'open', relation: 'author', active: false },
-      { project_id: 2, project_name: '나', provider: 'github', kind: 'issue', number: 3, title: '백로그 둘', url: 'https://example.invalid/3', state: 'open', relation: 'author', active: false },
-    ];
-    issueSub = null;
-    switchTab('issues');
-    var bar = document.getElementById('subtabs');
-    if (!bar.classList.contains('show')) throw new Error('이슈 탭인데 서브탭 띠가 서지 않았다');
-    var labels = [].map.call(bar.querySelectorAll('.subtab span:first-child'), function (s) { return s.textContent; });
-    if (labels.join(',') !== '지금,가,나') throw new Error('서브탭 차례가 다르다: ' + labels.join(','));
-    if (document.querySelectorAll('.issue').length !== 1) throw new Error('「지금」은 활동 중인 것만 세워야 한다');
-    // →로 옮기면 목록도 함께 좁아져야 한다
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    if (currentIssueTab().label !== '가') throw new Error('→가 서브탭을 옮기지 않았다: ' + currentIssueTab().label);
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    if (document.querySelectorAll('.issue').length !== 2) throw new Error('「나」의 이슈 2건이 서지 않았다');
-    if (currentList().length !== 2) throw new Error('선택 목록이 서브탭을 따라오지 않았다');
-    // 끝에서 한 번 더 — 감싸서 첫 자리로 돌아온다
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    if (currentIssueTab().key !== 'now') throw new Error('끝에서 첫 자리로 감싸지 않았다');
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-    if (currentIssueTab().label !== '나') throw new Error('←가 뒤로 감싸지 않았다');
-    // 다른 탭으로 나가면 띠도 물러난다
-    switchTab('today');
-    if (bar.classList.contains('show')) throw new Error('오늘 탭에서 서브탭 띠가 남았다');
-  });
-  // 리포에 끝내지 않고 둔 자리 — 프로젝트 줄에 그대로 드러난다
-  await step('repo-left', () => {
-    if (!state || !state.online) return;
-    state.repoStates = [
-      { project_id: 1, repo_path: 'D:/x', dirty: 2, ahead: 0, stash_count: 1, stash_at: new Date(Date.now() - 4 * 86400000).toISOString(), label: 'stash 1건 · 작업본 2개' },
-    ];
-    switchTab('projects');
-    var mark = document.querySelector('.proj-left');
-    if (!mark) throw new Error('둔 자리가 프로젝트 줄에 그려지지 않았다');
-    if (mark.textContent.indexOf('4일째') < 0) throw new Error('며칠째인지가 빠졌다: ' + mark.textContent);
-  });
-  // 이슈에서 세운 할 일과 재촉한 대기 — 실제 데이터가 없어도 그리는 경로는 밟아 둔다.
-  // (state를 직접 갈아끼우므로 이 뒤로는 화면 데이터가 진짜가 아니다 — 마지막에 둔다)
-  await step('item-badges', () => {
-    if (!state || !state.online) return;
-    var day = 86400000;
-    state.today = [{
-      id: 'smoke-1', project_id: null, kind: 'todo', title: '이슈에서 온 일',
-      issue_url: 'https://example.invalid/1', issue_number: 7,
-      issue_provider: 'github', issue_state: 'closed',
-      // 완료 제안 — 배지·근거·다음 키(Space/S)가 한 줄로 서는지도 여기서 본다
-      done_suggested_at: new Date().toISOString(), done_suggest_why: '원본 이슈 닫힘',
-    }];
-    state.waiting = [{
-      id: 'smoke-2', project_id: 1, project_name: '스모크', kind: 'waiting',
-      title: '회신 대기', waiting_for: '아무개',
-      captured_at: new Date(Date.now() - 6 * day).toISOString(),
-      nudged_at: new Date(Date.now() - day).toISOString(), nudge_count: 2,
-    }];
-    switchTab('today');
-    if (!document.querySelector('.isu.closed')) throw new Error('닫힌 이슈 배지가 그려지지 않았다');
-    // 완료 제안 줄 — 표식·근거·다음 키가 함께 서야 한다 (누르지는 않는다 — 실 DB를 건드린다)
-    var sg = document.querySelector('.item .suggest');
-    if (!sg) throw new Error('완료 제안 줄이 그려지지 않았다');
-    if (sg.textContent.indexOf('끝난 듯') < 0) throw new Error('제안 표식이 없다: ' + sg.textContent);
-    if (sg.textContent.indexOf('원본 이슈 닫힘') < 0) throw new Error('제안 근거가 없다: ' + sg.textContent);
-    if (sg.textContent.indexOf('S 아직') < 0) throw new Error('각하 키 안내가 없다: ' + sg.textContent);
-    // 체크박스는 눌러도 되게 생겼으니 실제로 눌려야 한다 (여기서 누르지는 않는다 — 실 DB를 건드린다)
-    if (typeof document.querySelector('.item .cb').onclick !== 'function') {
-      throw new Error('체크박스에 클릭이 붙어 있지 않다');
-    }
-    switchTab('waiting');
-    if (!document.querySelector('.nudge-n')) throw new Error('재촉 횟수가 그려지지 않았다');
-    // 프로젝트 표시가 없으면 대기 탭에서 1~9로 지정해도 화면이 그대로다
-    if (!document.querySelector('.wait-meta .chip')) throw new Error('대기 항목의 프로젝트가 그려지지 않았다');
-    var el = document.querySelector('.elapsed');
-    if (el.textContent.indexOf('재촉 후') !== 0) {
-      throw new Error('재촉 뒤로는 그때부터 세야 한다: ' + el.textContent);
-    }
-  });
-  await step('history', () => openHistory(7));
-  await step('history:close', () => closeHistory());
-  await new Promise((r) => setTimeout(r, 300));
-  return {
-    view: !!window.VIEW,
-    tabs: document.getElementById('tabs') ? document.getElementById('tabs').children.length : -1,
-    body: document.getElementById('body') ? document.getElementById('body').children.length : -1,
-    errors,
-  };
-})()`;
-
-// 퀵캡처 렌더러 점검. 창 폭이 560px로 고정이라 힌트가 하나 늘면 안내가 조용히 잘리고,
-// `#약어` 피드백은 이 창에만 있으므로 실제로 쳐 보지 않으면 깨진 것을 알 수 없다.
-const CAPTURE_PROBE = `(async () => {
-  const errors = [];
-  // 창을 만들자마자 보낸 push는 리스너가 없어 사라진다 — 렌더러가 직접 가져와야 한다.
-  // 가져오기는 비동기라 잠깐 기다려 준다(그래도 안 오면 그게 결함이다).
-  for (let i = 0; i < 30 && !projects.length; i++) await new Promise((r) => setTimeout(r, 50));
-  if (!projects.length) errors.push('약어 목록을 가져오지 못했다 (#약어가 통하지 않는 상태)');
-  if (document.getElementById('tokenHint').textContent === '#약어') {
-    errors.push('힌트가 실제 약어를 보여주지 않는다: ' + document.getElementById('tokenHint').textContent);
-  }
-  const foot = document.querySelector('.foot');
-  if (foot.scrollWidth > foot.clientWidth + 1) {
-    errors.push('푸터가 폭을 넘었다: ' + foot.scrollWidth + ' > ' + foot.clientWidth);
-  }
-  projects = [{ abbr: 'gw', name: 'GoWrite' }];
-  const type = function (v) {
-    input.value = v;
-    input.dispatchEvent(new Event('input'));
-    return msg.textContent;
-  };
-  const hit = type('복사버튼 추가 #gw');
-  if (hit.indexOf('GoWrite') < 0) errors.push('아는 약어인데 프로젝트를 알려주지 않았다: ' + hit);
-  // 앞에 치는 손도 받는다 (끝만 받던 동안 조용히 인박스로 갔다)
-  const head = type('#gw 복사버튼 추가');
-  if (head.indexOf('GoWrite') < 0) errors.push('앞에 붙인 약어를 알아보지 못했다: ' + head);
-  const miss = type('복사버튼 추가 #gwx');
-  if (miss.indexOf('없는 약어') < 0) errors.push('없는 약어를 알려주지 않았다: ' + miss);
-  const none = type('복사버튼 추가');
-  if (none.indexOf('인박스') < 0) errors.push('토큰이 없으면 기본 안내로 돌아와야 한다: ' + none);
-  // 가장 긴 저장 안내가 들어가는지 — 힌트가 늘면 여기가 먼저 잘린다
-  msg.className = 'msg ok';
-  msg.textContent = '✓ 서식갤러리로 저장 · 이번에 3건';
-  if (msg.scrollWidth > msg.clientWidth + 1) {
-    errors.push('저장 안내가 잘린다: ' + msg.scrollWidth + ' > ' + msg.clientWidth);
-  }
-  type('');
-  return errors;
-})()`;
-
-let tray = null;
-let captureWin = null;
-let todayWin = null;
-let todayHiddenAt = 0; // 트레이 클릭 토글용 — 방금 접혔는지
-let quitting = false;
-let hotkeyOk = false;
-let dbOnline = false;
-// 폴더 선택 같은 네이티브 다이얼로그가 뜨면 창이 blur된다 — 그때 창을 숨기면 안 된다
-let suppressHide = false;
-
-// ── 캡처 컨텍스트
-//
-// 창을 열 때 미리 긁어둔다(PowerShell 기동에 300ms쯤 걸려 저장을 기다리게 할 수 없다).
-// 우리 창을 후보에서 빼는 건 context.mjs가 하므로 팝업이 뜬 뒤에 실행돼도 답은 같다.
-// 그래도 못 받은 경우(입력이 300ms보다 빨랐다)는 방금 받아둔 값으로 대신한다 —
-// 퀵캡처는 blur되면 닫히므로 그 값은 사실상 같은 세션의 같은 창이다.
-const FG_CACHE_MS = 120_000;
-let pendingContext = Promise.resolve(null);
-let lastForeground = null; // { title, at }
-
-function trackForeground() {
-  pendingContext = foregroundTitle().then((title) => {
-    if (title) lastForeground = { title, at: Date.now() };
-    return title;
-  });
-}
-
-function cachedForeground() {
-  return lastForeground && Date.now() - lastForeground.at < FG_CACHE_MS ? lastForeground.title : null;
-}
-
-// 스모크는 실사용 인스턴스와 부딪히지 않게 격리한다 — 안 그러면 단일 인스턴스 락에 걸려
-// 아무것도 검증하지 않고 종료 코드 0으로 끝난다(캐시 점유 오류만 남는다).
-// 덤으로 "설정·큐가 빈 첫 실행" 경로를 검증하게 된다.
-if (SMOKE) app.setPath('userData', path.join(app.getPath('temp'), 'whenwork-smoke'));
-
-if (!SMOKE && !app.requestSingleInstanceLock()) app.quit();
-
-const queue = createQueue(path.join(app.getPath('userData'), 'queue.jsonl'));
-const settings = createSettings(path.join(app.getPath('userData'), 'settings.json'));
-// DB 접속은 로컬 도커가 기본이지만 settings.json의 `db`로 덮어쓸 수 있다 (바꾸면 재시작)
-const dbConfig = settings.get('db') ?? {};
-const db = createDb(dbConfig);
-
-// 볼트 경로는 코드에 박지 않는다 — 설정에 있으면 그걸 쓰고, 없으면 홈에서 한 번 찾아 기억한다.
-// 끝까지 못 찾으면 null이고, 주간 리뷰는 DB에만 남는다(설정 탭에서 지정할 수 있다).
-function vaultRoot() {
-  const saved = settings.get('vaultRoot');
-  if (saved) return saved;
-  if (settings.get('vaultSearched')) return null; // 이미 찾아봤는데 없었다 — 매번 훑지 않는다
-  const found = guessVaultRoot(app.getPath('home'));
-  settings.set('vaultSearched', true);
-  if (found) settings.set('vaultRoot', found);
-  return found;
-}
+const ctx = bootstrap();
 
 // ── 큐 → DB. 실패는 조용히 — 큐가 원본을 들고 있으니 다음 기회에 다시 흘린다.
 async function flush() {
   try {
-    dbOnline = await db.online();
-    if (!dbOnline) return;
-    await queue.drain((entries) => db.insertCaptures(entries));
+    ctx.dbOnline = await ctx.db.online();
+    if (!ctx.dbOnline) return;
+    await ctx.queue.drain((entries) => ctx.db.insertCaptures(entries));
   } catch {
-    dbOnline = false;
+    ctx.dbOnline = false;
   }
-  refreshTrayMenu();
+  ctx.refreshTrayMenu();
 }
 
 // ── 백그라운드 수집 (일과 중 언제 카드를 열어도 최신이도록)
 let collecting = false;
 async function collectAll() {
-  if (collecting || !(await db.online().catch(() => false))) return;
+  if (collecting || !(await ctx.db.online().catch(() => false))) return;
   collecting = true;
   try {
-    for (const p of await db.getProjects()) {
+    for (const p of await ctx.db.getProjects()) {
       if (!p.repo_paths?.length) continue;
-      await collectProject(db, p);
+      await collectProject(ctx.db, p);
       // 커밋(한 일)과 같은 박자로 "덜 한 일"도 읽는다 — 둘 다 리포가 원본이라 한 번에 훑는다
-      await collectRepoStates(db, p).catch(() => {});
-      await syncProjectIssues(db, p);
+      await collectRepoStates(ctx.db, p).catch(() => {});
+      await syncProjectIssues(ctx.db, p);
     }
-    settings.set('lastCollect', new Date().toISOString());
+    ctx.settings.set('lastCollect', new Date().toISOString());
     await syncCalendarNow();
   } catch {
     // 수집 실패는 조용히 — 다음 주기에 다시 시도한다
@@ -467,10 +70,10 @@ async function withAiLog(job, fn) {
   const secs = () => Math.round((Date.now() - started) / 1000);
   try {
     const out = await fn();
-    db.logEvent('ai_call', `${job}:ok:${secs()}s`);
+    ctx.db.logEvent('ai_call', `${job}:ok:${secs()}s`);
     return out;
   } catch (err) {
-    db.logEvent('ai_call', `${job}:fail:${secs()}s`);
+    ctx.db.logEvent('ai_call', `${job}:fail:${secs()}s`);
     throw err;
   }
 }
@@ -497,18 +100,18 @@ async function makeWeeklyReview(weekOffset = 0, { notify: useNotification = fals
     if (useNotification) new Notification({ title: 'WHENWORK 주간 리뷰', body }).show();
   };
   try {
-    if (!(await db.online())) {
+    if (!(await ctx.db.online())) {
       notify('DB 꺼짐 — 만들 수 없음');
       return { ok: false, error: 'DB 꺼짐' };
     }
     const w = weekOf(weekOffset);
     const range = { label: w.label };
     notify('초안 생성 중… (claude -p)');
-    const material = await db.weeklyMaterial(w.from, w.to);
+    const material = await ctx.db.weeklyMaterial(w.from, w.to);
     // 지표는 사실이라 AI를 거칠 이유가 없다 — 초안 맨 위에 한 줄로 앱이 직접 붙인다
     const draft = await withAiLog('weekly_review', () => generateWeeklyReview(range, material));
     const body = `${statsLine(material.stats)}\n\n${draft}`;
-    const root = vaultRoot();
+    const root = ctx.vaultRoot();
     let saved = null;
     if (root) {
       try {
@@ -519,8 +122,8 @@ async function makeWeeklyReview(weekOffset = 0, { notify: useNotification = fals
         // 볼트에 못 써도 DB에는 남는다 — 앱에서는 그대로 볼 수 있다
       }
     }
-    await db.saveReview({ year: w.week.year, week: w.week.week, body, range_label: w.label, file: saved });
-    await db.logEvent('weekly_review', saved ?? `${w.week.year}-W${w.week.week}`);
+    await ctx.db.saveReview({ year: w.week.year, week: w.week.week, body, range_label: w.label, file: saved });
+    await ctx.db.logEvent('weekly_review', saved ?? `${w.week.year}-W${w.week.week}`);
     notify(
       saved
         ? `저장됨 — ${path.basename(saved)}`
@@ -529,7 +132,7 @@ async function makeWeeklyReview(weekOffset = 0, { notify: useNotification = fals
           : '생성됨 (볼트 경로 미설정 — 설정 탭에서 지정)'
     );
     backupNow().catch(() => {}); // 리뷰를 만든 주에는 백업도 한 번 남는다 — 기다리지 않는다
-    return { ok: true, review: await db.getReview(w.week.year, w.week.week), ...w, label: w.label };
+    return { ok: true, review: await ctx.db.getReview(w.week.year, w.week.week), ...w, label: w.label };
   } catch (err) {
     const msg = String(err?.message ?? err).slice(0, 160);
     notify(`실패 — ${msg}`);
@@ -548,7 +151,7 @@ ipcMain.handle('review:get', async (_e, weekOffset = 0) => {
       year: w.week.year,
       week: w.week.week,
       generating: reviewing,
-      review: await db.getReview(w.week.year, w.week.week),
+      review: await ctx.db.getReview(w.week.year, w.week.week),
     };
   } catch {
     return { ok: false };
@@ -572,23 +175,23 @@ const weekTag = (w) => `${w.year}-W${String(w.week).padStart(2, '0')}`;
 async function maybeReview() {
   if (reviewing) return;
   const w = weekOf(-1);
-  const lastTry = settings.get('lastReviewTry');
+  const lastTry = ctx.settings.get('lastReviewTry');
   // 값싼 조건부터 — 오늘 이미 실패했거나 아직 끝나지 않은 주면 DB를 건드리지 않는다.
   // 같은 함수를 두 번 부르는 이유는 규칙을 여기에 베껴 쓰지 않기 위해서다.
   if (!reviewDue({ weekEnd: w.to, lastTry })) return;
-  if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 — 시도로 치지 않는다
-  const existing = await db.getReview(w.week.year, w.week.week).catch(() => null);
+  if (!(await ctx.db.online().catch(() => false))) return; // DB가 붙은 뒤에 — 시도로 치지 않는다
+  const existing = await ctx.db.getReview(w.week.year, w.week.week).catch(() => null);
   if (!reviewDue({ weekEnd: w.to, generatedAt: existing?.generated_at, lastTry })) return;
   const res = await makeWeeklyReview(-1);
   if (res.busy) return;
   if (res.ok) {
-    settings.remove('lastReviewError'); // 지난 실패는 성공으로 지운다
-    refreshTrayMenu();
+    ctx.settings.remove('lastReviewError'); // 지난 실패는 성공으로 지운다
+    ctx.refreshTrayMenu();
     return; // 만들었다고 따로 알리지는 않는다 — 아침 브리핑이 대신 전한다
   }
-  settings.set('lastReviewTry', dayKey()); // 실패한 날은 더 두드리지 않는다 (AI 호출이 붙어 있다)
-  settings.set('lastReviewError', res.error ?? '원인 불명');
-  refreshTrayMenu();
+  ctx.settings.set('lastReviewTry', dayKey()); // 실패한 날은 더 두드리지 않는다 (AI 호출이 붙어 있다)
+  ctx.settings.set('lastReviewError', res.error ?? '원인 불명');
+  ctx.refreshTrayMenu();
 }
 
 // 브리핑에 붙일 리뷰 한 마디. 한 주에 한 번만 — 매일 붙으면 잔소리가 된다.
@@ -596,9 +199,9 @@ async function maybeReview() {
 async function reviewNotice() {
   const w = weekOf(-1);
   const tag = weekTag(w.week);
-  if (settings.get('lastReviewNotice') === tag) return null;
+  if (ctx.settings.get('lastReviewNotice') === tag) return null;
   if (new Date() < w.to) return null; // 아직 끝나지 않은 주를 두고 할 말은 없다
-  const existing = await db.getReview(w.week.year, w.week.week).catch(() => null);
+  const existing = await ctx.db.getReview(w.week.year, w.week.week).catch(() => null);
   const fresh = existing?.generated_at && new Date(existing.generated_at) >= w.to;
   return { tag, state: fresh ? 'ready' : 'pending' };
 }
@@ -614,33 +217,33 @@ ipcMain.handle('settings:get', () => ({
   ok: true,
   // 캘린더 URL에는 토큰이 박혀 있다 — 화면에는 가린 값만 내려보내고 원본은 main에만 둔다
   values: Object.fromEntries(
-    SETTING_KEYS.map((k) => [k, k === 'calendarUrl' ? maskUrl(settings.get(k)) : settings.get(k)])
+    SETTING_KEYS.map((k) => [k, k === 'calendarUrl' ? maskUrl(ctx.settings.get(k)) : ctx.settings.get(k)])
   ),
-  calendar: { lastSync: settings.get('lastCalendarSync'), error: lastCalendarError },
+  calendar: { lastSync: ctx.settings.get('lastCalendarSync'), error: lastCalendarError },
   defaults: { notifyAt: NOTIFY_AT_DEFAULT, backupDir: BACKUP_DIR_DEFAULT },
-  lastBackup: settings.get('lastBackup'),
-  lastBackupError: settings.get('lastBackupError'),
-  lastReviewError: settings.get('lastReviewError'),
+  lastBackup: ctx.settings.get('lastBackup'),
+  lastBackupError: ctx.settings.get('lastBackupError'),
+  lastReviewError: ctx.settings.get('lastReviewError'),
   db: {
-    host: dbConfig.host ?? '127.0.0.1',
-    port: dbConfig.port ?? 5433,
-    database: dbConfig.database ?? 'whenwork',
-    online: dbOnline,
+    host: ctx.dbConfig.host ?? '127.0.0.1',
+    port: ctx.dbConfig.port ?? 5433,
+    database: ctx.dbConfig.database ?? 'whenwork',
+    online: ctx.dbOnline,
   },
-  file: settings.file,
+  file: ctx.settings.file,
 }));
 
 ipcMain.handle('settings:set', (_e, key, value) => {
   if (!SETTING_KEYS.includes(key)) return { ok: false };
-  if (value === null || value === '') settings.remove(key);
-  else settings.set(key, value);
-  settings.flush(); // 설정은 미루지 않고 바로 쓴다
+  if (value === null || value === '') ctx.settings.remove(key);
+  else ctx.settings.set(key, value);
+  ctx.settings.flush(); // 설정은 미루지 않고 바로 쓴다
   return { ok: true };
 });
 
 ipcMain.handle('settings:pickFolder', async (e, current) => {
   const win = BrowserWindow.fromWebContents(e.sender);
-  suppressHide = true; // 다이얼로그가 뜨면 창이 blur된다 — 그걸로 창을 접지 않는다
+  ctx.suppressHide = true; // 다이얼로그가 뜨면 창이 blur된다 — 그걸로 창을 접지 않는다
   try {
     const res = await dialog.showOpenDialog(win, {
       title: '폴더 선택',
@@ -651,14 +254,14 @@ ipcMain.handle('settings:pickFolder', async (e, current) => {
   } catch {
     return { ok: false };
   } finally {
-    suppressHide = false;
+    ctx.suppressHide = false;
     win?.focus();
   }
 });
 
 ipcMain.handle('settings:openFile', async () => {
-  settings.flush();
-  const err = await shell.openPath(settings.file);
+  ctx.settings.flush();
+  const err = await shell.openPath(ctx.settings.file);
   return { ok: !err };
 });
 
@@ -671,14 +274,14 @@ let lastCalendarError = null;
 let syncingCalendar = false;
 
 async function syncCalendarNow() {
-  const url = settings.get('calendarUrl');
+  const url = ctx.settings.get('calendarUrl');
   if (!url || syncingCalendar) return { ok: false, skipped: true };
   syncingCalendar = true;
   try {
-    if (!(await db.online().catch(() => false))) return { ok: false, error: 'DB 꺼짐' };
-    const res = await syncCalendar(db, url);
+    if (!(await ctx.db.online().catch(() => false))) return { ok: false, error: 'DB 꺼짐' };
+    const res = await syncCalendar(ctx.db, url);
     lastCalendarError = null;
-    settings.set('lastCalendarSync', new Date().toISOString());
+    ctx.settings.set('lastCalendarSync', new Date().toISOString());
     return res;
   } catch (err) {
     lastCalendarError = String(err?.message ?? err).slice(0, 200);
@@ -692,11 +295,11 @@ ipcMain.handle('calendar:sync', () => syncCalendarNow());
 
 // 오늘 0시부터 내일 0시까지 — 오늘 뷰가 쓰는 창
 async function todayEvents() {
-  if (!settings.get('calendarUrl')) return [];
+  if (!ctx.settings.get('calendarUrl')) return [];
   const base = new Date();
   base.setHours(0, 0, 0, 0);
   try {
-    return await db.getCalendar(base, new Date(base.getTime() + 86400000));
+    return await ctx.db.getCalendar(base, new Date(base.getTime() + 86400000));
   } catch {
     return [];
   }
@@ -711,12 +314,12 @@ async function backupNow() {
   if (backingUp) return { ok: false, busy: true };
   backingUp = true;
   try {
-    if (!(await db.online())) return { ok: false, error: 'DB 꺼짐' };
-    const dir = settings.get('backupDir') || BACKUP_DIR_DEFAULT;
-    const file = writeBackup(dir, await db.exportAll());
-    settings.set('lastBackup', new Date().toISOString());
-    settings.remove('lastBackupError'); // 지난 실패는 성공으로 지운다
-    refreshTrayMenu();
+    if (!(await ctx.db.online())) return { ok: false, error: 'DB 꺼짐' };
+    const dir = ctx.settings.get('backupDir') || BACKUP_DIR_DEFAULT;
+    const file = writeBackup(dir, await ctx.db.exportAll());
+    ctx.settings.set('lastBackup', new Date().toISOString());
+    ctx.settings.remove('lastBackupError'); // 지난 실패는 성공으로 지운다
+    ctx.refreshTrayMenu();
     return { ok: true, file };
   } catch (err) {
     return { ok: false, error: String(err?.message ?? err).slice(0, 160) };
@@ -731,17 +334,17 @@ ipcMain.handle('backup:now', () => backupNow());
 // 판단은 main/backup.mjs의 backupDue (테스트 대상).
 async function maybeBackup() {
   if (
-    !backupDue({ lastBackup: settings.get('lastBackup'), lastTry: settings.get('lastBackupTry') })
+    !backupDue({ lastBackup: ctx.settings.get('lastBackup'), lastTry: ctx.settings.get('lastBackupTry') })
   ) {
     return;
   }
-  if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 — 시도로 치지 않는다
+  if (!(await ctx.db.online().catch(() => false))) return; // DB가 붙은 뒤에 — 시도로 치지 않는다
   const res = await backupNow();
   if (res.ok || res.busy) return; // 성공은 조용히. lastBackup이 갱신돼 오늘 몫은 끝난다
   const why = res.error ?? '원인 불명';
-  settings.set('lastBackupTry', dayKey()); // 실패한 날은 더 두드리지 않는다
-  settings.set('lastBackupError', why);
-  refreshTrayMenu();
+  ctx.settings.set('lastBackupTry', dayKey()); // 실패한 날은 더 두드리지 않는다
+  ctx.settings.set('lastBackupError', why);
+  ctx.refreshTrayMenu();
   // 백업만은 조용히 실패하면 안 된다 — 사본이 없다는 걸 모르는 채로 지내게 된다.
   // 하루 한 번만 시도하므로 이 알림도 하루 한 번을 넘지 않는다.
   if (Notification.isSupported()) {
@@ -756,296 +359,49 @@ async function maybeBrief() {
   if (!Notification.isSupported()) return;
   const today = dayKey();
   const decision = briefDecision({
-    at: settings.get('notifyAt') ?? NOTIFY_AT_DEFAULT,
-    lastBriefing: settings.get('lastBriefing'),
-    enabled: settings.get('notifyEnabled') !== false,
+    at: ctx.settings.get('notifyAt') ?? NOTIFY_AT_DEFAULT,
+    lastBriefing: ctx.settings.get('lastBriefing'),
+    enabled: ctx.settings.get('notifyEnabled') !== false,
   });
   if (decision === 'wait') return;
   if (decision === 'skip') {
-    settings.set('lastBriefing', today); // 창을 놓친 날은 넘기고 내일 다시
+    ctx.settings.set('lastBriefing', today); // 창을 놓친 날은 넘기고 내일 다시
     return;
   }
-  if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 다시 시도한다
+  if (!(await ctx.db.online().catch(() => false))) return; // DB가 붙은 뒤에 다시 시도한다
   try {
     // 리뷰를 먼저 세운다 — 아침에 켠 날은 둘이 같은 박자로 시작해서, 기다리지 않으면
     // 브리핑이 늘 "아직"이라고 말하게 된다. 생성 중이거나 이미 있으면 바로 돌아온다.
     await maybeReview().catch(() => {});
     const notice = await reviewNotice().catch(() => null);
-    const parts = briefingLines(await db.briefing(STALE_WAITING_DAYS), {
+    const parts = briefingLines(await ctx.db.briefing(STALE_WAITING_DAYS), {
       events: await todayEvents(),
       review: notice?.state ?? null,
     });
-    settings.set('lastBriefing', today);
+    ctx.settings.set('lastBriefing', today);
     if (!parts.length) return; // 챙길 게 없으면 조용히
     const note = new Notification({ title: '오늘 WHENWORK', body: parts.join(' · ') });
-    note.on('click', () => showToday());
+    note.on('click', () => ctx.showToday());
     note.show();
-    if (notice) settings.set('lastReviewNotice', notice.tag);
+    if (notice) ctx.settings.set('lastReviewNotice', notice.tag);
   } catch {
     // 브리핑 실패는 조용히 — 다음 날 다시
   }
 }
 
-// ── 창
-//
-// 그림자·라운드 코너는 CSS가 아니라 Windows가 그린다. 다만 프레임리스 창은
-// **resizable을 끄면 WS_THICKFRAME이 빠져** 그 둘이 함께 사라진다
-// (Electron native_window_views.cc: `if (CanResize()) frame_style |= WS_THICKFRAME`).
-// 그래서 창은 resizable로 두고, 크기를 고정하고 싶으면 min=max로 묶는다.
-function baseWinOpts(w, h) {
-  return {
-    width: w,
-    height: h,
-    frame: false,
-    show: false,
-    skipTaskbar: true,
-    roundedCorners: true,
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs') },
-  };
-}
-
-// alwaysOnTop 기본 레벨(floating)은 Windows에서 창을 작업 표시줄 뒤로 보내
-// 다른 창을 누르면 가라앉는다 — pop-up-menu부터가 그 위다 (claude-office에서 확인된 패턴).
-function pinOnTop(win) {
-  win.setAlwaysOnTop(true, 'pop-up-menu');
-}
-
-// ── 창 위치 기억
-//
-// 사용자가 드래그로 옮긴 자리를 다음에도 쓴다. 다만 저장된 자리가 지금 화면 밖이면
-// (모니터를 뺐거나 해상도가 바뀌면) 창이 안 보이는 곳에 뜨므로 그때는 가운데로 되돌린다.
-// 계산은 main/place.mjs (테스트 대상), 여기서는 화면 정보만 넘긴다.
-function placeWindow(win, key, { centerY = true } = {}) {
-  const [width, height] = win.getSize();
-  const { x, y } = pickPosition({
-    saved: settings.get(key),
-    size: { width, height },
-    workAreas: screen.getAllDisplays().map((d) => d.workArea),
-    cursorArea: screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea,
-    centerY,
-  });
-  win.setPosition(x, y);
-}
-
-// 옮기거나 크기를 바꾸면 그 자리를 기억한다
-function rememberPosition(win, key) {
-  const save = () => {
-    if (win.isDestroyed() || !win.isVisible()) return;
-    const [x, y] = win.getPosition();
-    settings.set(key, { x, y });
-  };
-  win.on('moved', save);
-  win.on('resized', save);
-}
-
-function getCaptureWin() {
-  if (captureWin && !captureWin.isDestroyed()) return captureWin;
-  captureWin = new BrowserWindow({
-    ...baseWinOpts(560, CAPTURE_H),
-    // 크기 고정 — resizable은 켜두되 min=max로 실제 리사이즈는 막는다
-    minWidth: 560,
-    maxWidth: 560,
-    minHeight: CAPTURE_H,
-    maxHeight: CAPTURE_H,
-    backgroundColor: '#1e2027',
-  });
-  pinOnTop(captureWin);
-  rememberPosition(captureWin, 'captureBounds');
-  captureWin.loadFile(path.join(ROOT, 'renderer', 'capture.html'));
-  captureWin.on('blur', () => {
-    if (!suppressHide) captureWin.hide(); // 다른 데 클릭하면 캡처는 접는다
-  });
-  captureWin.on('close', (e) => {
-    if (!quitting) {
-      e.preventDefault();
-      captureWin.hide();
-    }
-  });
-  return captureWin;
-}
-
-// 퀵캡처가 약어 목록을 알아야 "#gw"가 어느 프로젝트인지 **그 자리에서** 알려줄 수 있다.
-// 약어를 타이핑하는 곳은 이 창뿐인데 정작 확인할 화면(번호 띠·프로젝트 탭)은 그때 볼 수 없었다.
-// DB가 꺼져 있으면 마지막 목록으로 답한다 — 캡처 경로에 DB를 끌어들이지 않는다(D1).
-let abbrHints = [];
-async function refreshAbbrHints() {
-  try {
-    const rows = await db.getProjects();
-    abbrHints = rows.filter((p) => p.abbr).map((p) => ({ abbr: p.abbr, name: p.name }));
-  } catch {
-    // 못 읽으면 이전 목록을 그대로 쓴다
-  }
-  return abbrHints;
-}
-
+// ── IPC
 // 목록은 **렌더러가 가져가게** 한다(push 아님). 첫 핫키에서는 getCaptureWin()이 창을
 // 만드는 중이어서 곧바로 보낸 메시지를 받을 리스너가 아직 없다 — 그래서 앱 재시작 후
 // 첫 퀵캡처에서는 약어 목록이 영원히 비어 있었고 어떤 약어도 인식하지 못했다.
-ipcMain.handle('capture:projects', () => refreshAbbrHints());
+ipcMain.handle('capture:projects', () => ctx.refreshAbbrHints());
 
-function showCapture() {
-  trackForeground(); // 저장 시점에 기다리지 않게 미리
-  const win = getCaptureWin();
-  placeWindow(win, 'captureBounds', { centerY: false });
-  win.webContents.send('capture:reset'); // 창이 이미 살아 있을 때만 뜻이 있다(갓 만든 창은 비어 있다)
-  win.show();
-  win.focus();
-}
-
-function getTodayWin() {
-  if (todayWin && !todayWin.isDestroyed()) return todayWin;
-  // 오늘 뷰는 실제로 리사이즈해도 되는 창 — 최소 크기만 잡는다
-  const size = settings.get('todaySize') ?? {};
-  todayWin = new BrowserWindow({
-    ...baseWinOpts(size.width ?? TODAY_W, size.height ?? TODAY_H),
-    minWidth: 560,
-    minHeight: 420,
-    backgroundColor: '#16171c',
-  });
-  pinOnTop(todayWin);
-  rememberPosition(todayWin, 'todayBounds');
-  todayWin.on('resized', () => {
-    const [width, height] = todayWin.getSize();
-    settings.set('todaySize', { width, height });
-  });
-  todayWin.loadFile(path.join(ROOT, 'renderer', 'today.html'));
-  todayWin.on('hide', () => {
-    todayHiddenAt = Date.now();
-  });
-  todayWin.on('blur', () => {
-    if (!suppressHide) todayWin.hide();
-  });
-  todayWin.on('close', (e) => {
-    if (!quitting) {
-      e.preventDefault();
-      todayWin.hide();
-    }
-  });
-  return todayWin;
-}
-
-// 트레이를 누르면 창이 blur돼 먼저 접히고, 그 뒤에 click이 와서 다시 열린다 —
-// 그래서 트레이로는 창을 닫을 수 없었다. 방금 접힌 직후의 클릭은 "닫으려는 클릭"으로 본다.
-const TOGGLE_GRACE_MS = 400;
-
-function toggleToday() {
-  const win = getTodayWin();
-  if (win.isVisible()) return win.hide();
-  if (Date.now() - todayHiddenAt < TOGGLE_GRACE_MS) return;
-  showToday();
-}
-
-function showToday() {
-  const win = getTodayWin();
-  placeWindow(win, 'todayBounds'); // 옮겨둔 자리가 있으면 거기, 없으면 화면 중앙
-  flush(); // 열 때 밀린 큐부터
-  win.webContents.send('today:refresh');
-  win.show();
-  win.focus();
-}
-
-// ── 트레이
-function trayImage() {
-  const p = path.join(ROOT, 'build', 'tray.png');
-  return fs.existsSync(p)
-    ? nativeImage.createFromBuffer(fs.readFileSync(p))
-    : nativeImage.createEmpty();
-}
-
-function refreshTrayMenu() {
-  if (!tray) return;
-  const pending = queue.count();
-  tray.setToolTip(
-    `WHENWORK${dbOnline ? '' : ' — DB 대기'}${pending ? ` · 큐 ${pending}건` : ''}`
-  );
-  const lastCollect = settings.get('lastCollect');
-  const lastBackup = settings.get('lastBackup');
-  const backupError = settings.get('lastBackupError');
-  const reviewError = settings.get('lastReviewError');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: '오늘 뷰', click: toggleToday },
-      { label: `퀵캡처 (${hotkeyOk ? 'Ctrl+Alt+Space' : '단축키 등록 실패!'})`, click: showCapture },
-      { type: 'separator' },
-      {
-        label: '주간 리뷰 초안 만들기',
-        click: async () => {
-          const res = await makeWeeklyReview(0, { notify: true });
-          if (res?.ok) {
-            showToday();
-            todayWin?.webContents.send('today:openReview');
-          }
-        },
-      },
-      { label: '지금 수집 (git · 이슈 · PR)', click: collectAll },
-      {
-        label: '지금 백업',
-        click: async () => {
-          const res = await backupNow();
-          new Notification({
-            title: 'WHENWORK 백업',
-            body: res.ok ? `저장됨 — ${path.basename(res.file)}` : `실패 — ${res.error ?? '원인 불명'}`,
-          }).show();
-        },
-      },
-      { type: 'separator' },
-      {
-        label: dbOnline ? 'DB 연결됨' : `DB 대기 중 — 큐 ${pending}건`,
-        enabled: false,
-      },
-      {
-        label: lastCollect ? `마지막 수집 ${new Date(lastCollect).toLocaleString('ko-KR')}` : '수집 이력 없음',
-        enabled: false,
-      },
-      {
-        // 실패를 먼저 말한다 — 마지막 백업 시각만 보이면 그 뒤로 못 남긴 걸 알 수 없다
-        label: backupError
-          ? `백업 실패 — ${backupError}`
-          : lastBackup
-            ? `마지막 백업 ${new Date(lastBackup).toLocaleString('ko-KR')}`
-            : '백업 이력 없음',
-        enabled: false,
-      },
-      // 성공은 리뷰 탭에 결과물로 남는다 — 여기서는 못 만든 것만 말한다
-      ...(reviewError ? [{ label: `주간 리뷰 실패 — ${reviewError}`, enabled: false }] : []),
-      { type: 'separator' },
-      {
-        label: '로그인 시 자동 시작',
-        type: 'checkbox',
-        checked: app.getLoginItemSettings().openAtLogin,
-        click: (menuItem) => {
-          app.setLoginItemSettings({ openAtLogin: menuItem.checked, args: [] });
-          settings.set('openAtLogin', menuItem.checked);
-          refreshTrayMenu();
-        },
-      },
-      {
-        label: '창 위치 초기화',
-        click: () => {
-          for (const key of ['captureBounds', 'todayBounds', 'todaySize']) settings.remove(key);
-          if (todayWin && !todayWin.isDestroyed()) {
-            todayWin.setSize(TODAY_W, TODAY_H);
-            if (todayWin.isVisible()) placeWindow(todayWin, 'todayBounds');
-          }
-          if (captureWin && !captureWin.isDestroyed() && captureWin.isVisible()) {
-            placeWindow(captureWin, 'captureBounds', { centerY: false });
-          }
-        },
-      },
-      { type: 'separator' },
-      { label: '종료', click: () => app.quit() },
-    ])
-  );
-}
-
-// ── IPC
 ipcMain.handle('capture:save', async (_e, title) => {
   const { title: text, abbr } = parseCaptureToken(title);
   if (!text) return { ok: false };
   const fg =
-    (await Promise.race([pendingContext, new Promise((r) => setTimeout(() => r(null), 300))])) ??
-    cachedForeground();
-  queue.append({
+    (await Promise.race([ctx.pendingContext, new Promise((r) => setTimeout(() => r(null), 300))])) ??
+    ctx.cachedForeground();
+  ctx.queue.append({
     id: crypto.randomUUID(),
     title: text,
     abbr, // #약어 — 프로젝트로 푸는 건 플러시 시점(DB)에서
@@ -1056,8 +412,8 @@ ipcMain.handle('capture:save', async (_e, title) => {
     context: fg ? { fg } : null,
   });
   flush(); // 기다리지 않는다 — 저장 완결은 큐가 이미 보장
-  refreshTrayMenu();
-  return { ok: true, dbOnline, pending: queue.count() };
+  ctx.refreshTrayMenu();
+  return { ok: true, dbOnline: ctx.dbOnline, pending: ctx.queue.count() };
 });
 
 // 회의 후속 캡처 — 회의는 할 일을 낳는데 그 경로가 손 입력뿐이었다.
@@ -1065,56 +421,56 @@ ipcMain.handle('capture:save', async (_e, title) => {
 ipcMain.handle('capture:followUp', async (_e, title, meeting) => {
   const text = String(title ?? '').trim();
   if (!text) return { ok: false };
-  queue.append({
+  ctx.queue.append({
     id: crypto.randomUUID(),
     title: text,
     captured_at: new Date().toISOString(),
     context: { meeting: String(meeting?.title ?? '').slice(0, 200) },
   });
   flush();
-  refreshTrayMenu();
-  return { ok: true, pending: queue.count() };
+  ctx.refreshTrayMenu();
+  return { ok: true, pending: ctx.queue.count() };
 });
 
 ipcMain.handle('today:getState', async () => {
-  dbOnline = await db.online().catch(() => false);
-  if (!dbOnline) return { online: false, pending: queue.count() };
+  ctx.dbOnline = await ctx.db.online().catch(() => false);
+  if (!ctx.dbOnline) return { online: false, pending: ctx.queue.count() };
   await flush();
-  const state = await db.getViewState();
+  const state = await ctx.db.getViewState();
   return {
     online: true,
-    pending: queue.count(),
+    pending: ctx.queue.count(),
     events: await todayEvents(),
     // 열린 이슈는 재개 카드 안에만 있어 오늘 뷰에서 놓쳤다 — 탭 배지로 건수가 늘 보이게 함께 싣는다
-    issues: await db.getOpenIssues().catch(() => []),
+    issues: await ctx.db.getOpenIssues().catch(() => []),
     // 리포에 끝내지 않고 둔 자리 — 프로젝트 탭에서 그 리포 줄에 붙는다
-    repoStates: await db.getRepoStates().catch(() => []),
+    repoStates: await ctx.db.getRepoStates().catch(() => []),
     ...state,
   };
 });
 
 ipcMain.handle('history:get', async (_e, days = 7) => {
   try {
-    return { ok: true, days, ...(await db.getHistory(days)) };
+    return { ok: true, days, ...(await ctx.db.getHistory(days)) };
   } catch {
     return { ok: false };
   }
 });
 
 const itemOps = {
-  'item:complete': (id) => db.completeItem(id),
-  'item:uncomplete': (id) => db.uncompleteItem(id),
-  'item:assign': (id, projectId, keepKind) => db.assignProject(id, projectId, keepKind),
-  'item:toWaiting': (id, who) => db.toWaiting(id, who),
-  'item:rename': (id, title) => db.renameItem(id, title),
-  'item:remove': (id) => db.removeItem(id),
-  'item:restore': (id) => db.restoreItem(id),
-  'item:note': (id, note) => db.setNote(id, note),
-  'project:create': (name) => db.createProject(name),
-  'project:update': (id, fields) => db.updateProject(id, fields),
-  'project:repos': (id, paths) => db.setRepoPaths(id, paths),
-  'project:archive': (id) => db.archiveProject(id),
-  'project:move': (id, dir) => db.moveProject(id, dir),
+  'item:complete': (id) => ctx.db.completeItem(id),
+  'item:uncomplete': (id) => ctx.db.uncompleteItem(id),
+  'item:assign': (id, projectId, keepKind) => ctx.db.assignProject(id, projectId, keepKind),
+  'item:toWaiting': (id, who) => ctx.db.toWaiting(id, who),
+  'item:rename': (id, title) => ctx.db.renameItem(id, title),
+  'item:remove': (id) => ctx.db.removeItem(id),
+  'item:restore': (id) => ctx.db.restoreItem(id),
+  'item:note': (id, note) => ctx.db.setNote(id, note),
+  'project:create': (name) => ctx.db.createProject(name),
+  'project:update': (id, fields) => ctx.db.updateProject(id, fields),
+  'project:repos': (id, paths) => ctx.db.setRepoPaths(id, paths),
+  'project:archive': (id) => ctx.db.archiveProject(id),
+  'project:move': (id, dir) => ctx.db.moveProject(id, dir),
 };
 for (const [ch, fn] of Object.entries(itemOps)) {
   ipcMain.handle(ch, async (_e, ...args) => {
@@ -1130,7 +486,7 @@ for (const [ch, fn] of Object.entries(itemOps)) {
 // 이슈를 오늘 할 일로 세운다 — 원본 이슈는 그대로 두고 로컬 todo만 만든다(D7)
 ipcMain.handle('issue:promote', async (_e, projectId, issue) => {
   try {
-    const res = await db.promoteIssue(projectId, {
+    const res = await ctx.db.promoteIssue(projectId, {
       url: String(issue?.url ?? ''),
       title: String(issue?.title ?? '').slice(0, 300),
     });
@@ -1143,7 +499,7 @@ ipcMain.handle('issue:promote', async (_e, projectId, issue) => {
 // 재촉 — 몇 번째인지와 직전 값(되돌리기용)을 돌려줘야 해서 itemOps(ok만 반환)와 따로 둔다
 ipcMain.handle('item:nudge', async (_e, id) => {
   try {
-    const res = await db.nudgeItem(id);
+    const res = await ctx.db.nudgeItem(id);
     return res ? { ok: true, ...res } : { ok: false };
   } catch {
     return { ok: false };
@@ -1152,7 +508,7 @@ ipcMain.handle('item:nudge', async (_e, id) => {
 
 ipcMain.handle('item:nudgeUndo', async (_e, id, at, count) => {
   try {
-    await db.nudgeRestore(id, at, count);
+    await ctx.db.nudgeRestore(id, at, count);
     return { ok: true };
   } catch {
     return { ok: false };
@@ -1164,7 +520,7 @@ ipcMain.handle('item:due', async (_e, id, text) => {
   const parsed = parseDue(text);
   if (!parsed.ok) return { ok: false, reason: 'parse' };
   try {
-    await db.setDue(id, parsed.value);
+    await ctx.db.setDue(id, parsed.value);
     return { ok: true, due: parsed.value };
   } catch {
     return { ok: false };
@@ -1180,10 +536,10 @@ ipcMain.handle('item:due', async (_e, id, text) => {
 // 하루 한 번이면 충분하고(근거의 대부분은 어제의 커밋이다), 실패한 날은 더 두드리지 않는다(리뷰와 같은 규칙).
 async function maybeSuggestDone() {
   const today = dayKey();
-  if (settings.get('lastDoneSuggest') === today || settings.get('lastDoneSuggestTry') === today) return;
-  if (!(await db.online().catch(() => false))) return; // DB가 붙은 뒤에 — 시도로 치지 않는다
+  if (ctx.settings.get('lastDoneSuggest') === today || ctx.settings.get('lastDoneSuggestTry') === today) return;
+  if (!(await ctx.db.online().catch(() => false))) return; // DB가 붙은 뒤에 — 시도로 치지 않는다
   try {
-    const { todos, commits, closedIssues } = await db.doneSuggestMaterial();
+    const { todos, commits, closedIssues } = await ctx.db.doneSuggestMaterial();
     const fromIssue = todos
       .filter((t) => t.issue_state && t.issue_state !== 'open')
       .map((t) => ({ id: t.id, why: t.issue_state === 'merged' ? '원본 머지됨' : '원본 이슈 닫힘' }));
@@ -1198,21 +554,21 @@ async function maybeSuggestDone() {
       : [];
     const pairs = [...fromIssue, ...fromAi];
     if (pairs.length) {
-      await db.setDoneSuggestions(pairs);
+      await ctx.db.setDoneSuggestions(pairs);
       // 창을 열어둔 채였으면 제안 줄이 바로 선다 — 닫혀 있으면 다음에 열 때 refresh가 온다
-      if (todayWin && !todayWin.isDestroyed()) todayWin.webContents.send('today:refresh');
+      if (ctx.todayWin && !ctx.todayWin.isDestroyed()) ctx.todayWin.webContents.send('today:refresh');
     }
-    await db.logEvent('done_suggest', `${pairs.length}/${todos.length}`);
-    settings.set('lastDoneSuggest', today);
+    await ctx.db.logEvent('done_suggest', `${pairs.length}/${todos.length}`);
+    ctx.settings.set('lastDoneSuggest', today);
   } catch {
-    settings.set('lastDoneSuggestTry', today); // AI 호출이 붙어 있다 — 실패한 날은 쉰다
+    ctx.settings.set('lastDoneSuggestTry', today); // AI 호출이 붙어 있다 — 실패한 날은 쉰다
   }
 }
 
 // "아직 안 끝났다"는 답 — 각하한 항목은 다시 제안하지 않는다. U로 되돌린다.
 ipcMain.handle('item:doneSuggestMute', async (_e, id, muted = true) => {
   try {
-    await db.muteDoneSuggest(id, muted);
+    await ctx.db.muteDoneSuggest(id, muted);
     return { ok: true };
   } catch {
     return { ok: false };
@@ -1225,11 +581,11 @@ ipcMain.handle('inbox:classify', async () => {
   if (classifying) return { ok: false, busy: true };
   classifying = true;
   try {
-    const [items, projects] = [await db.getInbox(), await db.getProjects()];
+    const [items, projects] = [await ctx.db.getInbox(), await ctx.db.getProjects()];
     if (!items.length) return { ok: true, suggested: 0 };
     const pairs = await withAiLog('inbox_classify', () => classifyInbox(items, projects));
-    await db.setSuggestions(pairs);
-    await db.logEvent('inbox_classify', `${pairs.length}/${items.length}`);
+    await ctx.db.setSuggestions(pairs);
+    await ctx.db.logEvent('inbox_classify', `${pairs.length}/${items.length}`);
     return { ok: true, suggested: pairs.length, total: items.length };
   } catch (err) {
     return { ok: false, error: String(err?.message ?? err) };
@@ -1243,7 +599,7 @@ const generatingCards = new Set(); // 프로젝트별 claude -p 중복 호출 �
 let lastOpenedProject = null; // 프로젝트 전환 수(9절 KPI)를 세기 위한 직전 프로젝트
 
 async function findProject(projectId) {
-  return (await db.getProjects()).find((p) => p.id === projectId) ?? null;
+  return (await ctx.db.getProjects()).find((p) => p.id === projectId) ?? null;
 }
 
 // AI 호출이 실패하면(서버 혼잡 등) 카드를 열 때마다 몇 분씩 다시 매달리지 않도록 잠시 쉰다.
@@ -1253,15 +609,15 @@ const cardFailure = new Map();
 
 async function resumePayload(projectId) {
   const failedAt = cardFailure.get(projectId) ?? 0;
-  const card = await db.getResumeCard(projectId);
+  const card = await ctx.db.getResumeCard(projectId);
   return {
     ok: true,
     card,
     // 카드를 만든 뒤로 쌓인 커밋 수 — 카드가 얼마나 낡았는지는 시각보다 이 숫자가 정확하다
-    fresh: card ? await db.newActivityCount(projectId, card.generated_at) : 0,
-    activities: await db.getActivities(projectId, 10),
-    issues: await db.getIssues(projectId, 12), // 이슈에 PR/MR까지 섞이므로 조금 넉넉하게
-    promoted: await db.promotedIssueUrls(projectId), // 이미 할 일로 세운 이슈
+    fresh: card ? await ctx.db.newActivityCount(projectId, card.generated_at) : 0,
+    activities: await ctx.db.getActivities(projectId, 10),
+    issues: await ctx.db.getIssues(projectId, 12), // 이슈에 PR/MR까지 섞이므로 조금 넉넉하게
+    promoted: await ctx.db.promotedIssueUrls(projectId), // 이미 할 일로 세운 이슈
     generating: generatingCards.has(projectId),
     retryAfter: failedAt + CARD_COOLDOWN_MS > Date.now() ? failedAt + CARD_COOLDOWN_MS : null,
   };
@@ -1272,9 +628,9 @@ ipcMain.handle('resume:get', async (_e, projectId, log = true) => {
   try {
     // KPI: 카드 열람 수와 프로젝트 전환 수 (9절)
     if (log) {
-      db.logEvent('resume_open', String(projectId));
+      ctx.db.logEvent('resume_open', String(projectId));
       if (lastOpenedProject !== null && lastOpenedProject !== projectId) {
-        db.logEvent('project_switch', `${lastOpenedProject}->${projectId}`);
+        ctx.db.logEvent('project_switch', `${lastOpenedProject}->${projectId}`);
       }
       lastOpenedProject = projectId;
     }
@@ -1296,8 +652,8 @@ ipcMain.handle('resume:sync', async (_e, projectId) => {
     if (Date.now() - last > RESUME_SYNC_MS) {
       const p = await findProject(projectId);
       if (p) {
-        await collectProject(db, p);
-        await syncProjectIssues(db, p);
+        await collectProject(ctx.db, p);
+        await syncProjectIssues(ctx.db, p);
         lastResumeSync.set(projectId, Date.now());
       }
     }
@@ -1314,16 +670,16 @@ async function buildResumeCard(projectId) {
   try {
     const p = await findProject(projectId);
     if (!p) throw new Error('프로젝트 없음');
-    const view = await db.getViewState();
+    const view = await ctx.db.getViewState();
     // 자료를 먼저 모으고 AI 호출만 감싼다 — 계량에 DB 시간이 섞이지 않게
     const material = {
-      activities: await db.getActivities(projectId, 15),
-      doneItems: await db.getDoneItems(projectId, 7),
-      issues: await db.getIssues(projectId, 14),
+      activities: await ctx.db.getActivities(projectId, 15),
+      doneItems: await ctx.db.getDoneItems(projectId, 7),
+      issues: await ctx.db.getIssues(projectId, 14),
       todos: view.today.filter((t) => t.project_id === projectId && !t.done_at),
     };
     const card = await withAiLog('resume_card', () => generateResumeCard(p, material));
-    await db.saveResumeCard(projectId, card);
+    await ctx.db.saveResumeCard(projectId, card);
     cardFailure.delete(projectId);
   } catch (err) {
     cardFailure.set(projectId, Date.now());
@@ -1331,7 +687,7 @@ async function buildResumeCard(projectId) {
   } finally {
     generatingCards.delete(projectId);
     // 백그라운드로 만드는 동안 사용자가 그 카드를 열어놓았을 수 있다 — 스켈레톤에 갇히지 않게 알린다
-    if (todayWin && !todayWin.isDestroyed()) todayWin.webContents.send('card:done', projectId);
+    if (ctx.todayWin && !ctx.todayWin.isDestroyed()) ctx.todayWin.webContents.send('card:done', projectId);
   }
 }
 
@@ -1344,7 +700,7 @@ async function prewarmCards() {
   if (prewarming) return;
   prewarming = true;
   try {
-    for (const t of await db.projectsNeedingCard(CARD_STALE_HOURS)) {
+    for (const t of await ctx.db.projectsNeedingCard(CARD_STALE_HOURS)) {
       if (generatingCards.has(t.id)) continue;
       const failedAt = cardFailure.get(t.id) ?? 0;
       if (failedAt + CARD_COOLDOWN_MS > Date.now()) continue; // 방금 실패한 것은 쉬게 둔다
@@ -1383,97 +739,23 @@ ipcMain.on('win:hide', (e) => {
 // 방금 던진 것을 정리하러 온 길이라 인박스에 쌓인 게 있으면 그 탭부터 보여준다.
 ipcMain.on('app:open', (e) => {
   BrowserWindow.fromWebContents(e.sender)?.hide();
-  showToday();
-  todayWin?.webContents.send('today:fromCapture');
+  ctx.showToday();
+  ctx.todayWin?.webContents.send('today:fromCapture');
 });
 
-// ── 앱 수명
-app.setAppUserModelId('com.when630.whenwork');
-// 개발 실행과 설치본이 같은 userData(큐·설정)를 쓰도록 이름을 고정한다 —
-// 안 그러면 productName 기준으로 갈려서 큐에 쌓인 캡처가 한쪽에만 남는다.
-app.setName('whenwork');
-
-app.whenReady().then(async () => {
-  tray = new Tray(trayImage());
-  tray.on('click', toggleToday);
-  // 단축키는 토글 — 열린 창(오늘 뷰든 캡처든)이 있으면 닫고, 없으면 캡처를 연다
-  const onHotkey = () => {
-    if (todayWin && !todayWin.isDestroyed() && todayWin.isVisible()) return todayWin.hide();
-    if (captureWin && !captureWin.isDestroyed() && captureWin.isVisible()) return captureWin.hide();
-    showCapture();
-  };
-  // register()는 이미 남이 쓰는 조합이면 조용히 false만 낸다 — 메뉴에 실패를 드러낸다
-  hotkeyOk = globalShortcut.register(HOTKEY, onHotkey);
-  refreshTrayMenu();
-  setInterval(flush, FLUSH_MS);
-  flush();
-
-  // 패키징본에서만 자동 시작을 걸어둔다 — 개발 실행(electron.exe)을 등록해봐야 쓸모없다
-  if (app.isPackaged && settings.get('openAtLogin') !== false) {
-    app.setLoginItemSettings({ openAtLogin: true, args: [] });
-  }
-
-  if (!SMOKE) {
-    setTimeout(collectAll, COLLECT_DELAY_MS);
-    setInterval(collectAll, COLLECT_MS);
-    // 오래 전에 지운 것만 실제로 비운다 — 되돌릴 창을 지난 뒤다
-    setTimeout(() => db.purgeDeleted(PURGE_DAYS).catch(() => {}), COLLECT_DELAY_MS);
-    setTimeout(maybeBrief, COLLECT_DELAY_MS); // 켠 직후 한 번 (DB가 붙을 시간을 준다)
-    setInterval(maybeBrief, BRIEFING_CHECK_MS);
-    setTimeout(maybeBackup, COLLECT_DELAY_MS); // 백업도 같은 박자로 — 시각은 따지지 않는다
-    setInterval(maybeBackup, BRIEFING_CHECK_MS);
-    // 리뷰도 마찬가지로 자립한다 — 브리핑을 꺼둔 날에도, 브리핑이 먼저 돌지 않은 날에도
-    setTimeout(maybeReview, COLLECT_DELAY_MS);
-    setInterval(maybeReview, BRIEFING_CHECK_MS);
-    // 캘린더는 git보다 자주 바뀐다 — 6시간 주기와 따로 돈다
-    setInterval(syncCalendarNow, CALENDAR_MS);
-  }
-
-  if (SMOKE) {
-    // 렌더러가 실제로 그려지는지까지 본다 — main만 띄워서는 화면 로직 오류가 잡히지 않는다.
-    // 창은 만들되 show하지 않으므로 화면에는 나타나지 않는다.
-    const win = getTodayWin();
-    win.webContents.once('did-finish-load', () => {
-      setTimeout(async () => {
-        let probe = null;
-        try {
-          probe = await win.webContents.executeJavaScript(SMOKE_PROBE);
-        } catch (err) {
-          probe = { errors: [String(err?.message ?? err)] };
-        }
-        // 퀵캡처 창도 만들어 그려 본다 (show하지 않으므로 화면에는 나타나지 않는다)
-        let capture = null;
-        try {
-          const cap = getCaptureWin();
-          if (cap.webContents.isLoading()) {
-            await new Promise((r) => cap.webContents.once('did-finish-load', r));
-          }
-          capture = await cap.webContents.executeJavaScript(CAPTURE_PROBE);
-        } catch (err) {
-          capture = [String(err?.message ?? err)];
-        }
-        const ok =
-          probe?.view === true &&
-          probe?.tabs > 0 &&
-          probe?.body >= 0 &&
-          probe?.errors?.length === 0 &&
-          capture?.length === 0;
-        console.log(
-          `SMOKE_${ok ? 'OK' : 'FAIL'} hotkey=${hotkeyOk} pending=${queue.count()} renderer=${JSON.stringify(probe)} capture=${JSON.stringify(capture)}`
-        );
-        quitting = true;
-        app.exit(ok ? 0 : 1);
-      }, 1200); // 첫 refresh()가 한 바퀴 돌 시간
-    });
-  }
-});
-
-app.on('before-quit', () => {
-  quitting = true;
-  settings.flush(); // 디바운스로 미뤄둔 창 위치를 마저 쓴다
-});
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
-});
-// 창을 모두 닫아도 트레이로 산다
-app.on('window-all-closed', () => {});
+// ── Task 1 전용 연결 다리 (D-08 분할 중간 상태)
+//
+// lifecycle.mjs가 만든 트레이 메뉴·타이머 등록은 아직 여기 남아 있는 백그라운드 함수를
+// 불러야 한다. app.whenReady는 항상 이 모듈의 나머지 동기 코드가 끝난 뒤에 실행되므로
+// (Electron 'ready'는 비동기 이벤트) 여기서 ctx에 붙여 두면 시점 문제 없이 안전하다.
+// main/jobs.mjs가 생기면(Task 2) 이 다리는 scheduleJobs(ctx) 호출로 대체되어 사라진다.
+ctx.flush = flush;
+ctx.collectAll = collectAll;
+ctx.maybeBrief = maybeBrief;
+ctx.maybeBackup = maybeBackup;
+ctx.maybeReview = maybeReview;
+ctx.syncCalendarNow = syncCalendarNow;
+ctx.makeWeeklyReview = makeWeeklyReview;
+ctx.backupNow = backupNow;
+ctx.BRIEFING_CHECK_MS = BRIEFING_CHECK_MS;
+ctx.CALENDAR_MS = CALENDAR_MS;

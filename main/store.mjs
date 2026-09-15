@@ -305,32 +305,51 @@ export function createStore(file) {
        VALUES (?, ?, ?, ?, ?, 'manual', ?)`
     );
     let inserted = 0;
+    let skipped = 0;
     withTransaction(db, () => {
       for (const e of entries) {
-        // WR-06: 파일 안 항목 하나가 바인딩 오류 등으로 예외를 내도 이 항목만 건너뛴다.
-        // 개별 INSERT 예외를 여기서 삼키지 않으면 withTransaction 전체가 ROLLBACK되어,
-        // 이 파일의 멀쩡한 항목까지 반영되지 않은 채로 replayPending이 던지고, break가
-        // 그 뒤(시간상 더 이른) 대기 파일까지 이번 기동에서 건드리지 않게 된다 — 손상된
-        // 항목 하나가 큐 전체를 영구히 막는 단일 장애점이 된다. 저장소 자체가 열리지 않는
-        // 등 실제 반영 불가 상태(db.exec 실패 등)는 여전히 위로 던져 replayPending이
-        // 파일을 보존하고 재시도하게 둔다 — 여기서 잡는 건 항목 단위 손상뿐이다.
-        try {
-          let projectId = null;
-          if (e.abbr) {
-            const row = findAbbr.get(e.abbr);
-            projectId = row?.id ?? null;
-          }
-          // 약어가 어느 프로젝트도 아니면(오타 등) 원문을 그대로 되살린다 — 조용히 떼어내면
-          // 인박스에서 "왜 여기 있지"를 풀 단서가 사라진다. raw가 없는 옛 항목은 뒤에 붙인다.
-          const title = e.abbr && !projectId ? (e.raw ?? `${e.title} #${e.abbr}`) : e.title;
-          const context = e.context != null ? JSON.stringify(e.context) : null;
-          const result = insert.run(e.id, projectId, projectId ? 'todo' : 'inbox', title, e.captured_at, context);
-          if (result.changes) inserted += 1;
-        } catch (err) {
-          console.error('insertCaptures: 항목 하나를 건너뛴다(손상 의심)', e?.id, err);
+        // 재검토 CR-01(656beaa 리뷰의 CR-01을 WR-06이 다른 경로로 재도입한 회귀의 수정):
+        // WR-06은 insert.run() 자체를 개별 try/catch로 감쌌었다. item.title NOT NULL 같은
+        // 제약 위반은 SQLite 트랜잭션을 무효화하지 않으므로, 파일 안 모든 항목이 같은
+        // 결함을 공유하면 insertCaptures가 절대 던지지 않고 { inserted: 0 }을 돌려주었고,
+        // replayPending은 이를 성공으로 오인해 대기 파일을 지워 캡처가 영구 유실됐다.
+        // 에러 종류로 나누는 대신(node:sqlite가 이를 신뢰성 있게 구분해 주지 않는다)
+        // 필수 필드를 insert.run() 호출 전에 여기서 검증해 구조적으로 결함 있는 항목만
+        // 조용히 건너뛴다 — 이 continue는 SQL을 건드리지 않으므로 트랜잭션을 무효화하지
+        // 않는다. insert.run() 자체는 더 이상 try/catch로 감싸지 않는다: 거기서 던지는
+        // 예외는 전부 진짜 저장 실패(디스크 풀·I/O 등)이므로 트랜잭션 전체를 롤백시켜
+        // 위로 올라가고, replayPending이 대기 파일을 보존해 다음 기동에서 재시도하게
+        // 둔다(WR-06 이전 동작으로 복귀).
+        if (!e?.id || !e?.captured_at || (e.abbr ? false : !e.title)) {
+          console.error('insertCaptures: 필수 필드 결함으로 항목을 건너뛴다', e?.id);
+          skipped += 1;
+          continue;
         }
+        let projectId = null;
+        if (e.abbr) {
+          const row = findAbbr.get(e.abbr);
+          projectId = row?.id ?? null;
+        }
+        // 약어가 어느 프로젝트도 아니면(오타 등) 원문을 그대로 되살린다 — 조용히 떼어내면
+        // 인박스에서 "왜 여기 있지"를 풀 단서가 사라진다. raw가 없는 옛 항목은 뒤에 붙인다.
+        const title = e.abbr && !projectId ? (e.raw ?? `${e.title} #${e.abbr}`) : e.title;
+        if (!title) {
+          console.error('insertCaptures: title 결함으로 항목을 건너뛴다', e.id);
+          skipped += 1;
+          continue;
+        }
+        const context = e.context != null ? JSON.stringify(e.context) : null;
+        const result = insert.run(e.id, projectId, projectId ? 'todo' : 'inbox', title, e.captured_at, context);
+        if (result.changes) inserted += 1;
       }
     });
+    // 파일 안 항목 일부만 결함이면(WR-06이 원래 겨냥한 시나리오) 나머지가 반영됐으므로
+    // 여기 걸리지 않고 정상적으로 성공 반환한다. 그러나 항목 전부가 구조 결함으로
+    // 건너뛰어졌다면(부분 성공이 전혀 없다면) 성공으로 보고하지 않는다 — replayPending이
+    // 이를 성공으로 오인해 대기 파일을 지우면 그 항목들이 영구 유실된다(재검토 CR-01).
+    if (entries.length > 0 && skipped === entries.length) {
+      throw new Error(`insertCaptures: ${entries.length}건 모두 구조적 결함으로 반영되지 못했다`);
+    }
     return { inserted };
   }
 

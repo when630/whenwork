@@ -6,6 +6,7 @@ import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { createStore, MIGRATIONS, schemaTables } from '../main/store.mjs';
 import { briefingLines } from '../main/brief.mjs';
+import { createQueue } from '../main/queue.mjs';
 
 function tmpFile() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whenwork-s-'));
@@ -588,5 +589,37 @@ test('briefing() 결과를 briefingLines()에 그대로 넣어도 예외 없이 
   const lines = briefingLines(b);
   assert.ok(Array.isArray(lines));
   for (const line of lines) assert.equal(typeof line, 'string');
+  store.close();
+});
+
+// ── 재검토 CR-01 회귀(WR-06이 재도입한 영구 유실) ──
+//
+// WR-06은 insertCaptures의 개별 항목 INSERT를 통째로 try/catch로 감쌌다. item.title
+// NOT NULL 위반은 SQLite 트랜잭션 자체를 무효화하지 않으므로, 대기 파일 안 "모든" 항목이
+// 같은 결함(title 없음)을 공유하면 insertCaptures가 절대 던지지 않고 { inserted: 0 }을
+// 돌려주었다 — queue.replayPending은 이를 성공으로 오인해 대기 파일을 지워, 캡처가
+// 저장소에도 큐 파일에도 남지 않는 영구 유실이 재발했다(재검토 REVIEW.md 새 CR-01).
+test('대기 파일 안 항목 전부가 title 결함을 공유하면 반영은 실패로 남고 대기 파일이 지워지지 않는다 (재검토 CR-01 회귀)', () => {
+  const store = createStore(tmpFile());
+  const queueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'whenwork-q-'));
+  const queue = createQueue(path.join(queueDir, 'queue.jsonl'));
+
+  // title이 null인, 구조적으로 결함 있는 항목 하나만 든 큐 — 656beaa 리뷰의 재현 그대로.
+  queue.append({ id: 'lost-1', title: null, abbr: null, captured_at: new Date().toISOString() });
+
+  const replayed = queue.replayPending((entries) => store.insertCaptures(entries));
+
+  const pendingLeft = fs.readdirSync(queueDir).filter((f) => f.includes('.pending-'));
+  assert.ok(
+    replayed === 0 && pendingLeft.length === 1,
+    '항목 전부가 결함이면 replayPending은 성공(0보다 큰 반영)으로 보고하면 안 되고, 대기 파일을 지우면 안 된다 — ' +
+      `replayed=${replayed}, pendingLeft=${JSON.stringify(pendingLeft)}`
+  );
+
+  const state = store.getViewState();
+  assert.ok(
+    !state.inbox.some((it) => it.id === 'lost-1'),
+    '결함 있는 항목 자체는 저장소에도 써지지 않아야 한다(구조 결함은 여전히 격리된다)'
+  );
   store.close();
 });

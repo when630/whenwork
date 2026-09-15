@@ -356,7 +356,186 @@ export function createStore(file) {
     }
   }
 
+  // ── 프로젝트 관리 — 시드·하드코딩 없이 전부 여기서
+
+  function getProjects() {
+    if (!db || !state.ok) return [];
+    return db
+      .prepare(`SELECT id, name, abbr, status, sort FROM project WHERE status = 'active' ORDER BY sort, id`)
+      .all();
+  }
+
+  function createProject(name) {
+    if (!db || !state.ok) return null;
+    const row = db
+      .prepare(
+        `INSERT OR IGNORE INTO project (name, sort)
+         VALUES (?, (SELECT coalesce(max(sort), 0) + 1 FROM project))
+         RETURNING id`
+      )
+      .get(name);
+    return row?.id ?? null;
+  }
+
+  function updateProject(id, fields) {
+    if (!db || !state.ok) return;
+    if (fields.name != null) db.prepare('UPDATE project SET name = ? WHERE id = ?').run(fields.name, id);
+    if (fields.abbr != null) db.prepare('UPDATE project SET abbr = ? WHERE id = ?').run(fields.abbr || null, id);
+  }
+
+  function archiveProject(id) {
+    if (!db || !state.ok) return;
+    db.prepare(`UPDATE project SET status = 'archived' WHERE id = ?`).run(id);
+  }
+
+  // 순서 변경 — 이웃과 자리를 바꾸고 sort를 0..n으로 정규화해 충돌을 없앤다
+  function moveProject(id, dir) {
+    if (!db || !state.ok) return;
+    const projects = getProjects();
+    const i = projects.findIndex((p) => p.id === id);
+    const j = i + (dir === 'up' ? -1 : 1);
+    if (i < 0 || j < 0 || j >= projects.length) return;
+    [projects[i], projects[j]] = [projects[j], projects[i]];
+    withTransaction(db, () => {
+      const setSort = db.prepare('UPDATE project SET sort = ? WHERE id = ?');
+      for (let k = 0; k < projects.length; k++) {
+        setSort.run(k, projects[k].id);
+      }
+    });
+  }
+
+  function completeItem(id) {
+    if (!db || !state.ok) return;
+    db.prepare('UPDATE item SET done_at = ? WHERE id = ?').run(new Date().toISOString(), id);
+  }
+
+  function uncompleteItem(id) {
+    if (!db || !state.ok) return;
+    db.prepare('UPDATE item SET done_at = NULL WHERE id = ?').run(id);
+  }
+
+  // 프로젝트 지정. 인박스에서 부르면 그것이 곧 "할 일로 세운다"는 뜻이라 kind도 바꾸지만,
+  // 대기 항목에 부를 때는 kind를 건드리면 안 된다 — 프로젝트만 붙이려던 조작이
+  // 대기 해제가 되어 항목이 대기 탭에서 사라진다.
+  function assignProject(id, projectId, keepKind = false) {
+    if (!db || !state.ok) return;
+    if (keepKind) {
+      db.prepare('UPDATE item SET project_id = ? WHERE id = ?').run(projectId, id);
+    } else {
+      db.prepare(`UPDATE item SET project_id = ?, kind = 'todo' WHERE id = ?`).run(projectId, id);
+    }
+  }
+
+  function setDue(id, due) {
+    if (!db || !state.ok) return;
+    db.prepare('UPDATE item SET due = ? WHERE id = ?').run(due, id);
+  }
+
+  function toWaiting(id, waitingFor) {
+    if (!db || !state.ok) return;
+    db.prepare(`UPDATE item SET kind = 'waiting', waiting_for = ? WHERE id = ?`).run(waitingFor ?? null, id);
+  }
+
+  function renameItem(id, title) {
+    if (!db || !state.ok) return;
+    db.prepare('UPDATE item SET title = ? WHERE id = ?').run(title, id);
+  }
+
+  // 삭제는 표시만 — 되돌릴 수 있어야 한다(U). 실제 삭제는 purgeDeleted가 나중에 한다.
+  function removeItem(id) {
+    if (!db || !state.ok) return;
+    db.prepare('UPDATE item SET deleted_at = ? WHERE id = ?').run(new Date().toISOString(), id);
+  }
+
+  function restoreItem(id) {
+    if (!db || !state.ok) return;
+    db.prepare('UPDATE item SET deleted_at = NULL WHERE id = ?').run(id);
+  }
+
+  function setNote(id, note) {
+    if (!db || !state.ok) return;
+    db.prepare('UPDATE item SET note = ? WHERE id = ?').run(note || null, id);
+  }
+
+  // 재촉 기록 — 경과 시계를 지금부터 다시 센다.
+  //
+  // 30분 안에 다시 누른 것은 손이 미끄러진 것으로 보고 횟수를 올리지 않는다(실사용에서 한 항목에
+  // 5회가 찍혔다 — 같은 사람을 30분 안에 두 번 찌를 일은 없다). 직전 값을 함께 돌려주는 것은
+  // U로 되돌리기 위해서다: 확인 없이 경과 시계를 리셋하는 키였는데 취소할 방법이 없었다.
+  const NUDGE_DEDUP_MIN = 30;
+
+  function nudgeItem(id) {
+    if (!db || !state.ok) return null;
+    const prev = db.prepare('SELECT nudged_at, nudge_count FROM item WHERE id = ?').get(id);
+    if (!prev) return null;
+    const repeated =
+      !!prev.nudged_at && new Date().getTime() - new Date(prev.nudged_at).getTime() < NUDGE_DEDUP_MIN * 60_000;
+    const nextCount = Number(prev.nudge_count ?? 0) + (repeated ? 0 : 1);
+    const updated = db
+      .prepare('UPDATE item SET nudged_at = ?, nudge_count = ? WHERE id = ? RETURNING nudge_count')
+      .get(new Date().toISOString(), nextCount, id);
+    return {
+      count: updated?.nudge_count ?? 0,
+      repeated,
+      prev: { at: prev.nudged_at, count: Number(prev.nudge_count ?? 0) },
+    };
+  }
+
+  // 재촉 되돌리기 — 직전 값을 그대로 되돌려 놓는다 (첫 재촉이었으면 at은 null)
+  function nudgeRestore(id, at, count) {
+    if (!db || !state.ok) return;
+    db.prepare('UPDATE item SET nudged_at = ?, nudge_count = ? WHERE id = ?').run(at ?? null, Number(count) || 0, id);
+  }
+
+  function getInbox() {
+    if (!db || !state.ok) return [];
+    const rows = db
+      .prepare(
+        `SELECT id, title, context FROM item
+         WHERE kind = 'inbox' AND done_at IS NULL AND deleted_at IS NULL
+         ORDER BY captured_at`
+      )
+      .all();
+    return rows.map((r) => ({ ...r, context: r.context ? JSON.parse(r.context) : null }));
+  }
+
+  // 되돌릴 수 있는 창이 지난 삭제분을 실제로 비운다. 기동 시 1회.
+  function purgeDeleted(days = 30) {
+    if (!db || !state.ok) return 0;
+    const cutoff = new Date(new Date().getTime() - days * 86400_000).toISOString();
+    const result = db.prepare('DELETE FROM item WHERE deleted_at IS NOT NULL AND deleted_at < ?').run(cutoff);
+    return result.changes;
+  }
+
   open();
 
-  return { open, close, reopen, checkpoint, status, insertCaptures, getViewState, logEvent, file };
+  return {
+    open,
+    close,
+    reopen,
+    checkpoint,
+    status,
+    insertCaptures,
+    getViewState,
+    logEvent,
+    getProjects,
+    createProject,
+    updateProject,
+    archiveProject,
+    moveProject,
+    completeItem,
+    uncompleteItem,
+    assignProject,
+    setDue,
+    toWaiting,
+    renameItem,
+    removeItem,
+    restoreItem,
+    setNote,
+    nudgeItem,
+    nudgeRestore,
+    getInbox,
+    purgeDeleted,
+    file,
+  };
 }

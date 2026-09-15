@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { createStore, MIGRATIONS, schemaTables } from '../main/store.mjs';
+import { briefingLines } from '../main/brief.mjs';
 
 function tmpFile() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whenwork-s-'));
@@ -264,4 +265,197 @@ test('백업 폴더를 만들 수 없어도 마이그레이션은 끝까지 진�
   } finally {
     MIGRATIONS.pop();
   }
+});
+
+// ── 프로젝트·항목 조작 (01-04 Task 1) ──
+
+test('createProject는 정수 id를 돌려주고 같은 이름으로 다시 부르면 새 행이 생기지 않는다', () => {
+  const store = createStore(tmpFile());
+  const id = store.createProject('가');
+  assert.equal(typeof id, 'number');
+  const again = store.createProject('가');
+  assert.equal(again, null, '같은 이름으로 다시 부르면 새 행이 생기지 않아야 한다');
+  assert.equal(store.getProjects().length, 1);
+  store.close();
+});
+
+test('moveProject 뒤 getProjects() 순서가 바뀌고 sort가 0..n으로 정규화된다', () => {
+  const store = createStore(tmpFile());
+  const a = store.createProject('가');
+  const b = store.createProject('나');
+  const c = store.createProject('다');
+  store.moveProject(c, 'up'); // 원래 순서 a,b,c에서 c가 한 칸 앞으로 — b와 자리를 바꾼다
+  const projects = store.getProjects();
+  assert.deepEqual(projects.map((p) => p.id), [a, c, b]);
+  assert.deepEqual(projects.map((p) => p.sort), [0, 1, 2]);
+  store.close();
+});
+
+test('assignProject는 kind를 todo로 바꾸지만 keepKind가 true면 대기 항목이 대기 탭에 남는다', () => {
+  const store = createStore(tmpFile());
+  const pid = store.createProject('프로젝트');
+
+  store.insertCaptures([
+    { id: 'id-w', title: '대기 항목', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.toWaiting('id-w', '회신 대기');
+  store.assignProject('id-w', pid, true);
+  let state = store.getViewState();
+  assert.ok(state.waiting.some((it) => it.id === 'id-w'), 'keepKind면 대기 탭에 남아야 한다');
+
+  store.insertCaptures([
+    { id: 'id-i', title: '인박스 항목', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.assignProject('id-i', pid);
+  state = store.getViewState();
+  assert.ok(state.today.some((it) => it.id === 'id-i'), 'keepKind가 없으면 todo로 바뀌어야 한다');
+  store.close();
+});
+
+test('completeItem 뒤 done_at이 ISO 8601 UTC 문자열이고 uncompleteItem이 다시 비운다', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  store.insertCaptures([
+    { id: 'id-done', title: '완료 테스트', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.completeItem('id-done');
+  store.close();
+
+  const raw = new DatabaseSync(file);
+  const row = raw.prepare('SELECT done_at FROM item WHERE id = ?').get('id-done');
+  assert.ok(row.done_at && !Number.isNaN(new Date(row.done_at).getTime()), 'done_at은 ISO 문자열이어야 한다');
+  raw.close();
+
+  const store2 = createStore(file);
+  store2.uncompleteItem('id-done');
+  store2.close();
+  const raw2 = new DatabaseSync(file);
+  const row2 = raw2.prepare('SELECT done_at FROM item WHERE id = ?').get('id-done');
+  assert.equal(row2.done_at, null);
+  raw2.close();
+});
+
+test('nudgeItem을 30분 안에 두 번 부르면 두 번째는 repeated:true이고 count가 오르지 않는다, nudgeRestore로 직전 값이 되돌아온다', () => {
+  const store = createStore(tmpFile());
+  store.insertCaptures([
+    { id: 'id-n', title: '대기 항목', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.toWaiting('id-n', '회신 대기');
+
+  const first = store.nudgeItem('id-n');
+  assert.equal(first.repeated, false);
+  assert.equal(first.count, 1);
+
+  const second = store.nudgeItem('id-n');
+  assert.equal(second.repeated, true, '30분 안의 재촉은 반복으로 잡혀야 한다');
+  assert.equal(second.count, 1, '30분 안의 재촉은 횟수가 오르면 안 된다');
+
+  store.nudgeRestore('id-n', second.prev.at, second.prev.count);
+  const state = store.getViewState();
+  const item = state.waiting.find((it) => it.id === 'id-n');
+  assert.equal(item.nudge_count, second.prev.count);
+  assert.equal(item.nudged_at, second.prev.at);
+  store.close();
+});
+
+test('removeItem 뒤 getViewState()에서 사라지지만 행은 남아 있고 restoreItem이 되살린다', () => {
+  const store = createStore(tmpFile());
+  store.insertCaptures([
+    { id: 'id-rm', title: '지울 항목', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.removeItem('id-rm');
+  let state = store.getViewState();
+  assert.ok(
+    ![...state.today, ...state.inbox, ...state.waiting].some((it) => it.id === 'id-rm'),
+    '삭제 표시된 항목은 오늘 뷰에 없어야 한다'
+  );
+  store.restoreItem('id-rm');
+  state = store.getViewState();
+  assert.ok(state.inbox.some((it) => it.id === 'id-rm'), '복구하면 다시 보여야 한다');
+  store.close();
+});
+
+test('purgeDeleted(30)은 30일보다 오래 전에 지워진 행만 실제로 지우고 그 수를 돌려준다', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  store.insertCaptures([
+    { id: 'id-old-del', title: '오래전 삭제', abbr: null, captured_at: new Date().toISOString(), context: null },
+    { id: 'id-recent-del', title: '최근 삭제', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.close();
+
+  const now = Date.now();
+  const raw = new DatabaseSync(file);
+  raw
+    .prepare('UPDATE item SET deleted_at = ? WHERE id = ?')
+    .run(new Date(now - 31 * 86400_000).toISOString(), 'id-old-del');
+  raw
+    .prepare('UPDATE item SET deleted_at = ? WHERE id = ?')
+    .run(new Date(now - 1 * 86400_000).toISOString(), 'id-recent-del');
+  raw.close();
+
+  const store2 = createStore(file);
+  const purged = store2.purgeDeleted(30);
+  assert.equal(purged, 1);
+  store2.close();
+
+  const raw2 = new DatabaseSync(file);
+  const remaining = raw2.prepare('SELECT id FROM item').all().map((r) => r.id);
+  assert.ok(!remaining.includes('id-old-del'), '30일보다 오래 전에 지워진 행은 사라져야 한다');
+  assert.ok(remaining.includes('id-recent-del'), '30일 안에 지워진 행은 남아야 한다');
+  raw2.close();
+});
+
+test('purgeDeleted 경계 — 29일 전 삭제는 남고 31일 전 삭제는 지워진다 (T-01-04-02)', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  store.insertCaptures([
+    { id: 'id-29', title: '29일 전 삭제', abbr: null, captured_at: new Date().toISOString(), context: null },
+    { id: 'id-31', title: '31일 전 삭제', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.close();
+
+  const now = Date.now();
+  const raw = new DatabaseSync(file);
+  raw.prepare('UPDATE item SET deleted_at = ? WHERE id = ?').run(new Date(now - 29 * 86400_000).toISOString(), 'id-29');
+  raw.prepare('UPDATE item SET deleted_at = ? WHERE id = ?').run(new Date(now - 31 * 86400_000).toISOString(), 'id-31');
+  raw.close();
+
+  const store2 = createStore(file);
+  const purged = store2.purgeDeleted(30);
+  assert.equal(purged, 1);
+  store2.close();
+
+  const raw2 = new DatabaseSync(file);
+  const remaining = raw2.prepare('SELECT id FROM item').all().map((r) => r.id);
+  assert.ok(remaining.includes('id-29'), '29일 전 삭제는 유예 기간 안이라 남아야 한다');
+  assert.ok(!remaining.includes('id-31'), '31일 전 삭제는 유예 기간을 넘겨 지워져야 한다');
+  raw2.close();
+});
+
+test('getInbox()가 인박스 항목의 context를 객체로 돌려준다', () => {
+  const store = createStore(tmpFile());
+  store.insertCaptures([
+    {
+      id: 'id-inbox-ctx',
+      title: '인박스 컨텍스트',
+      abbr: null,
+      captured_at: new Date().toISOString(),
+      context: { fg: '메모장' },
+    },
+  ]);
+  const inbox = store.getInbox();
+  const item = inbox.find((it) => it.id === 'id-inbox-ctx');
+  assert.deepEqual(item.context, { fg: '메모장' });
+  store.close();
+});
+
+test('getProjects()는 status가 active인 것만 sort·id 순으로 돌려준다', () => {
+  const store = createStore(tmpFile());
+  const a = store.createProject('가');
+  const b = store.createProject('나');
+  store.archiveProject(a);
+  const projects = store.getProjects();
+  assert.deepEqual(projects.map((p) => p.id), [b]);
+  store.close();
 });

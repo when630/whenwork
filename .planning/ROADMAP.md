@@ -142,4 +142,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. 레거시 기능 제거 | 1/1 | Complete | 2026-09-15 |
 | 3. 내보내기·가져오기·이전 | 1/1 | Complete | 2026-09-15 |
 | 4. 첫 실행·플랫폼 대응 | 1/1 | Complete (macOS 실기기 미검증) | 2026-09-15 |
-| 5. 이름·아이콘·릴리스 | 0/TBD | Not started | - |
+| 5. 아이콘·릴리스 | 1/1 | Partial (게시·macOS·도그푸딩 남음) | 2026-09-15 |

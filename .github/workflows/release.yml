@@ -1,0 +1,89 @@
+# 태그를 밀면 Windows·macOS 설치 파일을 만들어 Releases에 올린다 (REL-04).
+#
+# 서명하지 않는다. CSC_IDENTITY_AUTO_DISCOVERY=false가 그것을 못 박는다 —
+# 이 값을 빼면 electron-builder가 러너 키체인에서 아무 인증서나 집어가려다
+# 빌드를 실패시키거나, 더 나쁘게는 의도하지 않은 것으로 서명한다.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # 태그 없이 빌드만 확인하고 싶을 때 (업로드하지 않는다)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # 단위 테스트만 — 강제종료 스모크는 실제 Electron 창이 필요해 아래 build 잡에서 돈다
+      - run: npm test
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: build
+            artifact: dist/*.exe
+          - os: macos-latest
+            script: build:mac
+            artifact: |
+              dist/*.dmg
+              dist/*.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # 패키징 전에 진짜 Electron으로 한 번 돌려 본다 — 렌더러가 깨진 채로
+      # 설치 파일이 나가는 것을 막는다. macOS 러너에는 화면이 없지만
+      # --smoke는 창을 show하지 않으므로 헤드리스에서도 돈다.
+      - name: smoke
+        run: npm run smoke
+        env:
+          # 리눅스가 아니라 필요 없지만, 러너가 바뀌어도 같은 명령이 돌도록 둔다
+          ELECTRON_DISABLE_SANDBOX: 1
+
+      - name: build
+        run: npm run ${{ matrix.script }}
+        env:
+          # 미서명 배포 — 러너 키체인을 뒤지지 않게 못 박는다
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 올릴 파일 확인
+        run: find artifacts -type f | sort
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          draft: true # 사람이 내용을 보고 공개한다 — 자동으로 공개하지 않는다
+          generate_release_notes: true

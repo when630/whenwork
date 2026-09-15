@@ -18,7 +18,6 @@ import {
   STALE_WAITING_DAYS,
 } from './brief.mjs';
 
-const FLUSH_MS = 30_000;
 const COLLECT_MS = 6 * 60 * 60 * 1000; // git·이슈 백그라운드 수집 주기 (설계의 "일 1회"보다 촘촘하게)
 const COLLECT_DELAY_MS = 30_000; // 켜자마자 긁으면 부팅이 무거워진다 — 조금 뒤에
 const PURGE_DAYS = 30; // 소프트 삭제한 항목을 실제로 비우기까지 두는 기간
@@ -39,14 +38,17 @@ export function scheduleJobs(ctx) {
   // settings:get(IPC 핸들러)이 읽어야 해서 ctx에 둔다
   ctx.lastCalendarError = null;
 
-  // ── 큐 → DB. 실패는 조용히 — 큐가 원본을 들고 있으니 다음 기회에 다시 흘린다.
-  async function flush() {
+  // ── 큐 → 저장소, 앱 시작 시 딱 1회(D-01/D-02). 실행 중에는 다시 부르지 않는다 —
+  // 주기 타이머로 되살리면 CONCERNS.md가 지적한 읽기-쓰기 경합이 그대로 돌아온다
+  // (RESEARCH Pitfall 3). 반영에 실패한 파일은 replayPending이 알아서 남겨 두고
+  // 다음 기동이 재시도한다 — 여기서는 그 실패를 세지 않는다(ctx.pending은 "이번
+  // 실행에서 즉시 반영에 실패한 캡처 수"이지 큐 줄 수가 아니다).
+  function replayQueueOnce() {
     try {
-      ctx.dbOnline = await ctx.db.online();
-      if (!ctx.dbOnline) return;
-      ctx.queue.replayPending((entries) => ctx.db.insertCaptures(entries));
+      ctx.queue.replayPending((entries) => ctx.store.insertCaptures(entries));
+      ctx.pending = 0;
     } catch {
-      ctx.dbOnline = false;
+      // replayPending 자체는 던지지 않는 계약이지만 안전망으로 남겨둔다
     }
     ctx.refreshTrayMenu();
   }
@@ -431,7 +433,7 @@ export function scheduleJobs(ctx) {
 
   // IPC 핸들러(Task 3의 main/ipc)가 불러야 하는 함수 — ctx.jobs에 붙여 둔다
   ctx.jobs = {
-    flush,
+    replayQueueOnce,
     collectAll,
     maybeBrief,
     maybeBackup,
@@ -450,8 +452,9 @@ export function scheduleJobs(ctx) {
   };
 
   // ── 타이머 등록. lifecycle.mjs의 app.whenReady에 있던 블록을 그대로 옮겨 담는다.
-  setInterval(flush, FLUSH_MS);
-  flush();
+  // 큐 반영은 여기서 딱 한 번(D-02) — !SMOKE 가드 밖이다. 01-07의 강제종료 스모크가
+  // 두 번째 기동에서 큐 반영이 실제로 일어나는지를 보므로, 스모크에서도 이 호출은 돈다.
+  replayQueueOnce();
 
   if (!ctx.SMOKE) {
     setTimeout(collectAll, COLLECT_DELAY_MS);

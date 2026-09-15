@@ -8,6 +8,44 @@ import { parseCaptureToken, parseDue } from './parse.mjs';
 import { maskUrl } from './calendar.mjs';
 import { NOTIFY_AT_DEFAULT } from './brief.mjs';
 
+// 캡처 저장의 단일 경로(D-01/D-03). capture:save·capture:followUp 두 핸들러와
+// 01-07의 주입 모드가 모두 이 함수를 부른다 — 경로가 하나여야 테스트가 실경로를 밟는다.
+//
+// 순서 자체가 계약이다:
+// 1) 제목을 다듬고 약어를 분리한다. 빈 제목이면 { ok: false }.
+// 2) queue.append — 동기, fs만 의존. 여기까지 오면 캡처는 이미 보존된 것이다.
+// 3) store.insertCaptures를 동기로 즉시 시도한다.
+// 4) 던지면 store.reopen() 후 한 번 더 시도한다(D-03).
+// 5) 그래도 던지면 ctx.pending += 1. 예외를 위로 올리지 않는다.
+// 6) refreshTrayMenu 후 { ok: true, pending: ctx.pending }을 돌려준다.
+export function saveCapture(ctx, title, context = null) {
+  const { title: text, abbr } = parseCaptureToken(title);
+  if (!text) return { ok: false };
+  const entry = {
+    id: crypto.randomUUID(),
+    title: text,
+    abbr, // #약어 — 프로젝트로 푸는 건 저장소 반영 시점에서
+    // 그 약어가 어느 프로젝트도 아니면 원문을 그대로 되살린다 — 앞에 붙은 "#201 이슈 확인"이
+    // 어순이 바뀐 채 남으면 안 된다
+    raw: abbr ? String(title).trim() : null,
+    captured_at: new Date().toISOString(),
+    context,
+  };
+  ctx.queue.append(entry); // 먼저 큐에 남긴다 — 아래가 실패해도 이 줄은 이미 디스크에 있다(D1/D-01)
+  try {
+    ctx.store.insertCaptures([entry]);
+  } catch {
+    try {
+      ctx.store.reopen(); // D-03: 한 번 닫았다 다시 열어 재시도
+      ctx.store.insertCaptures([entry]);
+    } catch {
+      ctx.pending += 1; // 재시도까지 실패 — 대기 건수로만 드러낸다. 예외는 위로 올리지 않는다
+    }
+  }
+  ctx.refreshTrayMenu();
+  return { ok: true, pending: ctx.pending };
+}
+
 // ── D-08: index.mjs에 남아 있던 모든 ipcMain.handle/.on 등록. ctx를 받아 그 안의
 // db/queue/settings/tray·백그라운드 작업 모듈·창 함수(main/lifecycle)를 쓴다.
 // ipc.mjs는 백그라운드 작업 모듈을 import하지 않는다.
@@ -81,52 +119,16 @@ export function registerIpc(ctx) {
   ipcMain.handle('capture:projects', () => ctx.refreshAbbrHints());
 
   ipcMain.handle('capture:save', async (_e, title) => {
-    const { title: text, abbr } = parseCaptureToken(title);
-    if (!text) return { ok: false };
     const fg =
       (await Promise.race([ctx.pendingContext, new Promise((r) => setTimeout(() => r(null), 300))])) ??
       ctx.cachedForeground();
-    const entry = {
-      id: crypto.randomUUID(),
-      title: text,
-      abbr, // #약어 — 프로젝트로 푸는 건 저장소 반영 시점에서
-      // 그 약어가 어느 프로젝트도 아니면 원문을 그대로 되살린다 — 앞에 붙은 "#201 이슈 확인"이
-      // 어순이 바뀐 채 남으면 안 된다
-      raw: abbr ? String(title).trim() : null,
-      captured_at: new Date().toISOString(),
-      context: fg ? { fg } : null,
-    };
-    ctx.queue.append(entry); // 먼저 큐에 남긴다 — 아래가 실패해도 이 줄은 이미 디스크에 있다(D1)
-    // 같은 호출 흐름에서 저장소에 즉시 반영을 시도한다(D-01). 실패해도 사용자에게는
-    // 보이지 않는다 — 큐가 이미 보장했다. 재시도·대기 표시는 01-03이 붙인다.
-    try {
-      ctx.store.insertCaptures([entry]);
-    } catch {
-      // 큐가 이미 보장한다
-    }
-    ctx.refreshTrayMenu();
-    return { ok: true, dbOnline: ctx.dbOnline, pending: ctx.queue.count() };
+    return saveCapture(ctx, title, fg ? { fg } : null);
   });
 
   // 회의 후속 캡처 — 회의는 할 일을 낳는데 그 경로가 손 입력뿐이었다.
   // 캡처 경로는 퀵캡처와 같다(큐 선기록, D1) — 맥락만 창 제목 대신 회의 제목이다.
   ipcMain.handle('capture:followUp', async (_e, title, meeting) => {
-    const text = String(title ?? '').trim();
-    if (!text) return { ok: false };
-    const entry = {
-      id: crypto.randomUUID(),
-      title: text,
-      captured_at: new Date().toISOString(),
-      context: { meeting: String(meeting?.title ?? '').slice(0, 200) },
-    };
-    ctx.queue.append(entry);
-    try {
-      ctx.store.insertCaptures([entry]);
-    } catch {
-      // 큐가 이미 보장한다
-    }
-    ctx.refreshTrayMenu();
-    return { ok: true, pending: ctx.queue.count() };
+    return saveCapture(ctx, title, { meeting: String(meeting?.title ?? '').slice(0, 200) });
   });
 
   // D-05 전환 기간: 이 핸들러만 새 저장소(store.mjs)를 쓴다. issues/repoStates/events는

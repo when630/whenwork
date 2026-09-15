@@ -358,6 +358,9 @@ export function bootstrap() {
     quitting: false,
     hotkeyOk: false,
     dbOnline: false,
+    // 이번 실행에서 즉시 반영에 실패한 캡처 수(D-03) — 큐 줄 수가 아니다. 시작 시 0,
+    // replayQueueOnce 성공에서 0으로 되돌아가고, saveCapture의 재시도까지 실패할 때만 늘어난다.
+    pending: 0,
     // 폴더 선택 같은 네이티브 다이얼로그가 뜨면 창이 blur된다 — 그때 창을 숨기면 안 된다
     suppressHide: false,
     abbrHints: [],
@@ -578,7 +581,8 @@ export function bootstrap() {
   function showToday() {
     const win = getTodayWin();
     placeWindow(win, 'todayBounds'); // 옮겨둔 자리가 있으면 거기, 없으면 화면 중앙
-    ctx.jobs.flush(); // 열 때 밀린 큐부터
+    // 큐 반영은 앱 시작 시 1회뿐이다(D-01/D-02) — 여기서 다시 부르지 않는다.
+    // 밀린 캡처가 있다면 다음 기동이 반영하고, 이번 실행의 실패 건수는 ctx.pending이 이미 보여준다.
     win.webContents.send('today:refresh');
     win.show();
     win.focus();

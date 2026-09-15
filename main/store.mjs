@@ -85,11 +85,50 @@ function withTransaction(db, fn) {
   }
 }
 
-function migrate(db) {
+// 이행 직전 백업 몇 개만 남긴다(보관 개수는 재량 — 5로 고정). Phase 3의 가져오기 직전
+// 자동 백업(DATA-03)이 같은 폴더·명명 관례를 쓸 것이므로 접두사·위치를 바꾸지 않는다.
+const BACKUP_KEEP = 5;
+
+function todayStamp(d = new Date()) {
+  return d.toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+function pruneOldBackups(dir) {
+  try {
+    const files = fs.readdirSync(dir).filter((f) => /^store-v\d+-\d{8}\.sqlite$/.test(f));
+    if (files.length <= BACKUP_KEEP) return;
+    const withTimes = files
+      .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .sort((a, b) => a.t - b.t);
+    for (const { f } of withTimes.slice(0, withTimes.length - BACKUP_KEEP)) {
+      fs.unlinkSync(path.join(dir, f));
+    }
+  } catch {
+    // 정리 실패는 무시 — 이행을 막을 이유가 아니다
+  }
+}
+
+// user_version이 실제로 오를 때만, 그리고 v0에서 시작하는 게 아닐 때만 백업한다(D-16).
+// 복사 실패가 이행을 막지 않도록 전체를 삼킨다.
+function backupBeforeMigrate(file, fromVersion) {
+  try {
+    const dir = path.join(path.dirname(file), 'backups');
+    fs.mkdirSync(dir, { recursive: true });
+    const dest = path.join(dir, `store-v${fromVersion}-${todayStamp()}.sqlite`);
+    fs.copyFileSync(file, dest);
+    pruneOldBackups(dir);
+  } catch {
+    // 백업 실패가 이행을 막지 않는다(D-16)
+  }
+}
+
+function migrate(db, file) {
   const { user_version: current } = db.prepare('PRAGMA user_version').get();
   if (current > MIGRATIONS.length) {
     throw new NewerSchemaError(current, MIGRATIONS.length);
   }
+  if (current === MIGRATIONS.length) return; // 이미 최신 — 백업도 이행도 필요 없다
+  if (current > 0) backupBeforeMigrate(file, current);
   for (let v = current; v < MIGRATIONS.length; v++) {
     withTransaction(db, () => {
       MIGRATIONS[v](db);
@@ -99,33 +138,122 @@ function migrate(db) {
   }
 }
 
+// integrity_check가 'ok'가 아니면 손상으로 취급한다 — 판정 근거를 예외 하나로 통일한다.
+class IntegrityCheckFailedError extends Error {}
+
+function checkIntegrity(db) {
+  const row = db.prepare('PRAGMA integrity_check').get();
+  const result = row?.integrity_check;
+  if (result !== 'ok') throw new IntegrityCheckFailedError(`integrity_check: ${result}`);
+}
+
+// 손상 판정 기준은 "열기에 실패했다"가 아니라 에러의 정체다(D-15) — 건강한 DB를 옆으로
+// 미는 일이 절대 없어야 한다. errcode 26(SQLITE_NOTADB)·11(SQLITE_CORRUPT) 또는
+// integrity_check 불합격만 손상이고, 잠김(errcode 5)·권한 오류는 손상이 아니다.
+function isCorruptError(err) {
+  if (err instanceof IntegrityCheckFailedError) return true;
+  return !!err && (err.errcode === 26 || err.errcode === 11);
+}
+
+// 손상 파일·옆의 -wal/-shm을 옆으로 옮겨 보존한다(지우지 않는다, D-15). 콜론은 Windows가
+// 파일명으로 허용하지 않아 ISO 타임스탬프에서 :와 .을 제거한다.
+function quarantine(file) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '');
+  const quarantinedName = `store.corrupt-${stamp}.sqlite`;
+  const dir = path.dirname(file);
+  for (const suffix of ['', '-wal', '-shm']) {
+    const src = file + suffix;
+    if (!fs.existsSync(src)) continue;
+    try {
+      fs.renameSync(src, path.join(dir, quarantinedName + suffix));
+    } catch {
+      // 옆 파일(wal/shm) 이동 실패는 본 파일 격리를 막지 않는다
+    }
+  }
+  return quarantinedName;
+}
+
 export function createStore(file) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let db = null;
   let state = { ok: false, reason: null, notice: null, quarantined: null };
 
+  function closeQuietly() {
+    if (!db) return;
+    try {
+      db.close();
+    } catch {
+      // 이미 망가진 핸들이면 닫기도 실패할 수 있다 — 무시한다
+    }
+    db = null;
+  }
+
+  function genericFailure() {
+    closeQuietly();
+    return {
+      ok: false,
+      reason: 'error',
+      notice: '저장소를 열지 못했습니다 — 캡처는 로컬 큐에 안전하게 쌓입니다',
+      quarantined: null,
+    };
+  }
+
   function open() {
+    // (a)+(b) 열기(construction)와 integrity_check를 한 판정 경계로 묶는다 — 손상 여부는
+    // "열기에 실패했다"가 아니라 에러의 정체(errcode 26/11 또는 불합격 결과)로만 가른다.
+    // 잠김·권한 오류처럼 errcode가 다른 것은 isCorruptError가 걸러 손상으로 오판하지
+    // 않는다(D-15 — 건강한 파일을 절대 옆으로 밀지 않는다).
     try {
       db = new DatabaseSync(file);
+      checkIntegrity(db);
+    } catch (err) {
+      closeQuietly();
+      if (!isCorruptError(err)) {
+        state = genericFailure();
+        return state;
+      }
+      const quarantinedName = quarantine(file);
+      try {
+        db = new DatabaseSync(file); // 같은 자리에 빈 DB를 새로 연다
+        db.exec('PRAGMA journal_mode = WAL');
+        db.exec('PRAGMA synchronous = FULL');
+        migrate(db, file);
+        state = {
+          ok: true,
+          reason: 'corrupt',
+          notice: '이전 데이터 파일이 손상되어 보관해 두었습니다',
+          quarantined: quarantinedName,
+        };
+      } catch {
+        closeQuietly();
+        state = {
+          ok: false,
+          reason: 'error',
+          notice: '저장소를 열지 못했습니다 — 캡처는 로컬 큐에 안전하게 쌓입니다',
+          quarantined: quarantinedName,
+        };
+      }
+      return state;
+    }
+
+    // (c) 정상 파일 — 프라그마·마이그레이션. 상위 버전(D-13)은 여기서 걸린다.
+    try {
       db.exec('PRAGMA journal_mode = WAL');
       db.exec('PRAGMA synchronous = FULL');
-      migrate(db);
+      migrate(db, file);
       state = { ok: true, reason: null, notice: null, quarantined: null };
     } catch (err) {
-      if (db) {
-        try {
-          db.close();
-        } catch {
-          // 이미 망가진 핸들이면 닫기도 실패할 수 있다 — 무시한다
-        }
+      closeQuietly();
+      if (err instanceof NewerSchemaError) {
+        state = {
+          ok: false,
+          reason: 'newer',
+          notice: '새 버전으로 만든 데이터입니다 — 앱을 업데이트해 주세요',
+          quarantined: null,
+        };
+      } else {
+        state = genericFailure();
       }
-      db = null;
-      state = {
-        ok: false,
-        reason: 'error',
-        notice: '저장소를 열지 못했습니다 — 캡처는 로컬 큐에 안전하게 쌓입니다',
-        quarantined: null,
-      };
     }
     return state;
   }

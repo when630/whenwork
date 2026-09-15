@@ -39,7 +39,8 @@ let filter = ''; // 검색어 — 탭을 옮겨도 유지된다 (어느 탭에 �
 let searchOn = false; // 검색 입력에 포커스가 가 있는 동안
 let dueOnly = false; // 오늘 탭: 마감 있는 것만 보기 (F)
 let history = null; // 완료 기록 화면 상태 (H)
-let view = 'list'; // 'list' | 'history'
+let view = 'list'; // 'list' | 'history' | 'trash'
+let trashSel = 0; // 지운 프로젝트 화면의 선택 행
 let resetScroll = false; // 탭·뷰가 바뀐 렌더에서만 맨 위로
 // 되돌릴 수 있는 조작 스택 (U) — 최근 것부터. 삭제와 재촉이 함께 쌓인다:
 // 둘 다 확인 없이 한 키에 끝나고 취소할 방법이 없던 조작이다.
@@ -293,7 +294,8 @@ const KEYMAP = [
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
   ['완료 기록', [['←→', '7일·30일·전체'], ['/', '검색'], ['Esc', '뒤로']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
-  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 것 골라 되돌리기']]],
+  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 프로젝트 보기']]],
+  ['지운 프로젝트', [['↑↓', '고르기'], ['Enter', '되살리기'], ['Esc', '뒤로']]],
   ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json']]],
   ['퀵캡처', [['{hotkey}', '열기·닫기'], ['Enter', '저장'], ['Tab', '오늘 뷰']]],
 ];
@@ -345,7 +347,7 @@ function renderLegend() {
 }
 
 function openSearch() {
-  if (tab === 'settings') return; // 설정에는 검색할 목록이 없다
+  if (tab === 'settings' || view === 'trash') return; // 설정·지운 프로젝트 화면에는 검색할 목록이 없다
   searchOn = true;
   render();
   const input = $('searchIn');
@@ -374,6 +376,9 @@ function render() {
   if (view === 'history') {
     $('tabs').replaceChildren();
     renderHistory();
+  } else if (view === 'trash') {
+    $('tabs').replaceChildren();
+    renderTrash();
   } else {
     renderTabs();
     renderBody();
@@ -703,7 +708,11 @@ function renderFooter() {
     s.append(el('kbd', null, key), document.createTextNode(' ' + label));
     hints.append(s);
   };
-  if (view === 'history') {
+  if (view === 'trash') {
+    add('↑↓', '고르기');
+    add('Enter', '되살리기');
+    add('Esc', '뒤로');
+  } else if (view === 'history') {
     add('←→', '기간');
     add('/', '검색');
     add('Esc', '뒤로');
@@ -716,7 +725,7 @@ function renderFooter() {
     add('N', '추가');
     add('E', '이름');
     add('X', '삭제');
-    add('U', '지운 것 되돌리기');
+    add('U', '지운 프로젝트');
   } else if (tab === 'inbox') {
     add('1~9', '프로젝트');
     add('W', '대기로');
@@ -808,29 +817,73 @@ function promptText(label, initial = '') {
 }
 
 // 프로젝트 순서 이동 — 선택 표시도 함께 따라간다
-// 지운 프로젝트를 골라서 되돌린다. 프로젝트 탭의 U는 "마지막 조작 취소"가 아니라 이것이다 —
-// 지운 것은 화면에서 사라지므로 어느 것을 되돌릴지 사용자가 볼 자리가 여기밖에 없고,
-// 재시작 뒤에는 U 스택이 비어 있어도 store의 deletedProjects는 남아 있다.
+// ── 지운 프로젝트 (프로젝트 탭의 U)
 //
+// 지운 것은 목록에서 사라지므로 어느 것을 되돌릴지 볼 자리가 따로 있어야 한다. 한 줄
+// 프롬프트에 번호를 늘어놓는 방식은 지운 것이 열 개를 넘으면 읽을 수 없다 — 완료 기록(H)과
+// 같은 화면으로 둔다. 최근 지운 것이 위에 서고, ↑↓로 고르고 Enter로 되살린다.
+// 재시작 뒤에도 store의 deletedProjects는 남아 있어 여기서 되살릴 수 있다.
+function openTrash() {
+  view = 'trash';
+  trashSel = 0;
+  resetScroll = true;
+  render();
+}
+function closeTrash() {
+  view = 'list';
+  resetScroll = true;
+  render();
+}
+function renderTrash() {
+  const body = $('body');
+  body.replaceChildren();
+  const gone = state?.deletedProjects ?? [];
+  trashSel = Math.min(trashSel, Math.max(0, gone.length - 1));
+
+  const head = el('div', 'rhead');
+  const back = el('span', 'back', '‹');
+  back.onclick = closeTrash;
+  head.append(back, el('span', 'pname', `지운 프로젝트 — 최근 순 ${gone.length ? `(${gone.length})` : ''}`));
+  body.append(head);
+
+  if (!gone.length) {
+    body.append(el('div', 'empty', '지운 프로젝트 없음'));
+    return;
+  }
+  gone.forEach((g, idx) => {
+    const row = el('div', 'item' + (idx === trashSel ? ' selected' : ''));
+    row.append(el('div', 't', g.name));
+    // 언제 지웠는지와 딸린 할 일·기록 수 — 되살릴지 판단할 근거는 이 둘이다
+    const meta = el('div', 'ctx');
+    const days = g.deleted_at ? elapsedDays(g.deleted_at) : null;
+    const when = days == null ? '' : days === 0 ? '오늘 지움' : `${days}일 전 지움`;
+    const cnt = g.item_count ? `항목 ${g.item_count}건` : '항목 없음';
+    meta.textContent = [when, cnt].filter(Boolean).join(' · ');
+    row.append(meta);
+    row.onclick = () => {
+      trashSel = idx;
+      render();
+    };
+    row.ondblclick = () => restoreFromTrash();
+    body.append(row);
+  });
+}
 // 이번 실행에서 지운 것이면 U 스택에 그때 인박스로 보낸 항목 id가 있어 함께 데려온다.
 // 재시작 뒤라면 그 목록이 없다 — 항목은 인박스에 그대로 두고 프로젝트만 되살린다(사용자가
 // 그 사이 다른 데로 옮겼을 수도 있는 것을 되돌리기가 뒤집지 않는다).
-async function restoreProjectPick() {
+async function restoreFromTrash() {
   const gone = state?.deletedProjects ?? [];
-  if (!gone.length) return toast('되돌릴 프로젝트 없음');
-  const lines = gone.slice(0, 9).map((g, i) => `${i + 1} ${g.name}`).join(' · ');
-  const raw = await promptText(`되돌릴 프로젝트 번호 (최근 순): ${lines}`, '1');
-  if (raw === null) return;
-  const n = Number(raw);
-  const pick = gone[n - 1];
-  if (!pick) return toast('그 번호의 프로젝트가 없습니다');
+  const pick = gone[trashSel];
+  if (!pick) return;
   const i = undoStack.findLastIndex((u) => u.kind === 'projectDelete' && u.id === pick.id);
   const itemIds = i >= 0 ? undoStack[i].itemIds : [];
   if (i >= 0) undoStack.splice(i, 1);
   const res = await window.whenwork.projectRestore(pick.id, itemIds);
   if (!res.ok) return toast('되돌리기 실패');
   toast(`되돌림 — "${clip(pick.name)}"${itemIds.length ? ` · 할 일 ${itemIds.length}건도 함께` : ''}`);
-  return refresh();
+  await refresh();
+  // 마지막 것을 되살렸으면 볼 것이 없으니 목록으로 돌아간다
+  if (!(state?.deletedProjects ?? []).length) closeTrash();
 }
 
 async function moveProject(dir) {
@@ -1010,6 +1063,38 @@ document.addEventListener('keydown', async (e) => {
     return openKeys();
   }
 
+  // 지운 프로젝트 — 고르고 되살리는 화면
+  if (view === 'trash') {
+    const n = (state?.deletedProjects ?? []).length;
+    switch (e.key) {
+      case 'Escape':
+      case 'Backspace':
+      case 'u':
+      case 'U':
+        return closeTrash();
+      case 'ArrowDown':
+      case 'j':
+      case 'J':
+        trashSel = Math.min(trashSel + 1, Math.max(0, n - 1));
+        return render();
+      case 'ArrowUp':
+      case 'k':
+      case 'K':
+        trashSel = Math.max(trashSel - 1, 0);
+        return render();
+      case 'Home':
+        trashSel = 0;
+        return render();
+      case 'End':
+        trashSel = Math.max(0, n - 1);
+        return render();
+      case 'Enter':
+        e.preventDefault();
+        return restoreFromTrash();
+    }
+    return;
+  }
+
   // 완료 기록 — 읽는 화면이지만 기간과 검색은 움직인다
   if (view === 'history') {
     if (handleDocScroll(e, { arrows: true })) return;
@@ -1140,7 +1225,7 @@ document.addEventListener('keydown', async (e) => {
       }
       case 'u':
       case 'U':
-        return restoreProjectPick();
+        return openTrash();
       case 'x':
       case 'X': {
         if (!p) return;

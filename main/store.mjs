@@ -434,7 +434,11 @@ export function createStore(file) {
     // 지운 것도 함께 내려보낸다. 삭제는 항목과 같은 소프트 삭제라 되돌릴 문이 있어야
     // 하고, 재시작 뒤에는 U 스택이 비어 있으니 화면에 자리가 있어야 한다.
     const deletedProjects = db
-      .prepare(`SELECT id, name, status, sort, deleted_at FROM project WHERE status != 'active' ORDER BY deleted_at DESC, name`)
+      .prepare(
+        `SELECT p.id, p.name, p.status, p.sort, p.deleted_at,
+                (SELECT count(*) FROM item i WHERE i.project_id = p.id AND i.deleted_at IS NULL) AS item_count
+           FROM project p WHERE p.status != 'active' ORDER BY p.deleted_at DESC, p.name`
+      )
       .all();
     return {
       projects,

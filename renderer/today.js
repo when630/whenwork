@@ -275,7 +275,7 @@ const KEYMAP = [
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['A', '약어'], ['Shift+↑↓', '순서'], ['X', '보관']]],
-  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['O', 'settings.json']]],
+  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json']]],
   ['퀵캡처', [['Ctrl+Alt+Space', '열기·닫기'], ['#약어', '프로젝트 지정'], ['Tab', '오늘 뷰']]],
 ];
 
@@ -461,6 +461,25 @@ function renderSettings() {
   open.onclick = () => window.whenwork.settingsOpenFile();
   dbSec.append(open);
 
+  // ── 업데이트
+  const upSec = el('div', 'set-foot');
+  upSec.append(el('div', 'sec-h', '업데이트'));
+  const up = cfg.update ?? {};
+  upSec.append(el('div', 'ctx', up.line ?? `현재 ${up.current ?? ''}`));
+  if (!up.canAutoUpdate) {
+    // 미서명 macOS는 자동 설치가 불가능하다 — 왜 직접 받아야 하는지 그 자리에서 말한다
+    upSec.append(el('div', 'ctx', '서명하지 않은 앱이라 macOS에서는 자동 설치가 되지 않습니다 — 새 버전은 직접 받아 주세요'));
+  }
+  const upAct = el('div', 'set-act');
+  const ready = up.status === 'ready' || up.status === 'available';
+  upAct.append(
+    window.ICONS.context(),
+    document.createTextNode(ready ? (up.canAutoUpdate ? ' 지금 설치 (R)' : ' 받는 곳 열기 (R)') : ' 지금 확인 (R)')
+  );
+  upAct.onclick = runUpdate;
+  upSec.append(upAct);
+  body.append(upSec);
+
   // ── 내 데이터 (DATA-01~03)
   const dataSec = el('div', 'set-foot');
   dataSec.append(el('div', 'sec-h', '내 데이터'));
@@ -474,6 +493,21 @@ function renderSettings() {
   dataSec.append(exp, imp);
   body.append(dataSec);
   body.append(dbSec);
+}
+
+// 확인과 설치를 한 키(R)에 둔다 — 상태에 따라 할 일이 하나뿐이라 고르게 할 이유가 없다.
+async function runUpdate() {
+  const up = cfg?.update ?? {};
+  if (up.status === 'ready' || up.status === 'available') {
+    const res = await window.whenwork.updateInstall();
+    // installing이 false면 자동 설치가 안 되는 쪽이라 받는 곳을 열었다는 뜻이다
+    if (!res.installing) toast('받는 곳을 열었습니다 — 내려받아 덮어써 주세요', { holdMs: 5000 });
+    return;
+  }
+  toast('업데이트 확인 중…', { spinner: true, holdMs: 0 });
+  const res = await window.whenwork.updateCheck();
+  toast(res.line ?? '확인했습니다', { holdMs: 4000 });
+  return loadSettings();
 }
 
 async function runExport() {
@@ -652,6 +686,7 @@ function renderFooter() {
     add('Enter', '변경');
     add('E', '내보내기');
     add('I', '가져오기');
+    add('R', '업데이트');
   } else if (tab === 'projects') {
     add('N', '추가');
     add('E', '이름');
@@ -898,6 +933,10 @@ document.addEventListener('keydown', async (e) => {
       case 'I':
         e.preventDefault();
         return runImport();
+      case 'r':
+      case 'R':
+        e.preventDefault();
+        return runUpdate();
     }
     return;
   }

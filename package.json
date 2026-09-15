@@ -73,6 +73,16 @@
     },
     "dmg": {
       "artifactName": "WHENWORK-${version}-mac-${arch}.${ext}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "when630",
+        "repo": "whenwork"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

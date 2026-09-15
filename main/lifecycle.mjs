@@ -18,6 +18,7 @@ import { createSettings } from './settings.mjs';
 import { pickPosition } from './place.mjs';
 import { scheduleJobs } from './jobs.mjs';
 import { registerIpc, saveCapture } from './ipc.mjs';
+import { setupUpdater, updateLine } from './update.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -36,6 +37,10 @@ function argValue(prefix) {
 }
 const SMOKE_DATA = argValue('--smoke-data=');
 const INJECT_CAPTURE = argValue('--inject-capture=');
+// 릴리스 확인만 한 번 돌리고 결과를 찍은 뒤 끝낸다. 평상시 확인은 60초 뒤에 일어나
+// --smoke(1.2초)로는 볼 수 없어, 업데이트 경로가 실제로 도는지 확인할 자리가 없었다.
+// 창도 트레이도 만들지 않는다.
+const CHECK_UPDATE = process.argv.includes('--check-update');
 
 // 스모크에서 렌더러 안에서 돌리는 점검. 탭을 한 바퀴 돌리고 검색·완료 기록까지 열어보므로
 // "특정 화면에서만 터지는" 오류도 앱을 눈으로 보지 않고 잡힌다.
@@ -440,6 +445,14 @@ export function bootstrap() {
           },
         },
         { type: 'separator' },
+        {
+          // 업데이트 상태는 늘 보인다 — 새 버전이 준비돼도 말이 없으면 영영 안 깔린다.
+          // 누르면 상태에 따라 설치(Windows)하거나 받는 곳을 연다(미서명 macOS).
+          label: updateLine(ctx.update ?? {}, { canAutoUpdate: platform.canAutoUpdate, current: app.getVersion() }),
+          enabled: ctx.update?.status === 'ready' || ctx.update?.status === 'available',
+          click: () => ctx.installUpdate?.(),
+        },
+        { type: 'separator' },
         { label: '종료', click: () => app.quit() },
       ])
     );
@@ -483,6 +496,16 @@ export function bootstrap() {
     ctx.applyHotkey();
     if (!ctx.hotkeyOk) {
       ctx.notify('단축키를 등록하지 못했습니다', `${platform.hotkeyLabel(ctx.hotkey)} 를 다른 앱이 쓰고 있습니다 — 설정에서 다른 조합으로 바꿔 주세요`);
+    }
+    setupUpdater(ctx); // 릴리스 확인 — 60초 뒤 첫 확인, 이후 하루 한 번(main/update.mjs)
+    if (CHECK_UPDATE) {
+      const st = await ctx.checkForUpdate();
+      console.log(
+        `UPDATE_CHECK status=${st.status} version=${st.version ?? '-'} canAutoUpdate=${platform.canAutoUpdate} line=${updateLine(st, { canAutoUpdate: platform.canAutoUpdate, current: app.getVersion() })}`
+      );
+      if (st.rawError) console.log(`UPDATE_RAW ${st.rawError}`);
+      ctx.quitting = true;
+      return app.exit(st.status === 'error' ? 1 : 0);
     }
     scheduleJobs(ctx); // 큐 flush·수집·브리핑·백업·리뷰·캘린더 타이머 등록 (main/jobs.mjs)
 

@@ -1,10 +1,11 @@
 // main/ipc.mjs — 모든 ipcMain 핸들러 등록 (D-08 분할, main/index.mjs에서 이동)
-import { BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { parseCaptureToken, parseDue } from './parse.mjs';
 import { validateExport } from './store.mjs';
 import { platform } from './platform/index.mjs';
+import { updateLine } from './update.mjs';
 import { NOTIFY_AT_DEFAULT } from './brief.mjs';
 
 // 캡처 저장의 단일 경로(D-01/D-03). capture:save·capture:followUp 두 핸들러와
@@ -78,6 +79,12 @@ export function registerIpc(ctx) {
         return n;
       })(),
       store: { file: ctx.store.file, ok: st.ok, notice: st.notice },
+      update: {
+        ...(ctx.update ?? { status: 'idle' }),
+        line: updateLine(ctx.update ?? {}, { canAutoUpdate: platform.canAutoUpdate, current: app.getVersion() }),
+        canAutoUpdate: platform.canAutoUpdate,
+        current: app.getVersion(),
+      },
       file: ctx.settings.file,
     };
   });
@@ -202,6 +209,15 @@ export function registerIpc(ctx) {
     ctx.applyHotkey(prev); // 되돌린다 — 새 조합이 안 잡히는데 옛 조합까지 풀려 있으면 안 된다
     return { ok: false, error: '그 조합은 다른 앱이 쓰고 있거나 잘못된 형식입니다' };
   });
+
+  // ── 업데이트 (릴리스 감지)
+  ipcMain.handle('update:check', async () => {
+    const st = await (ctx.checkForUpdate?.() ?? Promise.resolve(ctx.update));
+    return { ok: true, ...st, line: updateLine(st ?? {}, { canAutoUpdate: platform.canAutoUpdate, current: app.getVersion() }) };
+  });
+
+  // Windows는 설치(재시작), 미서명 macOS는 받는 곳 열기 — 돌려주는 값이 그 차이를 말한다
+  ipcMain.handle('update:install', () => ({ ok: true, installing: !!ctx.installUpdate?.() }));
 
   // ── 내보내기·가져오기 (DATA-01~03)
   //

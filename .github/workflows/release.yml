@@ -35,12 +35,15 @@ jobs:
         include:
           - os: windows-latest
             script: build
-            artifact: dist/*.exe
+            artifact: |
+              dist/*.exe
+              dist/latest.yml
           - os: macos-latest
             script: build:mac
             artifact: |
               dist/*.dmg
               dist/*.zip
+              dist/latest-mac.yml
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +83,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      # latest.yml / latest-mac.yml이 함께 올라가야 electron-updater가 새 버전을 본다 —
+      # 설치 파일만 올리면 앱은 영영 "아직 올라온 릴리스가 없습니다"라고 말한다.
       - name: 올릴 파일 확인
         run: find artifacts -type f | sort
       - uses: softprops/action-gh-release@v2

@@ -9,6 +9,10 @@ export default {
   // 설계 11절의 조합. macOS와 다른 값을 쓰지 않는 이유는 platform/darwin.mjs에 적었다.
   defaultHotkey: 'Control+Alt+Space',
 
+  // Windows NSIS는 서명 없이도 electron-updater가 내려받아 설치한다.
+  // (설치 시 SmartScreen이 한 번 더 물을 수 있지만 업데이트 경로 자체는 막히지 않는다)
+  canAutoUpdate: true,
+
   // 사람에게 보여줄 조합 표기 — Electron 표기(Control+Alt+Space)를 그대로 읽히게 둔다
   hotkeyLabel: (accel) => String(accel).replace(/\bControl\b/g, 'Ctrl'),
 

@@ -27,8 +27,9 @@ contextBridge.exposeInMainWorld('whenwork', {
   // ── 프로젝트 관리
   projectCreate: (name) => ipcRenderer.invoke('project:create', name),
   projectUpdate: (id, fields) => ipcRenderer.invoke('project:update', id, fields),
-  projectArchive: (id) => ipcRenderer.invoke('project:archive', id),
-  projectRestore: (id) => ipcRenderer.invoke('project:restore', id),
+  // 삭제는 인박스로 보낸 항목 id를 돌려준다 — 되돌릴 때 그것들을 함께 데려간다
+  projectDelete: (id) => ipcRenderer.invoke('project:delete', id),
+  projectRestore: (id, movedItemIds) => ipcRenderer.invoke('project:restore', id, movedItemIds),
   projectMove: (id, dir) => ipcRenderer.invoke('project:move', id, dir),
 
   // ── 설정

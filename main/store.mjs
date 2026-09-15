@@ -68,12 +68,20 @@ const V2_SQL = `
 ALTER TABLE project DROP COLUMN abbr;
 `;
 
+// v3 — 프로젝트 삭제를 항목과 같은 소프트 삭제로 바꾼다. 언제 지웠는지가 있어야
+// 비어 있는 것을 30일 뒤 정리할 수 있다. 옛 데이터의 'archived'는 그대로 두되
+// 시각만 지금으로 채운다 — 그 프로젝트들도 같은 규칙(비었으면 30일 뒤 정리)을 탄다.
+const V3_SQL = `
+ALTER TABLE project ADD COLUMN deleted_at TEXT;
+UPDATE project SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE status != 'active';
+`;
+
 // PRAGMA user_version 순번 마이그레이션(D-12). 새 DB도 빈 상태(v0)에서 이 배열을 처음부터
 // 끝까지 밟아 올라간다 — 경로가 하나다. 한 번 배포된 함수는 절대 고치지 않는다.
-export const MIGRATIONS = [(db) => db.exec(V1_SQL), (db) => db.exec(V2_SQL)];
+export const MIGRATIONS = [(db) => db.exec(V1_SQL), (db) => db.exec(V2_SQL), (db) => db.exec(V3_SQL)];
 
 // schemaTables()가 대조하는 원본 — MIGRATIONS와 함수 대 함수로 짝을 이룬다.
-const MIGRATION_SQL = [V1_SQL, V2_SQL];
+const MIGRATION_SQL = [V1_SQL, V2_SQL, V3_SQL];
 
 // 스키마가 실제로 만드는 테이블 이름 — STOR-05 가드 테스트가 이것과 대조한다.
 export function schemaTables() {
@@ -423,14 +431,14 @@ export function createStore(file) {
     const projects = db
       .prepare(`SELECT id, name, status, sort FROM project WHERE status = 'active' ORDER BY sort, name`)
       .all();
-    // 보관한 것도 함께 내려보낸다. 안 내려보내면 화면에서 사라진 뒤 되돌릴 길이 없다 —
-    // 보관은 삭제가 아니므로 돌아오는 문이 있어야 한다.
-    const archivedProjects = db
-      .prepare(`SELECT id, name, status, sort FROM project WHERE status != 'active' ORDER BY sort, name`)
+    // 지운 것도 함께 내려보낸다. 삭제는 항목과 같은 소프트 삭제라 되돌릴 문이 있어야
+    // 하고, 재시작 뒤에는 U 스택이 비어 있으니 화면에 자리가 있어야 한다.
+    const deletedProjects = db
+      .prepare(`SELECT id, name, status, sort, deleted_at FROM project WHERE status != 'active' ORDER BY deleted_at DESC, name`)
       .all();
     return {
       projects,
-      archivedProjects,
+      deletedProjects,
       today: items.filter((r) => r.kind === 'todo'),
       inbox: items.filter((r) => r.kind === 'inbox'),
       waiting: items.filter((r) => r.kind === 'waiting'),
@@ -477,15 +485,43 @@ export function createStore(file) {
     if (fields.name != null) db.prepare('UPDATE project SET name = ? WHERE id = ?').run(fields.name, id);
   }
 
-  function archiveProject(id) {
-    if (!db || !state.ok) return;
-    db.prepare(`UPDATE project SET status = 'archived' WHERE id = ?`).run(id);
+  // 프로젝트 삭제 — 항목의 X와 같은 소프트 삭제다. 행은 남는다: 완료된 항목이 이 행을
+  // 라벨로 가리키고, 라벨이 떨어진 기록은 기록이 아니다.
+  //
+  // 미완료 항목은 인박스로 보낸다. 죽은 프로젝트가 살아 있는 일을 가질 수는 없고,
+  // 숨겨 두면 그 일이 조용히 사라진다 — 인박스에 다시 나타나 분류를 기다리는 쪽이
+  // "잃지 않는다"에 맞다. 되돌리기가 그 항목들을 다시 데려갈 수 있게 id를 돌려준다.
+  function deleteProject(id) {
+    if (!db || !state.ok) return { movedItemIds: [] };
+    return withTransaction(db, () => {
+      const moved = db
+        .prepare('SELECT id FROM item WHERE project_id = ? AND done_at IS NULL AND deleted_at IS NULL')
+        .all(id)
+        .map((r) => r.id);
+      if (moved.length) {
+        const q = db.prepare(`UPDATE item SET project_id = NULL, kind = 'inbox' WHERE id = ?`);
+        for (const iid of moved) q.run(iid);
+      }
+      db.prepare(`UPDATE project SET status = 'deleted', deleted_at = ? WHERE id = ?`).run(
+        new Date().toISOString(),
+        id
+      );
+      return { movedItemIds: moved };
+    });
   }
 
-  // 보관을 푼다. 보관은 삭제가 아니라 "지금은 안 보이게" 두는 것이라 짝이 필요하다.
-  function restoreProject(id) {
+  // 삭제를 되돌린다. 인박스로 보냈던 항목도 함께 데려온다 — 그 항목들이 그 사이 다른
+  // 프로젝트로 갔거나 완료됐으면 건드리지 않는다(사용자가 손댄 것을 되돌리기가 뒤집지 않게).
+  function restoreProject(id, movedItemIds = []) {
     if (!db || !state.ok) return;
-    db.prepare(`UPDATE project SET status = 'active' WHERE id = ?`).run(id);
+    withTransaction(db, () => {
+      db.prepare(`UPDATE project SET status = 'active', deleted_at = NULL WHERE id = ?`).run(id);
+      const q = db.prepare(
+        `UPDATE item SET project_id = ?, kind = 'todo'
+         WHERE id = ? AND project_id IS NULL AND kind = 'inbox' AND done_at IS NULL AND deleted_at IS NULL`
+      );
+      for (const iid of movedItemIds) q.run(id, iid);
+    });
   }
 
   // 순서 변경 — 이웃과 자리를 바꾸고 sort를 0..n으로 정규화해 충돌을 없앤다
@@ -603,24 +639,34 @@ export function createStore(file) {
   function purgeDeleted(days = 30) {
     if (!db || !state.ok) return 0;
     const cutoff = new Date(new Date().getTime() - days * 86400_000).toISOString();
-    const result = db.prepare('DELETE FROM item WHERE deleted_at IS NOT NULL AND deleted_at < ?').run(cutoff);
-    return result.changes;
+    const items = db.prepare('DELETE FROM item WHERE deleted_at IS NOT NULL AND deleted_at < ?').run(cutoff);
+    // 지운 프로젝트는 **비어 있을 때만** 정리한다. 항목이 하나라도 남아 있으면(완료 기록
+    // 포함) 그 기억이 사는 동안 라벨도 산다 — 라벨을 지우면 기록의 뜻이 사라진다.
+    const projects = db
+      .prepare(
+        `DELETE FROM project
+         WHERE status != 'active' AND deleted_at IS NOT NULL AND deleted_at < ?
+           AND NOT EXISTS (SELECT 1 FROM item WHERE item.project_id = project.id)`
+      )
+      .run(cutoff);
+    return items.changes + projects.changes;
   }
 
   // 완료 기록 — 오늘 뷰는 12시간만 보여주므로 "어제 뭐 했지"를 볼 창구가 없었다.
   // 커밋 목록은 제거 대상 테이블(수집기)에서 오던 것이라 여기서는 계산하지 않고 항상
   // 빈 배열을 돌려준다 — 호출부와 렌더러가 이 키(commits)를 그대로 읽으므로 모양은 유지한다.
+  // days가 null이면 전 기간. 완료 항목은 이 앱의 기억이라 "그거 했었나?"에 답하려면
+  // 끝까지 닿아야 한다 — 7일 고정일 때는 22건 중 19건이 어디서도 보이지 않았다.
   function getHistory(days = 7) {
     if (!db || !state.ok) return { items: [], commits: [] };
-    const cutoff = new Date(new Date().getTime() - days * 86400_000).toISOString();
-    const rows = db
-      .prepare(
-        `SELECT i.id, i.title, i.kind, i.done_at, i.project_id, p.name AS project_name
-         FROM item i LEFT JOIN project p ON p.id = i.project_id
-         WHERE i.deleted_at IS NULL AND i.done_at IS NOT NULL AND i.done_at > ?
-         ORDER BY i.done_at DESC`
-      )
-      .all(cutoff);
+    const where = `i.deleted_at IS NULL AND i.done_at IS NOT NULL${days == null ? '' : ' AND i.done_at > ?'}`;
+    const stmt = db.prepare(
+      `SELECT i.id, i.title, i.kind, i.done_at, i.project_id, p.name AS project_name
+       FROM item i LEFT JOIN project p ON p.id = i.project_id
+       WHERE ${where}
+       ORDER BY i.done_at DESC`
+    );
+    const rows = days == null ? stmt.all() : stmt.all(new Date(Date.now() - days * 86400_000).toISOString());
     return { items: rows, commits: [] };
   }
 
@@ -772,7 +818,7 @@ export function createStore(file) {
     getProjects,
     createProject,
     updateProject,
-    archiveProject,
+    deleteProject,
     restoreProject,
     moveProject,
     completeItem,

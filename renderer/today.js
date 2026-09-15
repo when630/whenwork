@@ -176,10 +176,10 @@ function currentList() {
   // 설정은 DB와 무관하게 항상 보여준다 — DB가 꺼져 있을 때 오히려 봐야 하는 화면이다
   if (tab === 'settings') return SETTING_FIELDS;
   if (!state?.online) return [];
-  // 보관한 것을 활성 뒤에 붙인다 — 화면에서 사라지기만 하면 되돌릴 길이 없다.
+  // 지운 것을 활성 뒤에 붙인다 — 재시작 뒤에는 U 스택이 비어 있어 여기가 유일한 되돌릴 문이다.
   // 그리는 순서와 같아야 선택 인덱스(sel)가 실제 대상과 어긋나지 않는다.
   if (tab === 'projects') {
-    return [...filtered(state.projects ?? []), ...filtered(state.archivedProjects ?? [])];
+    return [...filtered(state.projects ?? []), ...filtered(state.deletedProjects ?? [])];
   }
   if (tab === 'today') return todayView().flatMap((g) => g.items);
   return filtered(state[tab] ?? []);
@@ -198,16 +198,20 @@ function renderHistory() {
   const head = el('div', 'rhead');
   const back = el('span', 'back', '‹');
   back.onclick = closeHistory;
-  head.append(back, el('span', 'pname', `완료 기록 — 최근 ${history.days}일`));
+  head.append(back, el('span', 'pname', `완료 기록 — ${historyLabel(history.days)}`));
   body.append(head);
 
   if (history.loading) {
     body.append(el('div', 'empty', '불러오는 중…'));
     return;
   }
-  const days = historyDays(history.data);
+  // / 검색은 여기서도 통한다 — 목록 화면과 같은 matches로 제목·프로젝트·메모를 훑는다
+  const data = filter
+    ? { ...history.data, items: (history.data?.items ?? []).filter((it) => matches(it, filter)) }
+    : history.data;
+  const days = historyDays(data);
   if (!days.length) {
-    body.append(el('div', 'empty', '이 기간에 완료한 항목도 커밋도 없음'));
+    body.append(el('div', 'empty', filter ? `"${filter}"에 맞는 완료 항목 없음` : '이 기간에 완료한 항목도 커밋도 없음'));
     return;
   }
 
@@ -239,6 +243,11 @@ function renderHistory() {
   }
 }
 
+// 기간은 7일 → 30일 → 전체로 돈다. 완료 항목은 이 앱의 기억이라 끝까지 닿아야 한다 —
+// 7일 고정일 때는 22건 중 19건이 어디서도 보이지 않았다.
+const HISTORY_RANGES = [7, 30, null];
+const historyLabel = (days) => (days == null ? '전체' : `최근 ${days}일`);
+
 async function openHistory(days = 7) {
   view = 'history';
   history = { days, data: null, loading: true };
@@ -265,8 +274,11 @@ function renderSearch() {
   bar.classList.toggle('show', on);
   bar.classList.toggle('idle', !searchOn && !!filter);
   if (!on) return;
-  const list = currentList();
-  $('searchCnt').textContent = filter ? `${list.length}건` : '';
+  const n =
+    view === 'history'
+      ? (history?.data?.items ?? []).filter((it) => matches(it, filter)).length
+      : currentList().length;
+  $('searchCnt').textContent = filter ? `${n}건` : '';
 }
 
 // ── 전체 키맵 (?)
@@ -277,8 +289,9 @@ const KEYMAP = [
   ['이동', [['↑↓', 'jk 이동'], ['Home/End', '처음·끝'], ['PgUp/PgDn', '10줄'], ['Tab', '탭 전환'], ['/', '검색'], ['Esc', '닫기']]],
   ['항목', [['Space', '완료'], ['E', '제목'], ['D', '마감'], ['N', '메모'], ['W', '대기로'], ['X', '삭제'], ['U', '되돌리기'], ['1~9', '프로젝트']]],
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
+  ['완료 기록', [['←→', '7일·30일·전체'], ['/', '검색'], ['Esc', '뒤로']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
-  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '보관·되돌리기']]],
+  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제·되돌리기']]],
   ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json']]],
   ['퀵캡처', [['Ctrl+Alt+Space', '열기·닫기'], ['#약어', '프로젝트 지정'], ['Tab', '오늘 뷰']]],
 ];
@@ -329,7 +342,7 @@ function renderLegend() {
 }
 
 function openSearch() {
-  if (tab === 'settings' || view !== 'list') return; // 목록이 있는 화면에서만
+  if (tab === 'settings') return; // 설정에는 검색할 목록이 없다
   searchOn = true;
   render();
   const input = $('searchIn');
@@ -567,7 +580,7 @@ async function editSetting(f) {
 async function clearSetting(f) {
   if (!f) return;
   // 토큰이 박힌 값은 지우면 앱에서 되살릴 수 없다(화면에는 가린 값만 있다) —
-  // 프로젝트 보관과 같은 y 확인을 받는다. 폴더·시각은 다시 고르면 되니 묻지 않는다.
+  // 프로젝트 삭제와 같은 y 확인을 받는다. 폴더·시각은 다시 고르면 되니 묻지 않는다.
   if (f.kind === 'secret' && cfg?.values?.[f.key]) {
     const yes = await promptText(`${f.label} 해제? 지우려면 y 입력`, '');
     if (yes?.toLowerCase() !== 'y') return;
@@ -635,16 +648,16 @@ function renderBody() {
   if (tab === 'projects') {
     const activeCount = filtered(state.projects ?? []).length;
     list.forEach((p, idx) => {
-      // 보관 구간이 시작되는 자리에 머리글을 한 번 세운다 — 어디로 갔는지 보여야 한다
+      // 지운 구간이 시작되는 자리에 머리글을 한 번 세운다 — 어디로 갔는지 보여야 한다
       if (idx === activeCount) {
         const h = el('div', 'group-h');
-        h.append(el('span', 'chip', '보관됨 — X로 되돌리기'));
+        h.append(el('span', 'chip', '삭제됨 — X로 되돌리기'));
         body.append(h);
       }
-      const archived = idx >= activeCount;
-      const row = el('div', 'item' + (idx === sel ? ' selected' : '') + (archived ? ' done' : ''));
-      // 1~9는 활성 프로젝트의 번호다 — 보관된 것에는 붙이지 않는다
-      row.append(el('span', 'proj-num', !archived && idx < 9 ? String(idx + 1) : ''));
+      const deleted = idx >= activeCount;
+      const row = el('div', 'item' + (idx === sel ? ' selected' : '') + (deleted ? ' done' : ''));
+      // 1~9는 활성 프로젝트의 번호다 — 지운 것에는 붙이지 않는다
+      row.append(el('span', 'proj-num', !deleted && idx < 9 ? String(idx + 1) : ''));
       // 색점만. #약어를 걷어내기 전에는 여기 약어 알약이 섰고, 약어가 없는 프로젝트는
       // 빈 자리를 '—'로 채웠다 — 그 작대기가 약어처럼 읽혔다. 색은 1~9 번호와 짝을 이뤄
       // 다른 탭에서도 같은 프로젝트를 가리키므로 그대로 쓸모가 있다.
@@ -693,7 +706,8 @@ function renderFooter() {
     hints.append(s);
   };
   if (view === 'history') {
-    add('↑↓', '스크롤');
+    add('←→', '기간');
+    add('/', '검색');
     add('Esc', '뒤로');
   } else if (tab === 'settings') {
     add('Enter', '변경');
@@ -703,7 +717,7 @@ function renderFooter() {
   } else if (tab === 'projects') {
     add('N', '추가');
     add('E', '이름');
-    add('X', '보관·되돌리기');
+    add('X', '삭제·되돌리기');
   } else if (tab === 'inbox') {
     add('1~9', '프로젝트');
     add('W', '대기로');
@@ -871,11 +885,30 @@ document.addEventListener('keydown', async (e) => {
     return openKeys();
   }
 
-  // 완료 기록 — 읽기만 하는 화면이라 스크롤과 닫기만 있다
+  // 완료 기록 — 읽는 화면이지만 기간과 검색은 움직인다
   if (view === 'history') {
     if (handleDocScroll(e, { arrows: true })) return;
-    if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'h' || e.key === 'H') {
-      return closeHistory();
+    switch (e.key) {
+      case 'Escape':
+        if (filter) return closeSearch(false); // 필터부터 푼다 — 한 번 더 누르면 뒤로
+        return closeHistory();
+      case 'Backspace':
+      case 'h':
+      case 'H':
+        return closeHistory();
+      case '/':
+        e.preventDefault();
+        return openSearch();
+      case 'ArrowRight':
+      case 'l':
+      case 'L':
+      case 'ArrowLeft': {
+        e.preventDefault();
+        const i = HISTORY_RANGES.indexOf(history.days);
+        const step = e.key === 'ArrowLeft' ? -1 : 1;
+        const next = HISTORY_RANGES[(i + step + HISTORY_RANGES.length) % HISTORY_RANGES.length];
+        return openHistory(next);
+      }
     }
     return;
   }
@@ -983,16 +1016,26 @@ document.addEventListener('keydown', async (e) => {
       case 'x':
       case 'X': {
         if (!p) return;
-        // 보관된 것을 고르고 X를 누르면 되돌린다. 확인을 묻지 않는다 — 되돌리기는
-        // 잃는 것이 없고, 한 번 더 X를 누르면 다시 보관된다.
+        // 지운 것을 고르고 X를 누르면 되돌린다. 확인을 묻지 않는다 — 되돌리기는 잃는 것이
+        // 없고, 한 번 더 X를 누르면 다시 지워진다. 인박스로 갔던 항목은 U로만 따라온다
+        // (여기서는 그 목록이 없다 — 재시작 뒤라면 사용자가 이미 다른 데로 옮겼을 수도 있다).
         if (p.status && p.status !== 'active') {
-          await window.whenwork.projectRestore(p.id);
+          await window.whenwork.projectRestore(p.id, []);
           toast(`"${clip(p.name)}" 되돌림`);
           return refresh();
         }
-        const yes = await promptText(`"${p.name}" 보관? 되돌리려면 목록 아래 보관됨에서 X (지우려면 y 입력)`, '');
+        // 항목이 있으면 무슨 일이 일어나는지 미리 말한다 — 삭제는 항목의 X와 같은 소프트 삭제라
+        // 완료 기록은 그대로 남고, 아직 안 끝난 것만 인박스로 간다.
+        const live = [...(state.today ?? []), ...(state.inbox ?? []), ...(state.waiting ?? [])].filter(
+          (it) => it.project_id === p.id && !it.done_at
+        ).length;
+        const warn = live ? ` 남은 할 일 ${live}건은 인박스로 갑니다.` : '';
+        const yes = await promptText(`"${p.name}" 삭제?${warn} 완료 기록은 남습니다 (U로 되돌림). 지우려면 y`, '');
         if (yes?.toLowerCase() === 'y') {
-          await window.whenwork.projectArchive(p.id);
+          const res = await window.whenwork.projectDelete(p.id);
+          if (!res.ok) return toast('삭제 실패');
+          undoStack.push({ kind: 'projectDelete', id: p.id, title: p.name, itemIds: res.movedItemIds ?? [] });
+          toast(`삭제 — "${clip(p.name)}"${live ? ` · 할 일 ${live}건 인박스로` : ''} · U로 되돌리기`);
           await refresh();
         }
         return;
@@ -1091,6 +1134,7 @@ document.addEventListener('keydown', async (e) => {
       const last = undoStack.pop();
       if (!last) return toast('되돌릴 것 없음');
       if (last.kind === 'nudge') await window.whenwork.nudgeUndo(last.id, last.at, last.count);
+      else if (last.kind === 'projectDelete') await window.whenwork.projectRestore(last.id, last.itemIds);
       else await window.whenwork.restore(last.id);
       toast(`되돌림 — "${clip(last.title)}"`);
       return refresh();

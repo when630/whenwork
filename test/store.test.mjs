@@ -501,7 +501,7 @@ test('getProjects()는 status가 active인 것만 sort·id 순으로 돌려준�
   const store = createStore(tmpFile());
   const a = store.createProject('가');
   const b = store.createProject('나');
-  store.archiveProject(a);
+  store.deleteProject(a);
   const projects = store.getProjects();
   assert.deepEqual(projects.map((p) => p.id), [b]);
   store.close();
@@ -802,49 +802,143 @@ test('가져오기 백업 이름에 시각이 들어간다 — 두 번 가져와
   store.close();
 });
 
-test('보관한 프로젝트는 오늘 뷰 상태에서 빠진다 — X로 보관해도 목록에 남아 있었다', () => {
+// ── 프로젝트 삭제 — 항목의 X와 같은 소프트 삭제 ──
+
+test('지운 프로젝트는 1~9 목록에서 빠지고 deletedProjects로 따로 내려온다', () => {
   const store = createStore(tmpFile());
   store.open();
-  const gone = store.createProject('보관할 것');
+  const gone = store.createProject('지울 것');
   store.createProject('남을 것');
-  assert.equal(store.getViewState().projects.length, 2);
-
-  store.archiveProject(gone);
-  const names = store.getViewState().projects.map((p) => p.name);
-  assert.deepEqual(names, ['남을 것'], '보관한 프로젝트가 화면에 남았다: ' + names.join(','));
-  // getProjects()(약어 힌트·캡처 경로가 쓰던 쪽)는 원래도 걸러내고 있었다 — 두 곳이
-  // 다른 답을 하던 것이 이 결함의 정체다.
-  assert.deepEqual(store.getProjects().map((p) => p.name), ['남을 것']);
-  store.close();
-});
-
-test('보관해도 그 프로젝트의 항목은 사라지지 않는다 — 보관은 삭제가 아니다', () => {
-  const store = createStore(tmpFile());
-  store.open();
-  const pid = store.createProject('보관할 것');
-  store.insertCaptures([{ id: 'keep', title: '남아야 하는 할 일', captured_at: new Date().toISOString() }]);
-  store.assignProject('keep', pid);
-  store.archiveProject(pid);
-  const st = store.getViewState();
-  const all = [...st.today, ...st.inbox, ...st.waiting];
-  assert.ok(all.some((i) => i.id === 'keep'), '보관된 프로젝트의 항목이 함께 사라졌다');
-  store.close();
-});
-
-test('보관한 프로젝트는 archivedProjects로 따로 내려온다 — 되돌릴 길이 있어야 한다', () => {
-  const store = createStore(tmpFile());
-  store.open();
-  const gone = store.createProject('보관할 것');
-  store.createProject('남을 것');
-  store.archiveProject(gone);
-
+  store.deleteProject(gone);
   const st = store.getViewState();
   assert.deepEqual(st.projects.map((p) => p.name), ['남을 것']);
-  assert.deepEqual(st.archivedProjects.map((p) => p.name), ['보관할 것']);
+  assert.deepEqual(st.deletedProjects.map((p) => p.name), ['지울 것']);
+  assert.ok(st.deletedProjects[0].deleted_at, '언제 지웠는지가 남아야 30일 정리가 된다');
+  store.close();
+});
 
-  store.restoreProject(gone);
-  const after = store.getViewState();
-  assert.equal(after.archivedProjects.length, 0, '되돌린 뒤에는 보관 목록이 비어야 한다');
-  assert.deepEqual(after.projects.map((p) => p.name).sort(), ['남을 것', '보관할 것']);
+test('지우면 미완료 항목은 인박스로 가고 완료 항목은 라벨을 안고 남는다', () => {
+  const store = createStore(tmpFile());
+  store.open();
+  const pid = store.createProject('지울 것');
+  const now = new Date().toISOString();
+  store.insertCaptures([
+    { id: 'live', title: '아직 할 일', captured_at: now },
+    { id: 'done', title: '끝낸 일', captured_at: now },
+  ]);
+  store.assignProject('live', pid);
+  store.assignProject('done', pid);
+  store.completeItem('done');
+
+  const { movedItemIds } = store.deleteProject(pid);
+  assert.deepEqual(movedItemIds, ['live'], '인박스로 보낸 것은 미완료 항목만이어야 한다');
+
+  const st = store.getViewState();
+  const live = st.inbox.find((i) => i.id === 'live');
+  assert.ok(live, '미완료 항목이 인박스에 다시 나타나야 한다 — 숨겨지면 조용히 사라지는 것이다');
+  assert.equal(live.project_id, null);
+
+  // 완료 기록은 프로젝트 이름을 그대로 안고 있다 — 라벨이 떨어진 기록은 기록이 아니다
+  const hist = store.getHistory(null).items.find((i) => i.id === 'done');
+  assert.ok(hist, '완료 항목이 기록에 남아야 한다');
+  assert.equal(hist.project_name, '지울 것');
+  store.close();
+});
+
+test('되돌리면 프로젝트도, 인박스로 갔던 항목도 함께 돌아온다', () => {
+  const store = createStore(tmpFile());
+  store.open();
+  const pid = store.createProject('지울 것');
+  store.insertCaptures([{ id: 'live', title: '아직 할 일', captured_at: new Date().toISOString() }]);
+  store.assignProject('live', pid);
+  const { movedItemIds } = store.deleteProject(pid);
+
+  store.restoreProject(pid, movedItemIds);
+  const st = store.getViewState();
+  assert.deepEqual(st.projects.map((p) => p.name), ['지울 것']);
+  assert.equal(st.deletedProjects.length, 0);
+  const it = st.today.find((i) => i.id === 'live');
+  assert.ok(it, '되돌린 뒤 항목이 다시 프로젝트의 todo에 있어야 한다');
+  assert.equal(it.project_id, pid);
+  store.close();
+});
+
+test('되돌리기는 그 사이 사용자가 다른 데로 옮긴 항목을 뒤집지 않는다', () => {
+  const store = createStore(tmpFile());
+  store.open();
+  const a = store.createProject('지울 것');
+  const b = store.createProject('다른 것');
+  store.insertCaptures([{ id: 'x', title: '옮긴 일', captured_at: new Date().toISOString() }]);
+  store.assignProject('x', a);
+  const { movedItemIds } = store.deleteProject(a);
+  // 인박스에 나타난 것을 사용자가 다른 프로젝트로 보냈다
+  store.assignProject('x', b);
+
+  store.restoreProject(a, movedItemIds);
+  const it = store.getViewState().today.find((i) => i.id === 'x');
+  assert.equal(it.project_id, b, '사용자가 손댄 것을 되돌리기가 빼앗아 오면 안 된다');
+  store.close();
+});
+
+test('빈 삭제 프로젝트만 30일 뒤 정리되고, 항목이 남은 것은 라벨로 살아 있다', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  store.open();
+  const empty = store.createProject('빈 것');
+  const withDone = store.createProject('기록 있는 것');
+  store.insertCaptures([{ id: 'd', title: '끝낸 일', captured_at: new Date().toISOString() }]);
+  store.assignProject('d', withDone);
+  store.completeItem('d');
+  store.deleteProject(empty);
+  store.deleteProject(withDone);
+  store.close();
+
+  // 31일 전에 지운 것으로 만든다
+  const raw = new DatabaseSync(file);
+  const old = new Date(Date.now() - 31 * 86400_000).toISOString();
+  raw.prepare(`UPDATE project SET deleted_at = ? WHERE status != 'active'`).run(old);
+  raw.close();
+
+  store.reopen();
+  store.purgeDeleted(30);
+  const names = store.getViewState().deletedProjects.map((p) => p.name);
+  assert.deepEqual(names, ['기록 있는 것'], '기록이 남은 프로젝트는 지워지면 안 된다: ' + names.join(','));
+  assert.equal(store.getHistory(null).items.find((i) => i.id === 'd')?.project_name, '기록 있는 것');
+  store.close();
+});
+
+test('옛 데이터의 archived 프로젝트도 삭제된 것으로 함께 보인다 (v3 이행)', () => {
+  const file = tmpFile();
+  let store = createStore(file);
+  store.close();
+  // v2 시절처럼 status만 archived인 행을 흉내낸다 — deleted_at은 v3가 채운다
+  const raw = new DatabaseSync(file);
+  raw.prepare(`INSERT INTO project (name, status, sort) VALUES ('옛 보관', 'archived', 0)`).run();
+  raw.close();
+  store = createStore(file);
+  const st = store.getViewState();
+  assert.deepEqual(st.deletedProjects.map((p) => p.name), ['옛 보관']);
+  store.close();
+});
+
+// ── 완료 기록 기간 ──
+
+test('getHistory(null)은 전 기간을 돌려주고, 7은 7일만 돌려준다', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  store.open();
+  store.insertCaptures([
+    { id: 'recent', title: '최근', captured_at: new Date().toISOString() },
+    { id: 'old', title: '오래전', captured_at: new Date().toISOString() },
+  ]);
+  store.completeItem('recent');
+  store.completeItem('old');
+  store.close();
+  const raw = new DatabaseSync(file);
+  raw.prepare('UPDATE item SET done_at = ? WHERE id = ?').run(new Date(Date.now() - 40 * 86400_000).toISOString(), 'old');
+  raw.close();
+  store.reopen();
+  assert.deepEqual(store.getHistory(7).items.map((i) => i.id), ['recent']);
+  assert.deepEqual(store.getHistory(null).items.map((i) => i.id).sort(), ['old', 'recent']);
   store.close();
 });

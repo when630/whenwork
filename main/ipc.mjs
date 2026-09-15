@@ -120,6 +120,7 @@ export function registerIpc(ctx) {
     }
   });
 
+  // days가 null이면 전 기간이다 — 기본값 인자로 두면 null이 7로 바뀌지 않으므로 그대로 넘긴다
   ipcMain.handle('history:get', async (_e, days = 7) => {
     try {
       return { ok: true, days, ...ctx.store.getHistory(days) };
@@ -139,8 +140,6 @@ export function registerIpc(ctx) {
     'item:note': (id, note) => ctx.store.setNote(id, note),
     'project:create': (name) => ctx.store.createProject(name),
     'project:update': (id, fields) => ctx.store.updateProject(id, fields),
-    'project:archive': (id) => ctx.store.archiveProject(id),
-    'project:restore': (id) => ctx.store.restoreProject(id),
     'project:move': (id, dir) => ctx.store.moveProject(id, dir),
   };
   for (const [ch, fn] of Object.entries(itemOps)) {
@@ -153,6 +152,25 @@ export function registerIpc(ctx) {
       }
     });
   }
+
+  // 프로젝트 삭제 — 인박스로 보낸 항목 id를 돌려줘야 U가 그것들을 다시 데려갈 수 있다.
+  // itemOps(ok만 반환)와 따로 둔다.
+  ipcMain.handle('project:delete', async (_e, id) => {
+    try {
+      return { ok: true, ...ctx.store.deleteProject(id) };
+    } catch {
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle('project:restore', async (_e, id, movedItemIds = []) => {
+    try {
+      ctx.store.restoreProject(id, Array.isArray(movedItemIds) ? movedItemIds : []);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
 
   // 재촉 — 몇 번째인지와 직전 값(되돌리기용)을 돌려줘야 해서 itemOps(ok만 반환)와 따로 둔다
   ipcMain.handle('item:nudge', async (_e, id) => {

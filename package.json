@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "개인용 프로젝트별 업무 관리 트레이 앱 — 퀵캡처·오늘 뷰·재개 카드",
+  "description": "누구나 쓰는 퀵캡처 트레이 앱 — 단축키로 던진 할 일을 오늘 한 화면에서",
   "author": "when630 <70129021+when630@users.noreply.github.com>",
   "main": "main/index.mjs",
   "scripts": {
@@ -11,8 +11,8 @@
     "smoke": "electron . --smoke",
     "test": "node --test \"test/**/*.test.mjs\"",
     "smoke:crash": "node --test test/capture-crash-smoke.test.mjs",
-    "icons": "node tools/make-icon.mjs",
     "db": "docker compose up -d",
+    "icons": "node tools/make-icon.mjs",
     "build": "electron-builder --win",
     "postinstall": "node tools/make-icon.mjs"
   },
@@ -30,7 +30,14 @@
       "build/*.png"
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.png"
     },
     "nsis": {

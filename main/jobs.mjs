@@ -1,29 +1,19 @@
 // main/jobs.mjs — 백그라운드 작업과 타이머 등록 (D-08 분할, main/index.mjs에서 이동)
 //
-// 01-05 Task 2: 제거 대상 기능(git·이슈 수집, 캘린더 동기화, SQL 덤프 백업, 주간 리뷰 생성,
-// 재개 카드, 완료 제안)의 배경 작업과 타이머를 전부 걷어냈다(D-06). 남는 것은 큐 반영 1회,
-// 아침 브리핑, purge뿐이다 — 모두 저장소(store.mjs)만 거치고 외부 프로세스를 부르지 않는다.
-import { app, Notification } from 'electron';
-import path from 'node:path';
+// Phase 2: 제거 대상 기능의 배경 작업을 전부 걷어냈다. 남는 것은 큐 반영 1회, 아침 브리핑,
+// purge뿐이다 — 모두 저장소(store.mjs)만 거치고 외부 프로세스를 부르지 않는다.
+import { Notification } from 'electron';
 import { briefDecision, briefingLines, dayKey, NOTIFY_AT_DEFAULT, STALE_WAITING_DAYS } from './brief.mjs';
 
 const PURGE_DAYS = 30; // 소프트 삭제한 항목을 실제로 비우기까지 두는 기간
 const BRIEFING_CHECK_MS = 60_000;
 const COLLECT_DELAY_MS = 30_000; // 켜자마자 부팅이 무거워지지 않도록 조금 뒤에
 
-// settings:get(IPC 핸들러)이 "백업 폴더" 필드의 빈 값 자리에 보여줄 기본 경로 — 백업 자체는
-// D-06으로 스텁 처리됐지만 설정 화면의 안내 문구 형태는 Phase 2가 걷어낼 때까지 유지한다.
-const BACKUP_DIR_DEFAULT = path.join(app.getPath('userData'), 'backups');
-
 // ── D-08: 백그라운드 작업·타이머 등록. ctx를 받아 그 안의 store/queue/settings/tray를 쓴다.
 //
 // IPC 핸들러가 불러야 하는 함수는 ctx.jobs에 붙여 둔다 — IPC 핸들러 모듈이 여기서 꺼내 쓴다.
 // jobs.mjs는 IPC 핸들러 모듈을 import하지 않는다.
 export function scheduleJobs(ctx) {
-  // settings:get(IPC 핸들러)이 읽어야 해서 ctx에 둔다 — 캘린더 동기화가 더 이상 돌지 않아
-  // 이 값은 이제 항상 null이지만(D-06), calendar 필드 형태는 Phase 2가 걷어낼 때까지 유지한다.
-  ctx.lastCalendarError = null;
-
   // ── 큐 → 저장소, 앱 시작 시 딱 1회(D-01/D-02). 실행 중에는 다시 부르지 않는다 —
   // 주기 타이머로 되살리면 CONCERNS.md가 지적한 읽기-쓰기 경합이 그대로 돌아온다
   // (RESEARCH Pitfall 3). 반영에 실패한 파일은 replayPending이 알아서 남겨 두고
@@ -78,12 +68,10 @@ export function scheduleJobs(ctx) {
   }
 
   // IPC 핸들러(main/ipc.mjs)가 불러야 하는 것 — ctx.jobs에 붙여 둔다.
-  // BACKUP_DIR_DEFAULT는 settings:get의 기본값 표시용으로만 남아 있다.
   ctx.jobs = {
     replayQueueOnce,
     maybeBrief,
     purgeOnce,
-    BACKUP_DIR_DEFAULT,
   };
 
   // ── 타이머 등록. 큐 반영은 여기서 딱 한 번(D-02) — !SMOKE 가드 밖이다. 01-07의 강제종료

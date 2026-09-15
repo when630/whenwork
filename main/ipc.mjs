@@ -1,37 +1,8 @@
 // main/ipc.mjs — 모든 ipcMain 핸들러 등록 (D-08 분할, main/index.mjs에서 이동)
 import { BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import crypto from 'node:crypto';
-import { parseCaptureToken, parseDue, isoWeek, weekRange } from './parse.mjs';
-import { maskUrl } from './calendar.mjs';
+import { parseCaptureToken, parseDue } from './parse.mjs';
 import { NOTIFY_AT_DEFAULT } from './brief.mjs';
-
-// D-06 레거시 스텁 — 재개 카드 채널(resume:get/resume:sync/resume:generate) 셋이 공유하는
-// 빈 반환 형태. 원본 resumePayload와 같은 키를 유지해야 화면(재개 카드 뷰)이 깨지지 않는다.
-function resumeStub() {
-  return {
-    ok: false,
-    card: null,
-    fresh: 0,
-    activities: [],
-    issues: [],
-    promoted: [],
-    generating: false,
-    retryAfter: null,
-  };
-}
-
-// review:get이 필요로 하는 것은 주(week) 라벨뿐이다 — 원래 jobs.mjs의 weekOf()가 하던 계산 중
-// 이 부분만 이리로 옮긴다. 나머지(주간 리뷰 생성용 from/to/base)는 D-06으로 걷어낸 기능 전용이라
-// main/jobs.mjs에서 함께 지운다(01-05 Task 2).
-function weekLabel(weekOffset = 0) {
-  const base = new Date();
-  base.setDate(base.getDate() + weekOffset * 7);
-  const { from, to } = weekRange(base);
-  const last = new Date(to.getTime() - 86400000);
-  const fmt = (d) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return { label: `${fmt(from)} ~ ${fmt(last)}`, week: isoWeek(base) };
-}
 
 // 캡처 저장의 단일 경로(D-01/D-03). capture:save·capture:followUp 두 핸들러와
 // 01-07의 주입 모드가 모두 이 함수를 부른다 — 경로가 하나여야 테스트가 실경로를 밟는다.
@@ -81,7 +52,7 @@ export function registerIpc(ctx) {
   //
   // DB가 꺼져 있어도 봐야 하는 화면이라(접속 정보 확인) DB 경로를 타지 않는다.
   // 앱에서 만지는 건 아래 네 개뿐이고, DB 접속은 settings.json을 직접 고쳐 재시작한다.
-  const SETTING_KEYS = ['vaultRoot', 'backupDir', 'notifyEnabled', 'notifyAt', 'calendarUrl'];
+  const SETTING_KEYS = ['notifyEnabled', 'notifyAt'];
 
   ipcMain.handle('settings:get', () => {
     // 01-05: PostgreSQL 접속 정보 대신 저장소(store.mjs) 파일 위치와 상태를 보여준다
@@ -90,15 +61,8 @@ export function registerIpc(ctx) {
     const st = ctx.store.status();
     return {
       ok: true,
-      // 캘린더 URL에는 토큰이 박혀 있다 — 화면에는 가린 값만 내려보내고 원본은 main에만 둔다
-      values: Object.fromEntries(
-        SETTING_KEYS.map((k) => [k, k === 'calendarUrl' ? maskUrl(ctx.settings.get(k)) : ctx.settings.get(k)])
-      ),
-      calendar: { lastSync: ctx.settings.get('lastCalendarSync'), error: ctx.lastCalendarError },
-      defaults: { notifyAt: NOTIFY_AT_DEFAULT, backupDir: ctx.jobs.BACKUP_DIR_DEFAULT },
-      lastBackup: ctx.settings.get('lastBackup'),
-      lastBackupError: ctx.settings.get('lastBackupError'),
-      lastReviewError: ctx.settings.get('lastReviewError'),
+      values: Object.fromEntries(SETTING_KEYS.map((k) => [k, ctx.settings.get(k)])),
+      defaults: { notifyAt: NOTIFY_AT_DEFAULT },
       store: { file: ctx.store.file, ok: st.ok, notice: st.notice },
       file: ctx.settings.file,
     };
@@ -112,35 +76,11 @@ export function registerIpc(ctx) {
     return { ok: true };
   });
 
-  ipcMain.handle('settings:pickFolder', async (e, current) => {
-    const win = BrowserWindow.fromWebContents(e.sender);
-    ctx.suppressHide = true; // 다이얼로그가 뜨면 창이 blur된다 — 그걸로 창을 접지 않는다
-    try {
-      const res = await dialog.showOpenDialog(win, {
-        title: '폴더 선택',
-        defaultPath: current || undefined,
-        properties: ['openDirectory', 'createDirectory'],
-      });
-      return { ok: !res.canceled, path: res.filePaths?.[0] ?? null };
-    } catch {
-      return { ok: false };
-    } finally {
-      ctx.suppressHide = false;
-      win?.focus();
-    }
-  });
-
   ipcMain.handle('settings:openFile', async () => {
     ctx.settings.flush();
     const err = await shell.openPath(ctx.settings.file);
     return { ok: !err };
   });
-
-  // D-06 레거시 스텁 — 캘린더 동기화·백업 타이머는 01-05 Task 2가 끈다. 여기서는 아무것도
-  // 쓰지 않고 실패만 돌려준다(T-01-05-01).
-  ipcMain.handle('calendar:sync', () => ({ ok: false }));
-
-  ipcMain.handle('backup:now', () => ({ ok: false }));
 
   // ── IPC
   // 목록은 **렌더러가 가져가게** 한다(push 아님). 첫 핫키에서는 getCaptureWin()이 창을
@@ -148,24 +88,10 @@ export function registerIpc(ctx) {
   // 첫 퀵캡처에서는 약어 목록이 영원히 비어 있었고 어떤 약어도 인식하지 못했다.
   ipcMain.handle('capture:projects', () => ctx.refreshAbbrHints());
 
-  ipcMain.handle('capture:save', async (_e, title) => {
-    const fg =
-      (await Promise.race([ctx.pendingContext, new Promise((r) => setTimeout(() => r(null), 300))])) ??
-      ctx.cachedForeground();
-    return saveCapture(ctx, title, fg ? { fg } : null);
-  });
+  ipcMain.handle('capture:save', (_e, title) => saveCapture(ctx, title));
 
-  // 회의 후속 캡처 — 회의는 할 일을 낳는데 그 경로가 손 입력뿐이었다.
-  // 캡처 경로는 퀵캡처와 같다(큐 선기록, D1) — 맥락만 창 제목 대신 회의 제목이다.
-  ipcMain.handle('capture:followUp', async (_e, title, meeting) => {
-    return saveCapture(ctx, title, { meeting: String(meeting?.title ?? '').slice(0, 200) });
-  });
-
-  // D-05 전환 기간: 이 핸들러만 새 저장소(store.mjs)를 쓴다. issues/repoStates/events는
-  // 제거 대상 기능의 자리였고 store.getViewState()가 채우지 않으므로 빈 배열을 반드시
-  // 담아 보낸다 — 렌더러의 SMOKE_PROBE가 state.issues.length를 가드 없이 읽는다.
   ipcMain.handle('today:getState', async () => {
-    const base = { pending: ctx.pending, issues: [], repoStates: [], events: [] };
+    const base = { pending: ctx.pending };
     const st = ctx.store.status();
     if (!st.ok) return { ...base, online: false, notice: st.notice };
     // WR-03: st.ok가 true인 뒤에도 getViewState() 실행 중 SQLite 오류(디스크 I/O 등)가 날 수
@@ -211,13 +137,6 @@ export function registerIpc(ctx) {
     });
   }
 
-  // ── D-06 레거시 스텁 — 제거 대상 기능의 채널. 삭제하지 않고 무해한 값만 돌려준다
-  // (아무것도 쓰지 않는다, T-01-05-01). Phase 2가 스텁과 UI를 함께 걷어낸다.
-  ipcMain.handle('project:repos', () => ({ ok: false }));
-  ipcMain.handle('issue:promote', () => ({ ok: false }));
-  ipcMain.handle('item:doneSuggestMute', () => ({ ok: false }));
-  ipcMain.handle('inbox:classify', () => ({ ok: false }));
-
   // 재촉 — 몇 번째인지와 직전 값(되돌리기용)을 돌려줘야 해서 itemOps(ok만 반환)와 따로 둔다
   ipcMain.handle('item:nudge', async (_e, id) => {
     try {
@@ -247,30 +166,6 @@ export function registerIpc(ctx) {
     } catch {
       return { ok: false };
     }
-  });
-
-  // ── 주간 리뷰 — D-06: 생성은 스텁, 조회는 주 라벨만 계산하고 본문은 항상 비운다.
-  // review:get은 새 저장소·db 어느 쪽도 부르지 않는다(week 계산은 순수 함수).
-  ipcMain.handle('review:get', async (_e, weekOffset = 0) => {
-    try {
-      const w = weekLabel(weekOffset);
-      return { ok: true, label: w.label, year: w.week.year, week: w.week.week, generating: false, review: null };
-    } catch {
-      return { ok: false };
-    }
-  });
-
-  ipcMain.handle('review:generate', () => ({ ok: false }));
-  ipcMain.handle('review:openFile', () => ({ ok: false }));
-
-  // ── M2 재개 카드 — D-06: 셋 다 무해한 빈 값. KPI 로깅(resume_open/project_switch)과
-  // git·이슈 재수집(collectProject/syncProjectIssues)은 제거 대상 기능이라 함께 걷어낸다.
-  ipcMain.handle('resume:get', () => resumeStub());
-  ipcMain.handle('resume:sync', () => resumeStub());
-  ipcMain.handle('resume:generate', () => resumeStub());
-
-  ipcMain.on('open:url', (_e, url) => {
-    if (/^https:\/\//.test(String(url))) shell.openExternal(String(url));
   });
 
   ipcMain.on('win:hide', (e) => {

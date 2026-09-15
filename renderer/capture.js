@@ -53,14 +53,10 @@ function tokenOf(text) {
   return { abbr, project: hit ? hit.name : null };
 }
 
-// 기본 안내 — 컨텍스트가 함께 저장된다는 표시로 창 아이콘을 앞에 둔다
+// 기본 안내
 function showDefaultMsg() {
   msg.className = 'msg';
-  msg.replaceChildren(
-    document.createTextNode('인박스로 저장 · '),
-    window.ICONS.context(),
-    document.createTextNode(' 컨텍스트 기록')
-  );
+  msg.textContent = '인박스로 저장';
   document.body.classList.remove('flash');
 }
 

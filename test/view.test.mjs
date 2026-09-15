@@ -50,13 +50,6 @@ test('대소문자를 가리지 않고, 빈 검색어는 모두 통과', () => {
   assert.ok(VIEW.matches({ title: '아무거나' }, ''));
 });
 
-test('이슈는 번호로도 찾는다 — 210도 #210도', () => {
-  const issue = { title: '복사버튼 추가', number: 210, project_name: 'GoWrite' };
-  assert.ok(VIEW.matches(issue, '210'));
-  assert.ok(VIEW.matches(issue, '#210'));
-  assert.ok(!VIEW.matches(issue, '#211'));
-});
-
 // ── 오늘 탭 배치 (선택 인덱스와 그리는 순서가 어긋나면 엉뚱한 항목이 지워진다)
 test('프로젝트별로만 묶는다 — 급한 것은 배지가 알린다', () => {
   const list = [
@@ -124,60 +117,6 @@ const ev = (h1, h2, extra = {}) => ({
   ...extra,
 });
 
-test('"지금"은 아직 시작하지 않은 첫 일정 앞에 선다', () => {
-  const now = new Date(2026, 7, 6, 12, 0).getTime();
-  const { rows } = VIEW.timeline([ev(10, 11), ev(14, 15), ev(16, 17)], now);
-  assert.deepEqual(rows.map((r) => (r.type === 'now' ? '지금' : r.ev.title)), [
-    '10시',
-    '지금',
-    '14시',
-    '16시',
-  ]);
-});
-
-test('일정이 다 지났으면 "지금"이 축의 끝', () => {
-  const now = new Date(2026, 7, 6, 20, 0).getTime();
-  const { rows } = VIEW.timeline([ev(10, 11), ev(14, 15)], now);
-  assert.equal(rows[rows.length - 1].type, 'now');
-});
-
-test('아직 아무것도 시작 안 했으면 "지금"이 맨 위', () => {
-  const now = new Date(2026, 7, 6, 8, 0).getTime();
-  const { rows } = VIEW.timeline([ev(10, 11)], now);
-  assert.equal(rows[0].type, 'now');
-});
-
-test('진행 중인 일정 다음에 "지금"이 온다', () => {
-  const now = new Date(2026, 7, 6, 10, 30).getTime();
-  const { rows } = VIEW.timeline([ev(10, 11), ev(14, 15)], now);
-  assert.deepEqual(rows.map((r) => (r.type === 'now' ? '지금' : r.ev.title)), ['10시', '지금', '14시']);
-});
-
-test('종일 일정은 축에서 빼내 따로 준다', () => {
-  const allDayEv = { title: '휴가', all_day: true, start_at: new Date(2026, 7, 6) };
-  const { allDay, rows } = VIEW.timeline([allDayEv, ev(14, 15)], new Date(2026, 7, 6, 9).getTime());
-  assert.deepEqual(allDay.map((e) => e.title), ['휴가']);
-  assert.ok(!rows.some((r) => r.ev?.all_day));
-});
-
-test('종일 일정만 있으면 축을 그리지 않는다 — "지금"만 덜렁 남지 않게', () => {
-  const { allDay, rows } = VIEW.timeline([{ title: '휴가', all_day: true }], Date.now());
-  assert.equal(allDay.length, 1);
-  assert.deepEqual(rows, []);
-});
-
-test('시각 순서가 뒤섞여 들어와도 축은 시간순', () => {
-  const now = new Date(2026, 7, 6, 9, 0).getTime();
-  const { rows } = VIEW.timeline([ev(16, 17), ev(10, 11), ev(14, 15)], now);
-  assert.deepEqual(rows.filter((r) => r.type === 'event').map((r) => r.ev.title), ['10시', '14시', '16시']);
-});
-
-test('빈 입력에도 버틴다', () => {
-  assert.deepEqual(VIEW.timeline([], Date.now()), { allDay: [], rows: [] });
-  assert.deepEqual(VIEW.timeline(undefined, Date.now()), { allDay: [], rows: [] });
-});
-
-// ── 완료 기록
 test('완료 항목과 커밋을 하루 단위로 묶어 최근 날짜부터', () => {
   const data = {
     items: [
@@ -214,77 +153,13 @@ test('달을 넘는 어제도 어제로 본다', () => {
 });
 
 // ── 일정
-test('일정은 지난 것·진행 중·앞으로를 가른다', () => {
-  const now = new Date(2026, 7, 6, 14, 30).getTime();
-  const ev = (h1, h2) => ({
-    start_at: new Date(2026, 7, 6, h1, 0),
-    end_at: new Date(2026, 7, 6, h2, 0),
-  });
-  assert.equal(VIEW.eventState(ev(10, 11), now), 'past');
-  assert.equal(VIEW.eventState(ev(14, 15), now), 'live');
-  assert.equal(VIEW.eventState(ev(16, 17), now), 'next');
-  assert.equal(VIEW.eventState({ all_day: true }, now), 'allday');
-});
-
-test('끝나는 순간은 이미 지난 것으로 본다', () => {
-  const now = new Date(2026, 7, 6, 15, 0).getTime();
-  const ev = { start_at: new Date(2026, 7, 6, 14, 0), end_at: new Date(2026, 7, 6, 15, 0) };
-  assert.equal(VIEW.eventState(ev, now), 'past');
-});
-
-test('시각은 두 자리로 채운다', () => {
-  assert.equal(VIEW.hhmm(new Date(2026, 7, 6, 9, 5)), '09:05');
-  assert.equal(VIEW.hhmm('깨진값'), '');
-});
-
-test('일정은 시작만이 아니라 끝나는 시각까지 보여준다', () => {
-  const ev = { start_at: new Date(2026, 7, 6, 14, 10), end_at: new Date(2026, 7, 6, 15, 10) };
-  assert.equal(VIEW.eventTime(ev), '14:10–15:10');
-  assert.equal(VIEW.eventTime({ all_day: true }), '종일');
-  // 길이가 0이면 굳이 같은 시각을 두 번 쓰지 않는다
-  assert.equal(VIEW.eventTime({ start_at: ev.start_at, end_at: ev.start_at }), '14:10');
-  assert.equal(VIEW.eventTime({ start_at: ev.start_at }), '14:10');
-});
-
-test('길이는 사람이 읽는 말로', () => {
-  assert.equal(VIEW.humanSpan(45), '45분');
-  assert.equal(VIEW.humanSpan(60), '1시간');
-  assert.equal(VIEW.humanSpan(130), '2시간 10분');
-  assert.equal(VIEW.humanSpan(0), null);
-  assert.equal(VIEW.humanSpan(-5), null);
-});
-
-test('앞으로의 일정은 시작까지, 진행 중이면 남은 시간을 말한다', () => {
-  const ev = { start_at: new Date(2026, 7, 6, 14, 0), end_at: new Date(2026, 7, 6, 15, 0) };
-  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 13, 30).getTime()), '30분 뒤');
-  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 14, 40).getTime()), '20분 남음');
-  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 11, 0).getTime()), '3시간 뒤');
-});
-
-test('지난 일정과 종일 일정에는 상대시간을 붙이지 않는다', () => {
-  const past = { start_at: new Date(2026, 7, 6, 10, 0), end_at: new Date(2026, 7, 6, 11, 0) };
-  assert.equal(VIEW.eventRelative(past, new Date(2026, 7, 6, 14, 0).getTime()), null);
-  assert.equal(VIEW.eventRelative({ all_day: true }, Date.now()), null);
-});
-
-test('막 시작하거나 막 끝나는 순간에도 말이 된다', () => {
-  const ev = { start_at: new Date(2026, 7, 6, 14, 0), end_at: new Date(2026, 7, 6, 15, 0) };
-  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 14, 0).getTime()), '1시간 남음');
-  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 14, 59, 45).getTime()), '곧 끝남');
-  assert.equal(VIEW.eventRelative(ev, new Date(2026, 7, 6, 13, 59, 45).getTime()), '곧 시작');
-});
-
-// ── 설정 표시
-test('빈 설정은 대신 쓰이는 값을 밝힌다', () => {
-  const defaults = { notifyAt: '09:00', backupDir: 'C:/data/backups' };
-  assert.match(VIEW.settingDisplay({ key: 'backupDir', kind: 'folder' }, {}, defaults), /기본/);
-  assert.match(VIEW.settingDisplay({ key: 'vaultRoot', kind: 'folder' }, {}, defaults), /미설정/);
-  assert.equal(VIEW.settingDisplay({ key: 'notifyAt', kind: 'time' }, {}, defaults), '09:00 (기본)');
+test('빈 설정은 기본값을 밝힌다', () => {
+  assert.equal(VIEW.settingDisplay({ key: 'notifyAt', kind: 'time' }, {}, { notifyAt: '09:00' }), '09:00 (기본)');
+  assert.match(VIEW.settingDisplay({ key: 'notifyAt', kind: 'time' }, {}, {}), /기본/);
 });
 
 test('설정한 값이 있으면 그대로 보여준다', () => {
-  const values = { vaultRoot: 'D:/vault', notifyAt: '07:30', notifyEnabled: false };
-  assert.equal(VIEW.settingDisplay({ key: 'vaultRoot', kind: 'folder' }, values), 'D:/vault');
+  const values = { notifyAt: '07:30', notifyEnabled: false };
   assert.equal(VIEW.settingDisplay({ key: 'notifyAt', kind: 'time' }, values), '07:30');
   assert.equal(VIEW.settingDisplay({ key: 'notifyEnabled', kind: 'bool' }, values), '꺼짐');
   assert.equal(VIEW.settingDisplay({ key: 'notifyEnabled', kind: 'bool' }, {}), '켜짐'); // 기본은 켜짐
@@ -313,110 +188,3 @@ test('재촉 경계는 브리핑과 같은 5일이다', () => {
 });
 
 // ── 이슈에서 세운 할 일
-test('이슈 배지는 종류·번호를 달고, 닫히면 그 사실을 앞세운다', () => {
-  const base = { issue_url: 'https://x/1', issue_number: 12, issue_provider: 'github' };
-  assert.deepEqual(VIEW.issueBadge({ ...base, issue_state: 'open' }), { text: '이슈 #12', cls: '' });
-  assert.deepEqual(VIEW.issueBadge({ ...base, issue_state: 'closed' }), { text: '이슈 #12 닫힘', cls: 'closed' });
-  assert.deepEqual(VIEW.issueBadge({ ...base, issue_kind: 'pr', issue_state: 'merged' }), {
-    text: 'PR #12 머지됨',
-    cls: 'closed',
-  });
-  assert.equal(VIEW.issueBadge({ ...base, issue_kind: 'pr', issue_provider: 'gitlab', issue_state: 'open' }).text, 'MR #12');
-});
-
-test('이슈에서 온 것이 아니면 배지가 없다', () => {
-  assert.equal(VIEW.issueBadge({ title: '손으로 적은 일' }), null);
-  assert.equal(VIEW.issueBadge(null), null);
-});
-
-test('아직 동기화되지 않아 상태를 모르면 닫혔다고 하지 않는다', () => {
-  assert.deepEqual(VIEW.issueBadge({ issue_url: 'https://x/1', issue_number: 3 }), { text: '이슈 #3', cls: '' });
-});
-
-// ── 회의 후속 캡처가 붙을 일정 고르기
-const mtg = (h, m, endH, o = {}) => ({
-  start_at: new Date(2026, 7, 6, h, m),
-  end_at: new Date(2026, 7, 6, endH, m),
-  title: `${h}시 회의`,
-  ...o,
-});
-
-test('진행 중인 회의가 있으면 그것이 먼저다', () => {
-  const now = new Date(2026, 7, 6, 14, 30).getTime();
-  const picked = VIEW.focusEvent([mtg(10, 0, 11), mtg(14, 0, 15), mtg(16, 0, 17)], now);
-  assert.equal(picked.title, '14시 회의');
-});
-
-test('진행 중인 것이 없으면 가장 최근에 끝난 회의', () => {
-  const now = new Date(2026, 7, 6, 15, 30).getTime();
-  const picked = VIEW.focusEvent([mtg(10, 0, 11), mtg(14, 0, 15), mtg(16, 0, 17)], now);
-  assert.equal(picked.title, '14시 회의');
-});
-
-test('끝난 지 오래된 회의와 종일 일정은 고르지 않는다', () => {
-  const now = new Date(2026, 7, 6, 18, 0).getTime();
-  assert.equal(VIEW.focusEvent([mtg(10, 0, 11)], now), null); // 7시간 전
-  assert.equal(VIEW.focusEvent([{ ...mtg(9, 0, 10), all_day: true }], now), null);
-  assert.equal(VIEW.focusEvent([], now), null);
-});
-
-test('앞으로 있을 회의는 아직 후속을 낳지 않았다', () => {
-  const now = new Date(2026, 7, 6, 13, 0).getTime();
-  assert.equal(VIEW.focusEvent([mtg(14, 0, 15)], now), null);
-});
-
-// ── 캡처 맥락
-test('회의 후속은 창 제목보다 회의를 앞세운다', () => {
-  assert.equal(VIEW.captureContext({ context: { meeting: '주간회의', fg: 'Chrome' } }), '회의 후속: 주간회의');
-  assert.equal(VIEW.captureContext({ context: { fg: 'VS Code' } }), '캡처 당시: VS Code');
-  assert.equal(VIEW.captureContext({ context: null }), null);
-  assert.equal(VIEW.captureContext(undefined), null);
-});
-
-// ── 이슈 서브탭 (←→)
-const iss = (o) => ({ project_id: 1, project_name: '가', title: '이', active: false, ...o });
-const PROJ = [{ id: 1, name: '가' }, { id: 2, name: '나' }, { id: 3, name: '다' }];
-
-test('「지금」이 맨 앞에 서고 그 뒤는 프로젝트 탭 순서다', () => {
-  const tabs = VIEW.issueTabs(
-    [iss({ project_id: 2, project_name: '나' }), iss({ project_id: 1, active: true })],
-    PROJ
-  );
-  assert.deepEqual(tabs.map((t) => t.key), ['now', 'p1', 'p2']);
-  assert.equal(tabs[0].items.length, 1); // 활동 중인 것만
-  assert.equal(tabs[1].hot, true); // 프로젝트 탭에도 활동 중임이 남는다
-  assert.equal(tabs[2].hot, false);
-});
-
-test('활동 중인 이슈가 없으면 「지금」 자리를 만들지 않는다', () => {
-  // 빈 탭으로 열리면 탭이 있으나 마나다 — 그날은 프로젝트별로 보는 게 맞다
-  const tabs = VIEW.issueTabs([iss({}), iss({ project_id: 2, project_name: '나' })], PROJ);
-  assert.deepEqual(tabs.map((t) => t.key), ['p1', 'p2']);
-});
-
-test('「지금」은 여러 프로젝트를 한자리에 모은다', () => {
-  const tabs = VIEW.issueTabs(
-    [iss({ project_id: 1, active: true }), iss({ project_id: 3, project_name: '다', active: true })],
-    PROJ
-  );
-  assert.equal(tabs[0].key, 'now');
-  assert.equal(tabs[0].items.length, 2);
-});
-
-test('목록에 없는 프로젝트는 뒤로 간다', () => {
-  const tabs = VIEW.issueTabs([iss({ project_id: 9, project_name: '먼' }), iss({})], PROJ);
-  assert.deepEqual(tabs.map((t) => t.key), ['p1', 'p9']);
-});
-
-test('이슈가 없으면 탭도 없다', () => {
-  assert.deepEqual(VIEW.issueTabs([], PROJ), []);
-});
-
-test('고른 탭이 사라지면 첫 자리로 되돌린다', () => {
-  // 수집이 돌아 그 프로젝트의 이슈가 다 닫히면 머물던 탭이 없어진다 —
-  // 그대로 두면 빈 화면이 뜨고 선택 인덱스가 목록과 어긋난다
-  const tabs = VIEW.issueTabs([iss({})], PROJ);
-  assert.equal(VIEW.pickTab(tabs, 'p9').key, 'p1');
-  assert.equal(VIEW.pickTab(tabs, 'p1').key, 'p1');
-  assert.equal(VIEW.pickTab([], 'p1'), null);
-});

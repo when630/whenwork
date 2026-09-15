@@ -86,17 +86,24 @@ export function registerIpc(ctx) {
     const fg =
       (await Promise.race([ctx.pendingContext, new Promise((r) => setTimeout(() => r(null), 300))])) ??
       ctx.cachedForeground();
-    ctx.queue.append({
+    const entry = {
       id: crypto.randomUUID(),
       title: text,
-      abbr, // #약어 — 프로젝트로 푸는 건 플러시 시점(DB)에서
+      abbr, // #약어 — 프로젝트로 푸는 건 저장소 반영 시점에서
       // 그 약어가 어느 프로젝트도 아니면 원문을 그대로 되살린다 — 앞에 붙은 "#201 이슈 확인"이
       // 어순이 바뀐 채 남으면 안 된다
       raw: abbr ? String(title).trim() : null,
       captured_at: new Date().toISOString(),
       context: fg ? { fg } : null,
-    });
-    ctx.jobs.flush(); // 기다리지 않는다 — 저장 완결은 큐가 이미 보장
+    };
+    ctx.queue.append(entry); // 먼저 큐에 남긴다 — 아래가 실패해도 이 줄은 이미 디스크에 있다(D1)
+    // 같은 호출 흐름에서 저장소에 즉시 반영을 시도한다(D-01). 실패해도 사용자에게는
+    // 보이지 않는다 — 큐가 이미 보장했다. 재시도·대기 표시는 01-03이 붙인다.
+    try {
+      ctx.store.insertCaptures([entry]);
+    } catch {
+      // 큐가 이미 보장한다
+    }
     ctx.refreshTrayMenu();
     return { ok: true, dbOnline: ctx.dbOnline, pending: ctx.queue.count() };
   });
@@ -106,32 +113,30 @@ export function registerIpc(ctx) {
   ipcMain.handle('capture:followUp', async (_e, title, meeting) => {
     const text = String(title ?? '').trim();
     if (!text) return { ok: false };
-    ctx.queue.append({
+    const entry = {
       id: crypto.randomUUID(),
       title: text,
       captured_at: new Date().toISOString(),
       context: { meeting: String(meeting?.title ?? '').slice(0, 200) },
-    });
-    ctx.jobs.flush();
+    };
+    ctx.queue.append(entry);
+    try {
+      ctx.store.insertCaptures([entry]);
+    } catch {
+      // 큐가 이미 보장한다
+    }
     ctx.refreshTrayMenu();
     return { ok: true, pending: ctx.queue.count() };
   });
 
+  // D-05 전환 기간: 이 핸들러만 새 저장소(store.mjs)를 쓴다. issues/repoStates/events는
+  // 제거 대상 기능의 자리였고 store.getViewState()가 채우지 않으므로 빈 배열을 반드시
+  // 담아 보낸다 — 렌더러의 SMOKE_PROBE가 state.issues.length를 가드 없이 읽는다.
   ipcMain.handle('today:getState', async () => {
-    ctx.dbOnline = await ctx.db.online().catch(() => false);
-    if (!ctx.dbOnline) return { online: false, pending: ctx.queue.count() };
-    await ctx.jobs.flush();
-    const state = await ctx.db.getViewState();
-    return {
-      online: true,
-      pending: ctx.queue.count(),
-      events: await ctx.jobs.todayEvents(),
-      // 열린 이슈는 재개 카드 안에만 있어 오늘 뷰에서 놓쳤다 — 탭 배지로 건수가 늘 보이게 함께 싣는다
-      issues: await ctx.db.getOpenIssues().catch(() => []),
-      // 리포에 끝내지 않고 둔 자리 — 프로젝트 탭에서 그 리포 줄에 붙는다
-      repoStates: await ctx.db.getRepoStates().catch(() => []),
-      ...state,
-    };
+    const base = { pending: ctx.queue.count(), issues: [], repoStates: [], events: [] };
+    const st = ctx.store.status();
+    if (!st.ok) return { ...base, online: false, notice: st.notice };
+    return { ...base, online: true, notice: st.notice, ...ctx.store.getViewState() };
   });
 
   ipcMain.handle('history:get', async (_e, days = 7) => {

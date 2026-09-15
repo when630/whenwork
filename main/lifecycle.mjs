@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createQueue } from './queue.mjs';
 import { createDb } from './db.mjs';
+import { createStore } from './store.mjs';
 import { createSettings } from './settings.mjs';
 import { pickPosition } from './place.mjs';
 import { foregroundTitle } from './context.mjs';
@@ -379,6 +380,11 @@ export function bootstrap() {
   ctx.dbConfig = dbConfig;
   ctx.db = createDb(dbConfig);
 
+  // 새 저장소(D-14) — settings.json·queue.jsonl 옆의 store.sqlite 한 파일이다. 파일 이름에
+  // 앱 이름을 넣지 않아 Phase 5 개명이 파일명을 건드리지 않는다. ctx.db는 아직 그대로
+  // 둔다 — 전환 기간에는 capture:save/today:getState만 새 저장소를 쓴다(D-05).
+  ctx.store = createStore(path.join(app.getPath('userData'), 'store.sqlite'));
+
   // ipcMain.handle/.on 등록은 원래도 모듈 로드 시점(동기)이었다 — app.whenReady보다 먼저,
   // ctx를 만든 직후 등록한다. 핸들러 본문의 ctx.jobs.* 호출은 실제 IPC가 올 때(항상
   // app.whenReady 이후, scheduleJobs(ctx)가 ctx.jobs를 채운 뒤)에야 실행되므로 안전하다.
@@ -741,6 +747,7 @@ export function bootstrap() {
   app.on('before-quit', () => {
     ctx.quitting = true;
     ctx.settings.flush(); // 디바운스로 미뤄둔 창 위치를 마저 쓴다
+    ctx.store.close(); // wal_checkpoint(TRUNCATE) 후 닫는다(D-17) — store.sqlite 하나만 복사해도 온전해야 한다
   });
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();

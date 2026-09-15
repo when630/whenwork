@@ -417,7 +417,12 @@ export function createStore(file) {
       )
       .all(cutoff);
     const items = rows.map((r) => ({ ...r, context: r.context ? JSON.parse(r.context) : null }));
-    const projects = db.prepare(`SELECT id, name, status, sort FROM project ORDER BY sort, name`).all();
+    // 보관한 프로젝트는 화면에서 빠져야 한다. status 필터가 없어서 X로 보관해도 목록이
+    // 그대로였고, 사용자에게는 "삭제가 안 되는" 것으로 보였다. 1~9 번호와 색도 이 배열의
+    // 순서에서 나오므로, 보관한 것이 남아 있으면 번호가 빈 자리를 차지한다.
+    const projects = db
+      .prepare(`SELECT id, name, status, sort FROM project WHERE status = 'active' ORDER BY sort, name`)
+      .all();
     return {
       projects,
       today: items.filter((r) => r.kind === 'todo'),

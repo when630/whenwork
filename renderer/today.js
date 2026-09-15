@@ -976,9 +976,8 @@ document.addEventListener('keydown', async (e) => {
         }
         return;
       }
-      case 'Enter':
-        if (p) openResume(p.id);
-        return;
+      // Enter는 재개 카드를 여는 자리였다. 그 화면은 Phase 2에서 걷어냈는데 호출이
+      // 남아 있어, 프로젝트를 고르고 Enter를 누르면 openResume이 없어 터졌다.
     }
     return;
   }
@@ -988,9 +987,6 @@ document.addEventListener('keydown', async (e) => {
   // 다이얼로그를 여는 키는 기본 동작을 먼저 끊는다 (그 글자가 입력창에 찍히지 않게)
   if (['e', 'w', 'd', 'n', 'm'].includes(e.key.toLowerCase())) e.preventDefault();
   switch (e.key) {
-    case 'Enter':
-      if (it?.project_id) openResume(it.project_id);
-      return;
     case 'd':
     case 'D': {
       if (!it) return;

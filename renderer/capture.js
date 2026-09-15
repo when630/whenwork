@@ -39,7 +39,6 @@ input.addEventListener('beforeinput', (e) => {
 });
 input.addEventListener('input', () => {
   if (/^\s/.test(input.value)) input.value = input.value.replace(/^\s+/, '');
-  showTokenMsg();
 });
 
 document.addEventListener('keydown', async (e) => {

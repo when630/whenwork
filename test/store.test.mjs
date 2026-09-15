@@ -801,3 +801,32 @@ test('가져오기 백업 이름에 시각이 들어간다 — 두 번 가져와
   assert.match(path.basename(first), /^store-import-\d{8}T\d{6}\.sqlite$/, path.basename(first));
   store.close();
 });
+
+test('보관한 프로젝트는 오늘 뷰 상태에서 빠진다 — X로 보관해도 목록에 남아 있었다', () => {
+  const store = createStore(tmpFile());
+  store.open();
+  const gone = store.createProject('보관할 것');
+  store.createProject('남을 것');
+  assert.equal(store.getViewState().projects.length, 2);
+
+  store.archiveProject(gone);
+  const names = store.getViewState().projects.map((p) => p.name);
+  assert.deepEqual(names, ['남을 것'], '보관한 프로젝트가 화면에 남았다: ' + names.join(','));
+  // getProjects()(약어 힌트·캡처 경로가 쓰던 쪽)는 원래도 걸러내고 있었다 — 두 곳이
+  // 다른 답을 하던 것이 이 결함의 정체다.
+  assert.deepEqual(store.getProjects().map((p) => p.name), ['남을 것']);
+  store.close();
+});
+
+test('보관해도 그 프로젝트의 항목은 사라지지 않는다 — 보관은 삭제가 아니다', () => {
+  const store = createStore(tmpFile());
+  store.open();
+  const pid = store.createProject('보관할 것');
+  store.insertCaptures([{ id: 'keep', title: '남아야 하는 할 일', captured_at: new Date().toISOString() }]);
+  store.assignProject('keep', pid);
+  store.archiveProject(pid);
+  const st = store.getViewState();
+  const all = [...st.today, ...st.inbox, ...st.waiting];
+  assert.ok(all.some((i) => i.id === 'keep'), '보관된 프로젝트의 항목이 함께 사라졌다');
+  store.close();
+});

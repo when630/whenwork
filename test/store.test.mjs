@@ -459,3 +459,128 @@ test('getProjects()는 status가 active인 것만 sort·id 순으로 돌려준�
   assert.deepEqual(projects.map((p) => p.id), [b]);
   store.close();
 });
+
+// ── 완료 이력·축소된 아침 브리핑 (01-04 Task 2) ──
+
+test('getHistory(7)이 최근 7일 완료 항목을 done_at 내림차순으로 돌려주고 8일 전 항목은 빠진다, commits는 항상 빈 배열', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  store.insertCaptures([
+    { id: 'id-h1', title: '최근 완료1', abbr: null, captured_at: new Date().toISOString(), context: null },
+    { id: 'id-h2', title: '최근 완료2', abbr: null, captured_at: new Date().toISOString(), context: null },
+    { id: 'id-h-old', title: '오래된 완료', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.close();
+
+  const now = Date.now();
+  const raw = new DatabaseSync(file);
+  raw.prepare('UPDATE item SET done_at = ? WHERE id = ?').run(new Date(now - 1 * 86400_000).toISOString(), 'id-h1');
+  raw.prepare('UPDATE item SET done_at = ? WHERE id = ?').run(new Date(now - 2 * 86400_000).toISOString(), 'id-h2');
+  raw
+    .prepare('UPDATE item SET done_at = ? WHERE id = ?')
+    .run(new Date(now - 8 * 86400_000).toISOString(), 'id-h-old');
+  raw.close();
+
+  const store2 = createStore(file);
+  const history = store2.getHistory(7);
+  assert.deepEqual(history.items.map((it) => it.id), ['id-h1', 'id-h2'], 'done_at 내림차순, 8일 전은 빠져야 한다');
+  assert.deepEqual(history.commits, []);
+  store2.close();
+});
+
+test('briefing()이 overdue·due_today·inbox·open_todo·oldest_todo_days·stale_waiting 여섯 키를 숫자로 돌려준다', () => {
+  const store = createStore(tmpFile());
+  const b = store.briefing();
+  assert.deepEqual(Object.keys(b).sort(), [
+    'due_today',
+    'inbox',
+    'oldest_todo_days',
+    'open_todo',
+    'overdue',
+    'stale_waiting',
+  ]);
+  for (const v of Object.values(b)) assert.equal(typeof v, 'number');
+  store.close();
+});
+
+test('마감이 어제인 항목은 overdue에, 오늘인 항목은 due_today에 잡히고 kind와 무관하다', () => {
+  const store = createStore(tmpFile());
+  store.insertCaptures([
+    { id: 'id-od', title: '인박스 지연', abbr: null, captured_at: new Date().toISOString(), context: null },
+    { id: 'id-dt', title: '인박스 오늘마감', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.setDue('id-od', new Date(Date.now() - 86400_000).toISOString().slice(0, 10));
+  store.setDue('id-dt', new Date().toISOString().slice(0, 10));
+  const b = store.briefing();
+  assert.equal(b.overdue, 1, '인박스 항목의 마감도 지연으로 잡혀야 한다');
+  assert.equal(b.due_today, 1);
+  store.close();
+});
+
+test('5일 넘게 손대지 않은 대기 항목은 stale_waiting에 잡히고 어제 재촉한 대기 항목은 잡히지 않는다', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  store.insertCaptures([
+    {
+      id: 'id-stale',
+      title: '오래된 대기',
+      abbr: null,
+      captured_at: new Date(Date.now() - 10 * 86400_000).toISOString(),
+      context: null,
+    },
+    {
+      id: 'id-fresh',
+      title: '재촉한 대기',
+      abbr: null,
+      captured_at: new Date(Date.now() - 10 * 86400_000).toISOString(),
+      context: null,
+    },
+  ]);
+  store.toWaiting('id-stale', '회신 대기');
+  store.toWaiting('id-fresh', '회신 대기');
+  store.close();
+
+  const raw = new DatabaseSync(file);
+  raw
+    .prepare('UPDATE item SET nudged_at = ? WHERE id = ?')
+    .run(new Date(Date.now() - 86400_000).toISOString(), 'id-fresh');
+  raw.close();
+
+  const store2 = createStore(file);
+  const b = store2.briefing(5);
+  assert.equal(b.stale_waiting, 1, '재촉 시각부터 경과를 다시 세야 어제 재촉한 건은 빠진다');
+  store2.close();
+});
+
+test('완료됐거나 소프트 삭제된 항목은 어느 숫자에도 잡히지 않는다', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  const pid = store.createProject('프로젝트');
+  store.insertCaptures([
+    { id: 'id-done-b', title: '완료된 할일', abbr: null, captured_at: new Date().toISOString(), context: null },
+    { id: 'id-del-b', title: '삭제된 할일', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  store.assignProject('id-done-b', pid);
+  store.assignProject('id-del-b', pid);
+  const today = new Date().toISOString().slice(0, 10);
+  store.setDue('id-done-b', today);
+  store.setDue('id-del-b', today);
+  store.completeItem('id-done-b');
+  store.removeItem('id-del-b');
+  const b = store.briefing();
+  assert.equal(b.due_today, 0, '완료·삭제된 항목은 due_today에 잡히면 안 된다');
+  assert.equal(b.open_todo, 0, '완료·삭제된 항목은 open_todo에 잡히면 안 된다');
+  store.close();
+});
+
+test('briefing() 결과를 briefingLines()에 그대로 넣어도 예외 없이 문자열 배열이 나온다', () => {
+  const store = createStore(tmpFile());
+  store.insertCaptures([
+    { id: 'id-bl', title: '할 일', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  const b = store.briefing();
+  const lines = briefingLines(b);
+  assert.ok(Array.isArray(lines));
+  for (const line of lines) assert.equal(typeof line, 'string');
+  store.close();
+});

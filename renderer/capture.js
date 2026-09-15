@@ -115,10 +115,9 @@ document.addEventListener('keydown', async (e) => {
   input.value = ''; // 다음 입력을 바로 받는다 — 창은 그대로 열려 있다
   input.focus();
   const more = sessionCount > 1 ? ` · 이번에 ${sessionCount}건` : '';
-  if (!res.dbOnline) {
-    // DB가 꺼져 있으면 약어는 플러시 시점에 풀린다 — 지금은 큐에 들어간 사실만 알린다
-    showMsg('warn', `✓ 저장 · DB 대기 — 로컬 큐 ${res.pending}건`, 3000);
-  } else if (token && !token.project) {
+  // 저장소가 즉시 반영에 실패해도 창은 실패를 보이지 않는다(D-03) — 대기 건수는
+  // 트레이 툴팁과 오늘 뷰 상단에서만 드러난다.
+  if (token && !token.project) {
     // 없는 약어는 제목에 그대로 남는다 (인박스에서 E로 고치면 된다)
     showMsg('warn', `✓ 인박스로 저장 · #${token.abbr} 없는 약어`, 3000);
   } else if (token) {

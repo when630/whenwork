@@ -597,12 +597,22 @@ export function bootstrap() {
       : nativeImage.createEmpty();
   }
 
+  // 저장소 상태(D-03) — 예전에 DB 접속 상태를 보여주던 툴팁·메뉴 자리를 그대로 쓴다.
+  // 값을 다룰 때는 status().notice의 요약 문구와 정수 건수뿐이다(내부 경로·예외 문자열은 노출하지 않는다).
+  function storeStatusLine() {
+    const st = ctx.store.status();
+    if (st.notice) return st.notice;
+    if (ctx.pending > 0) return `${ctx.pending}건이 기다리고 있어요 — 다시 시작하면 반영됩니다`;
+    return '저장소 정상';
+  }
+
   function refreshTrayMenu() {
     if (!ctx.tray) return;
-    const pending = ctx.queue.count();
-    ctx.tray.setToolTip(
-      `WHENWORK${ctx.dbOnline ? '' : ' — DB 대기'}${pending ? ` · 큐 ${pending}건` : ''}`
-    );
+    const st = ctx.store.status();
+    const tooltipBits = [];
+    if (!st.ok) tooltipBits.push(st.notice ?? '저장소 대기');
+    if (ctx.pending > 0) tooltipBits.push(`대기 ${ctx.pending}건`);
+    ctx.tray.setToolTip(`WHENWORK${tooltipBits.length ? ' — ' + tooltipBits.join(' · ') : ''}`);
     const lastCollect = ctx.settings.get('lastCollect');
     const lastBackup = ctx.settings.get('lastBackup');
     const backupError = ctx.settings.get('lastBackupError');
@@ -635,7 +645,7 @@ export function bootstrap() {
         },
         { type: 'separator' },
         {
-          label: ctx.dbOnline ? 'DB 연결됨' : `DB 대기 중 — 큐 ${pending}건`,
+          label: storeStatusLine(),
           enabled: false,
         },
         {

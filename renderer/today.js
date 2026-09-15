@@ -1031,11 +1031,21 @@ function renderBody() {
     const e = el('div', 'empty');
     e.append(
       el('div', 'big', '⏳'),
-      el('div', null, 'DB 대기 중 — Docker의 whenwork-db가 켜지면 자동 동기화'),
-      el('div', null, `로컬 큐 ${state.pending}건 보관 중 · 캡처는 계속 가능`)
+      el('div', null, state.notice || '저장소를 열지 못했습니다'),
+      el('div', null, `대기 ${state.pending}건 · 캡처는 계속 가능`)
     );
     body.append(e);
     return;
+  }
+
+  // 저장소는 열려 있지만 대기 건이 있거나(D-03) 방금 손상을 격리했다는 안내(D-15)가
+  // 있으면 목록을 그리기 전에 오늘 뷰 상단에 한 줄 붙인다.
+  if (state.pending > 0 || state.notice) {
+    const notice = el('div', 'sync-note');
+    notice.textContent = state.notice
+      ? state.notice
+      : `${state.pending}건이 기다리고 있어요 — 다시 시작하면 반영됩니다`;
+    body.append(notice);
   }
 
   const list = currentList();
@@ -1206,8 +1216,8 @@ function renderFooter() {
   const online = state?.online;
   sync.classList.toggle('off', !online);
   $('syncText').textContent = online
-    ? state.pending ? `동기화 중 — 큐 ${state.pending}건` : '동기화됨'
-    : `DB 대기 — 큐 ${state?.pending ?? 0}건`;
+    ? state.pending ? `대기 ${state.pending}건 — 다시 시작하면 반영` : '저장소 정상'
+    : `저장소 대기 — 대기 ${state?.pending ?? 0}건`;
 
   // 지금 화면에서 자주 쓰는 것만 — 나머지는 ?(전체 키맵)에서 본다.
   // 힌트가 열 칸을 넘어가면 결국 아무것도 읽히지 않는다.

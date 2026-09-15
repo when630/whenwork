@@ -135,7 +135,7 @@ export function registerIpc(ctx) {
   // 제거 대상 기능의 자리였고 store.getViewState()가 채우지 않으므로 빈 배열을 반드시
   // 담아 보낸다 — 렌더러의 SMOKE_PROBE가 state.issues.length를 가드 없이 읽는다.
   ipcMain.handle('today:getState', async () => {
-    const base = { pending: ctx.queue.count(), issues: [], repoStates: [], events: [] };
+    const base = { pending: ctx.pending, issues: [], repoStates: [], events: [] };
     const st = ctx.store.status();
     if (!st.ok) return { ...base, online: false, notice: st.notice };
     return { ...base, online: true, notice: st.notice, ...ctx.store.getViewState() };

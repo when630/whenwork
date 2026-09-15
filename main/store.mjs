@@ -5,6 +5,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { dayKey } from './brief.mjs';
 
 // 앱이 자신보다 높은 user_version의 DB를 만나면 열지 않는다(D-13) — 구버전으로 되돌린
 // 사용자가 최신 스키마에 실수로 쓰지 않게 막는 신호다.
@@ -534,7 +535,11 @@ export function createStore(file) {
     if (!db || !state.ok) {
       return { overdue: 0, due_today: 0, inbox: 0, open_todo: 0, oldest_todo_days: 0, stale_waiting: 0 };
     }
-    const today = new Date().toISOString().slice(0, 10);
+    // WR-01: due는 로컬 캘린더 날짜(D-10)로 저장되는데 toISOString()은 UTC 날짜를 뽑아,
+    // 한국 시간 자정~09시 사이에는 로컬 날짜가 이미 넘어갔지만 UTC 날짜는 전날이라 overdue/
+    // due_today 판정이 하루 어긋난다. dayKey()(main/brief.mjs, main/ipc.mjs weekLabel과 동일한
+    // getFullYear/getMonth/getDate 기반)로 로컬 날짜를 뽑는다.
+    const today = dayKey();
     const cutoff = new Date(new Date().getTime() - staleDays * 86400_000).toISOString();
     // 마감은 어느 탭에 있든 챙겨야 한다 — kind로 거르지 않는다(원본 PostgreSQL 저장소 모듈의
     // 이유를 그대로 옮긴다: kind='todo'만 세면 인박스·대기 항목의 마감이 화면 배지로는 뜨는데 아침에는

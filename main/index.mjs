@@ -1,4 +1,4 @@
-// WHENWORK — 트레이 상주. 퀵캡처(전역 단축키) → 로컬 큐 → PostgreSQL 동기화(D1).
+// WHENWORK — 트레이 상주. 퀵캡처(전역 단축키) → 로컬 큐 → 내장 SQLite 저장소(store.mjs) 반영(D1).
 //
 // 엔트리포인트는 bootstrap() 호출 하나뿐이다(D-08). 앱 수명·창·트레이·단축키는
 // main/lifecycle.mjs, 모든 IPC 핸들러는 main/ipc.mjs, 백그라운드 작업·타이머는

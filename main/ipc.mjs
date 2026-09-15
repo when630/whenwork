@@ -109,7 +109,11 @@ export function registerIpc(ctx) {
     ctx.pendingNotice = null;
     // 화면이 조합을 말할 때 쓰는 사람 표기 — 설정을 바꾼 사람에게 기본값을 보여주면 거짓말이다
     const hotkeyLabel = platform.hotkeyLabel(ctx.hotkey ?? platform.defaultHotkey);
-    const base = { pending: ctx.pending, notice, hotkeyLabel };
+    // 퀵캡처 Tab이 남긴 "이 탭으로 열어라". 한 번 실어 보내면 비운다 — 다음 새로고침마다
+    // 인박스로 튀면 그게 더 성가시다.
+    const openTab = ctx.openTab ?? null;
+    ctx.openTab = null;
+    const base = { pending: ctx.pending, notice, hotkeyLabel, openTab };
     const st = ctx.store.status();
     if (!st.ok) return { ...base, online: false, notice: st.notice };
     // WR-03: st.ok가 true인 뒤에도 getViewState() 실행 중 SQLite 오류(디스크 I/O 등)가 날 수
@@ -290,11 +294,14 @@ export function registerIpc(ctx) {
     BrowserWindow.fromWebContents(e.sender)?.hide();
   });
 
-  // 퀵캡처에서 Tab — 캡처를 접고 오늘 뷰를 연다.
-  // 방금 던진 것을 정리하러 온 길이라 인박스에 쌓인 게 있으면 그 탭부터 보여준다.
+  // 퀵캡처에서 Tab — 캡처를 접고 오늘 뷰를 **인박스 탭으로** 연다. 방금 던진 것을 정리하러 온 길이다.
+  //
+  // 어느 탭으로 열지는 push하지 않고 상태에 실어 둔다(openTab). 창을 지금 만드는 중이면
+  // 렌더러에 리스너가 아직 없어 push는 조용히 사라진다 — 그래서 첫 Tab이 늘 오늘 탭으로
+  // 열렸다. 렌더러는 어차피 첫 로드에서 getState를 부르므로 거기서 읽어 가면 시점과 무관하다.
   ipcMain.on('app:open', (e) => {
     BrowserWindow.fromWebContents(e.sender)?.hide();
-    ctx.showToday();
-    ctx.todayWin?.webContents.send('today:fromCapture');
+    ctx.openTab = 'inbox';
+    ctx.showToday(); // 이미 열려 있으면 today:refresh를 보내고, 그 refresh가 openTab을 읽는다
   });
 }

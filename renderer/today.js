@@ -293,7 +293,7 @@ const KEYMAP = [
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
   ['완료 기록', [['←→', '7일·30일·전체'], ['/', '검색'], ['Esc', '뒤로']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
-  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '되돌리기']]],
+  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 것 골라 되돌리기']]],
   ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json']]],
   ['퀵캡처', [['{hotkey}', '열기·닫기'], ['Enter', '저장'], ['Tab', '오늘 뷰']]],
 ];
@@ -716,7 +716,7 @@ function renderFooter() {
     add('N', '추가');
     add('E', '이름');
     add('X', '삭제');
-    add('U', '되돌리기');
+    add('U', '지운 것 되돌리기');
   } else if (tab === 'inbox') {
     add('1~9', '프로젝트');
     add('W', '대기로');
@@ -757,6 +757,13 @@ async function refresh() {
   if (firstLoad && state?.online) {
     firstLoad = false;
     if (state.inbox?.length) tab = 'inbox';
+  }
+  // 퀵캡처에서 Tab으로 건너왔다 — 방금 던진 것을 정리하러 온 길이다. 인박스에 쌓인 게 있으면
+  // 거기로, 비어 있으면(저장이 실패했거나 던진 게 없으면) 정리할 것이 없으니 오늘 탭으로.
+  if (state?.openTab === 'inbox' && view === 'list') {
+    tab = state.online && state.inbox?.length ? 'inbox' : 'today';
+    sel = 0;
+    resetScroll = true;
   }
   render();
 }
@@ -801,6 +808,31 @@ function promptText(label, initial = '') {
 }
 
 // 프로젝트 순서 이동 — 선택 표시도 함께 따라간다
+// 지운 프로젝트를 골라서 되돌린다. 프로젝트 탭의 U는 "마지막 조작 취소"가 아니라 이것이다 —
+// 지운 것은 화면에서 사라지므로 어느 것을 되돌릴지 사용자가 볼 자리가 여기밖에 없고,
+// 재시작 뒤에는 U 스택이 비어 있어도 store의 deletedProjects는 남아 있다.
+//
+// 이번 실행에서 지운 것이면 U 스택에 그때 인박스로 보낸 항목 id가 있어 함께 데려온다.
+// 재시작 뒤라면 그 목록이 없다 — 항목은 인박스에 그대로 두고 프로젝트만 되살린다(사용자가
+// 그 사이 다른 데로 옮겼을 수도 있는 것을 되돌리기가 뒤집지 않는다).
+async function restoreProjectPick() {
+  const gone = state?.deletedProjects ?? [];
+  if (!gone.length) return toast('되돌릴 프로젝트 없음');
+  const lines = gone.slice(0, 9).map((g, i) => `${i + 1} ${g.name}`).join(' · ');
+  const raw = await promptText(`되돌릴 프로젝트 번호 (최근 순): ${lines}`, '1');
+  if (raw === null) return;
+  const n = Number(raw);
+  const pick = gone[n - 1];
+  if (!pick) return toast('그 번호의 프로젝트가 없습니다');
+  const i = undoStack.findLastIndex((u) => u.kind === 'projectDelete' && u.id === pick.id);
+  const itemIds = i >= 0 ? undoStack[i].itemIds : [];
+  if (i >= 0) undoStack.splice(i, 1);
+  const res = await window.whenwork.projectRestore(pick.id, itemIds);
+  if (!res.ok) return toast('되돌리기 실패');
+  toast(`되돌림 — "${clip(pick.name)}"${itemIds.length ? ` · 할 일 ${itemIds.length}건도 함께` : ''}`);
+  return refresh();
+}
+
 async function moveProject(dir) {
   const p = currentList()[sel];
   if (!p) return;
@@ -1106,6 +1138,9 @@ document.addEventListener('keydown', async (e) => {
         }
         return;
       }
+      case 'u':
+      case 'U':
+        return restoreProjectPick();
       case 'x':
       case 'X': {
         if (!p) return;
@@ -1246,11 +1281,5 @@ setInterval(() => {
 // 백그라운드로 만들던 카드가 완성됐다 — 그 카드를 열어둔 채 스켈레톤을 보고 있었으면 채워준다.
 // 열람 수(KPI)는 늘리지 않는다(log=false).
 window.whenwork.onRefresh(refresh);
-// 퀵캡처에서 Tab으로 건너왔다 — 방금 던진 것을 정리하러 온 길이다
-window.whenwork.onFromCapture(async () => {
-  await refresh();
-  if (view !== 'list') return;
-  switchTab(state?.online && state.inbox?.length ? 'inbox' : 'today');
-});
 // 트레이에서 리뷰를 만들면 그 탭을 바로 열어준다
 refresh();

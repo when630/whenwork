@@ -893,9 +893,12 @@ function renderSettings() {
   });
 
   const dbSec = el('div', 'set-foot');
-  dbSec.append(el('div', 'sec-h', 'DB — settings.json의 db로 바꾸고 재시작'));
+  dbSec.append(el('div', 'sec-h', '저장소'));
+  // 01-05: PostgreSQL 접속 정보 대신 저장소 파일 위치와 상태 — 사용자 자신의 데이터
+  // 파일 위치라 화면에 그대로 드러내도 된다(오류 안내에는 절대 경로를 넣지 않는다는
+  // 규칙과는 별개, 01-02).
   dbSec.append(
-    el('div', 'ctx', `${cfg.db.host}:${cfg.db.port}/${cfg.db.database} — ${cfg.db.online ? '연결됨' : '대기 중'}`)
+    el('div', 'ctx', `${cfg.store.file} — ${cfg.store.ok ? '정상' : (cfg.store.notice ?? '대기 중')}`)
   );
   const backup = el('div', 'rv-file');
   backup.append(

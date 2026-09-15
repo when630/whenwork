@@ -378,15 +378,24 @@ export function bootstrap() {
 
   ctx.queue = createQueue(path.join(app.getPath('userData'), 'queue.jsonl'));
   ctx.settings = createSettings(path.join(app.getPath('userData'), 'settings.json'));
-  // DB 접속은 로컬 도커가 기본이지만 settings.json의 `db`로 덮어쓸 수 있다 (바꾸면 재시작)
-  const dbConfig = ctx.settings.get('db') ?? {};
-  ctx.dbConfig = dbConfig;
-  ctx.db = createDb(dbConfig);
+  // 01-05 전환 기간: main/jobs.mjs의 남은 함수(Task 2 이전)가 아직 이 저장소를 부른다.
+  // settings.json의 `db` 접속 설정은 더 이상 읽지 않는다 — main/db.mjs가 사라지면(01-06)
+  // 아무도 읽지 않을 죽은 설정이었다(RESEARCH Runtime State Inventory).
+  ctx.db = createDb();
 
   // 새 저장소(D-14) — settings.json·queue.jsonl 옆의 store.sqlite 한 파일이다. 파일 이름에
-  // 앱 이름을 넣지 않아 Phase 5 개명이 파일명을 건드리지 않는다. ctx.db는 아직 그대로
-  // 둔다 — 전환 기간에는 capture:save/today:getState만 새 저장소를 쓴다(D-05).
+  // 앱 이름을 넣지 않아 Phase 5 개명이 파일명을 건드리지 않는다. ctx.db는 01-05 Task 2까지만
+  // main/jobs.mjs의 남은 배경 작업이 쓰고, 그 뒤로는 아무도 부르지 않는다(01-06이 지운다).
   ctx.store = createStore(path.join(app.getPath('userData'), 'store.sqlite'));
+
+  // 스모크는 매번 빈 저장소로 시작한다(의도된 "빈 첫 실행" 경로, D-05). 예전에는
+  // capture:projects가 개인용 PostgreSQL의 실제 프로젝트 데이터에 기대어 약어(#gw) 인식을
+  // 검증했지만, 이제 그 데이터가 없는 것이 정상이다 — 검증용 프로젝트 하나를 직접 심어
+  // CAPTURE_PROBE가 외부 데이터 없이도 같은 것을 확인하게 한다.
+  if (SMOKE) {
+    const seedId = ctx.store.createProject('스모크프로젝트');
+    if (seedId) ctx.store.updateProject(seedId, { abbr: 'gw' });
+  }
 
   // ipcMain.handle/.on 등록은 원래도 모듈 로드 시점(동기)이었다 — app.whenReady보다 먼저,
   // ctx를 만든 직후 등록한다. 핸들러 본문의 ctx.jobs.* 호출은 실제 IPC가 올 때(항상
@@ -511,10 +520,10 @@ export function bootstrap() {
 
   // 퀵캡처가 약어 목록을 알아야 "#gw"가 어느 프로젝트인지 **그 자리에서** 알려줄 수 있다.
   // 약어를 타이핑하는 곳은 이 창뿐인데 정작 확인할 화면(번호 띠·프로젝트 탭)은 그때 볼 수 없었다.
-  // DB가 꺼져 있으면 마지막 목록으로 답한다 — 캡처 경로에 DB를 끌어들이지 않는다(D1).
+  // 저장소가 꺼져 있으면 마지막 목록으로 답한다 — 캡처 경로에 저장소 실패를 끌어들이지 않는다(D1).
   async function refreshAbbrHints() {
     try {
-      const rows = await ctx.db.getProjects();
+      const rows = ctx.store.getProjects();
       ctx.abbrHints = rows.filter((p) => p.abbr).map((p) => ({ abbr: p.abbr, name: p.name }));
     } catch {
       // 못 읽으면 이전 목록을 그대로 쓴다

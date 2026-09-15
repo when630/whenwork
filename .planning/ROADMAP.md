@@ -32,7 +32,7 @@ WHENNOTE(구 WHENWORK)는 1인 개발자 전용으로 돌아가던 트레이 할
   4. 앱을 업데이트해도 사용자 개입 없이 저장소 스키마가 최신 버전으로 자동 이행된다
   5. 새 저장소 스키마에는 제거 대상 테이블(activity, issue, resume_card, repo_state, cal_event, review)이 처음부터 만들어지지 않는다
 
-**Plans**: 1/7 plans executed (6 waves)
+**Plans**: 2/7 plans executed (6 waves)
 
 Plans:
 **Wave 1**
@@ -41,7 +41,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — [tracer] main/store.mjs 개설 + 캡처→오늘 뷰 한 줄기 배선, 손상·상위버전·이행 전 백업
+- [x] 01-02-PLAN.md — [tracer] main/store.mjs 개설 + 캡처→오늘 뷰 한 줄기 배선, 손상·상위버전·이행 전 백업
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -138,7 +138,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. 내장 저장소 전환 | 1/7 | In Progress|  |
+| 1. 내장 저장소 전환 | 2/7 | In Progress|  |
 | 2. 레거시 기능 제거 | 0/TBD | Not started | - |
 | 3. 내보내기·가져오기·이전 | 0/TBD | Not started | - |
 | 4. 첫 실행·플랫폼 대응 | 0/TBD | Not started | - |

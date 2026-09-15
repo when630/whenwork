@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: 내장 저장소 전환
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-09-14T08:41:47.643Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-09-15T00:12:35.729Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 01 execution started
-state_head: 07fdfd1ef7a1a285b2c759503f490d7a464557cd
+state_head: 3e6c15d6e52baec12896a0e0a667ac608f27c16c
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-14)
 ## Current Position
 
 Phase: 01 (내장 저장소 전환) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-09-14 — Phase 01 execution started
 
@@ -59,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P01 | 54 min | 3 tasks | 4 files |
+| Phase 01 P02 | 12 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Recent decisions affecting current work:
 - [Phase 01]: main/index.mjs 1479줄을 lifecycle/jobs/ipc 3파일로 D-08 그대로 분할 — 저장소 교체(01-02)보다 먼저, 별도 커밋으로
 - [Phase 01]: index.mjs가 아직 옮기지 않은 코드가 lifecycle.mjs/jobs.mjs 함수를 불러야 할 때는 ctx 필드로 다리를 놓고 다음 태스크에서 정리 — 태스크마다 npm test/smoke로 분할 전과 동일함을 확인
 - [Phase 01]: reviewing/generatingCards/lastCalendarError는 여러 파일이 함께 읽고 써야 해서 jobs.mjs 클로저 대신 ctx 필드로 둠
+- [Phase 01]: 01-02: v1 스키마 lean 채택 — 인덱스 최소, 외래키 강제 끔, event.id 정수 autoincrement — PG 스키마와 같은 보장 수준, Phase 3 이전 스크립트가 삽입 순서를 신경 쓰지 않아도 됨, 프로젝트는 archive만 하고 삭제 않는 설계에서 외래키 강제 이득 작음
+- [Phase 01]: 01-02: open()의 손상/newer/그 외 오류 판정을 하나의 경계로 통합해 되돌리기 확인이 실제로 유효하도록 재구성 — construction 실패를 무조건 non-corrupt로 하드코딩하면 잠김 테스트가 isCorruptError를 거치지 않아 되돌리기 확인이 무의미해짐
 
 ### Pending Todos
 
@@ -97,6 +100,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-14T08:41:47.629Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-09-15T00:12:35.713Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None

@@ -12,7 +12,7 @@
 - [ ] **STOR-01**: 앱은 외부 DB·컨테이너 없이 앱 데이터 폴더 안의 내장 저장소(단일 파일)에 프로젝트·항목·이벤트를 저장한다
 - [ ] **STOR-02**: 캡처는 저장소 상태와 무관하게 절대 실패하지 않는다. 저장소 쓰기가 실패하면 로컬 큐 폴백에 남고 다음 실행 시 자동 반영된다
 - [ ] **STOR-03**: 캡처 직후 앱을 강제 종료해도 그 캡처는 유실되지 않는다. 이를 재현하는 자동 테스트가 있다
-- [ ] **STOR-04**: 저장소 스키마에 버전이 있고, 앱 업데이트 시 사용자 개입 없이 자동 마이그레이션된다
+- [x] **STOR-04**: 저장소 스키마에 버전이 있고, 앱 업데이트 시 사용자 개입 없이 자동 마이그레이션된다
 - [ ] **STOR-05**: 저장소는 제거되는 기능의 테이블(activity, issue, resume_card, repo_state, cal_event, review)을 만들지 않는다
 
 ### 내보내기·가져오기·이전 (DATA)
@@ -100,7 +100,7 @@
 | STOR-01 | Phase 1 | Pending |
 | STOR-02 | Phase 1 | Pending |
 | STOR-03 | Phase 1 | Pending |
-| STOR-04 | Phase 1 | Pending |
+| STOR-04 | Phase 1 | Complete |
 | STOR-05 | Phase 1 | Pending |
 | DATA-01 | Phase 3 | Pending |
 | DATA-02 | Phase 3 | Pending |
@@ -130,6 +130,7 @@
 | DONE-01 | Phase 5 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 31 total
 - Mapped to phases: 31
 - Unmapped: 0 ✓

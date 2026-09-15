@@ -254,6 +254,41 @@ test('새로 만든 빈 DB(v0에서 시작)는 백업 파일을 만들지 않는
   store.close();
 });
 
+// WR-01: 재검토 REVIEW.md가 WR-02(이행 전 백업이 WAL 체크포인트를 하는지)에 전용
+// 회귀 테스트가 없다고 지적했다 — store1의 연결을 열어 둔 채(닫으면 SQLite가 WAL 모드의
+// 마지막 연결 종료 시 자동으로 체크포인트해 버려 검증 의미가 없어진다) 커밋된 캡처를
+// -wal에만 남기고, 두 번째 연결(store2)이 다음 마이그레이션을 트리거하게 만들어 이행 전
+// 백업이 그 캡처를 포함하는지 직접 확인한다.
+test('WAL에만 있고 아직 체크포인트되지 않은 캡처도 이행 전 백업에 포함된다 (WR-02 회귀)', () => {
+  const file = tmpFile();
+  const store1 = createStore(file); // v1까지 정상적으로 마이그레이션
+  store1.insertCaptures([
+    { id: 'id-wal-only', title: 'WAL에만 있는 캡처', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  // store1을 닫지 않는다 — 지금 커밋은 -wal에만 있고 메인 파일에는 아직 합쳐지지 않았다.
+
+  MIGRATIONS.push(() => {}); // 이 테스트 안에서만 다음 버전을 흉내낸다(D-12: 배포된 함수는 고치지 않는다)
+  let store2;
+  try {
+    store2 = createStore(file); // current=1 < MIGRATIONS.length=2 → backupBeforeMigrate 트리거
+    assert.equal(store2.status().ok, true);
+    const backupDir = path.join(path.dirname(file), 'backups');
+    const backups = fs.existsSync(backupDir) ? fs.readdirSync(backupDir) : [];
+    const backupFile = backups.find((f) => /^store-v1-\d{8}\.sqlite$/.test(f));
+    assert.ok(backupFile, '백업 파일이 있어야 한다: ' + backups.join(','));
+
+    const raw = new DatabaseSync(path.join(backupDir, backupFile));
+    const row = raw.prepare('SELECT title FROM item WHERE id = ?').get('id-wal-only');
+    raw.close();
+    assert.ok(row, 'WAL에만 있던 캡처가 이행 전 백업에도 있어야 한다 — 체크포인트 없이 복사했다면 빠진다');
+    assert.equal(row.title, 'WAL에만 있는 캡처');
+  } finally {
+    MIGRATIONS.pop();
+    if (store2) store2.close();
+    store1.close();
+  }
+});
+
 test('백업 폴더를 만들 수 없어도 마이그레이션은 끝까지 진행된다', () => {
   const file = tmpFile();
   let store = createStore(file); // v1까지

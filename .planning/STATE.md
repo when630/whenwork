@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: 내장 저장소 전환
 status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-09-15T01:11:12.119Z"
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-09-15T01:21:34.660Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 01 execution started
-state_head: a1b15d5b4ce40343f2ccf4d3b3975b4aecc96b1b
+state_head: 920821aa017c0ed422116e3b56853d772e8d4d76
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-14)
 ## Current Position
 
 Phase: 01 (내장 저장소 전환) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-09-14 — Phase 01 execution started
 
@@ -63,6 +63,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P03 | 12min | 3 tasks | 7 files |
 | Phase 01 P04 | 3min | 2 tasks | 2 files |
 | Phase 01 P05 | 17min | 2 tasks | 4 files |
+| Phase 01 P01-06 | 7min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,8 @@ Recent decisions affecting current work:
 - [Phase 01]: D2: 레거시 IPC 채널(issue/resume/review/calendar/backup/inbox 등)은 삭제 대신 D-06 무해 스텁으로 전환 — 저장소·파일·프로세스에 아무것도 쓰지 않음
 - [Phase 01]: D3: main/jobs.mjs에서 collectAll·backupNow·makeWeeklyReview·resumePayload·maybeSuggestDone 등 제거 대상 배경 작업과 타이머를 전량 삭제(471→98줄), replayQueueOnce·maybeBrief·purgeOnce만 남김
 - [Phase 01]: D4: main/ 어디에서도 ctx.db·main/db.mjs를 부르지 않게 됨 — main/db.mjs는 이제 아무도 부르지 않는 죽은 파일(삭제는 01-06)
+- [Phase 01]: main/db.mjs·main/backup.mjs·test/backup.test.mjs 삭제, pg를 devDependencies로 격하(D-05/D-07/D-09) — 두 저장소가 공존하는 기간을 두지 않는다는 D-05 one-way 결정을 실행. STOR-05 가드는 이미 test/store.test.mjs로 이관되어 있어 안전하게 삭제. electron-builder는 devDependencies를 패키징하지 않아 pg가 설치본에 실리지 않음
+- [Phase 01]: v-personal 태그를 두 지점(both)에 나눠 생성 — v-personal(98c17e3, 페이즈 시작 직전)과 v-personal-lastmix(d9416cc, 삭제 직전 HEAD) — 사용자 결정: 돌아갈 지점과 비교할 지점을 분리해 둘 다 잃지 않는다. Phase 5 공개 리포 분리 때 무엇을 남길지 한 번 정한다
 
 ### Pending Todos
 
@@ -112,6 +115,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-15T01:11:12.102Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-09-15T01:21:12.618Z
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None

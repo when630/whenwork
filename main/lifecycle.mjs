@@ -383,7 +383,14 @@ export function bootstrap() {
   // 덤으로 "설정·큐가 빈 첫 실행" 경로를 검증하게 된다.
   if (SMOKE) app.setPath('userData', SMOKE_DATA || path.join(app.getPath('temp'), 'whenwork-smoke'));
 
-  if (!SMOKE && !app.requestSingleInstanceLock()) app.quit();
+  // WR-04: app.quit()은 비동기 종료 요청일 뿐 실행을 멈추지 않는다 — return 없이 두면
+  // 락을 얻지 못한 두 번째 인스턴스도 아래 초기화를 계속 진행해 같은 store.sqlite에
+  // 두 번째 핸들을 열고, quit 처리가 끝나기 전에 whenReady가 해소되면 트레이·창까지
+  // 중복 생성한다. 여기서 멈춰 트레이·저장소·IPC를 만들지 않는다.
+  if (!SMOKE && !app.requestSingleInstanceLock()) {
+    app.quit();
+    return ctx;
+  }
 
   ctx.queue = createQueue(path.join(app.getPath('userData'), 'queue.jsonl'));
   ctx.settings = createSettings(path.join(app.getPath('userData'), 'settings.json'));

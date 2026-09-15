@@ -307,17 +307,28 @@ export function createStore(file) {
     let inserted = 0;
     withTransaction(db, () => {
       for (const e of entries) {
-        let projectId = null;
-        if (e.abbr) {
-          const row = findAbbr.get(e.abbr);
-          projectId = row?.id ?? null;
+        // WR-06: 파일 안 항목 하나가 바인딩 오류 등으로 예외를 내도 이 항목만 건너뛴다.
+        // 개별 INSERT 예외를 여기서 삼키지 않으면 withTransaction 전체가 ROLLBACK되어,
+        // 이 파일의 멀쩡한 항목까지 반영되지 않은 채로 replayPending이 던지고, break가
+        // 그 뒤(시간상 더 이른) 대기 파일까지 이번 기동에서 건드리지 않게 된다 — 손상된
+        // 항목 하나가 큐 전체를 영구히 막는 단일 장애점이 된다. 저장소 자체가 열리지 않는
+        // 등 실제 반영 불가 상태(db.exec 실패 등)는 여전히 위로 던져 replayPending이
+        // 파일을 보존하고 재시도하게 둔다 — 여기서 잡는 건 항목 단위 손상뿐이다.
+        try {
+          let projectId = null;
+          if (e.abbr) {
+            const row = findAbbr.get(e.abbr);
+            projectId = row?.id ?? null;
+          }
+          // 약어가 어느 프로젝트도 아니면(오타 등) 원문을 그대로 되살린다 — 조용히 떼어내면
+          // 인박스에서 "왜 여기 있지"를 풀 단서가 사라진다. raw가 없는 옛 항목은 뒤에 붙인다.
+          const title = e.abbr && !projectId ? (e.raw ?? `${e.title} #${e.abbr}`) : e.title;
+          const context = e.context != null ? JSON.stringify(e.context) : null;
+          const result = insert.run(e.id, projectId, projectId ? 'todo' : 'inbox', title, e.captured_at, context);
+          if (result.changes) inserted += 1;
+        } catch (err) {
+          console.error('insertCaptures: 항목 하나를 건너뛴다(손상 의심)', e?.id, err);
         }
-        // 약어가 어느 프로젝트도 아니면(오타 등) 원문을 그대로 되살린다 — 조용히 떼어내면
-        // 인박스에서 "왜 여기 있지"를 풀 단서가 사라진다. raw가 없는 옛 항목은 뒤에 붙인다.
-        const title = e.abbr && !projectId ? (e.raw ?? `${e.title} #${e.abbr}`) : e.title;
-        const context = e.context != null ? JSON.stringify(e.context) : null;
-        const result = insert.run(e.id, projectId, projectId ? 'todo' : 'inbox', title, e.captured_at, context);
-        if (result.changes) inserted += 1;
       }
     });
     return { inserted };

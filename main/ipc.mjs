@@ -168,7 +168,14 @@ export function registerIpc(ctx) {
     const base = { pending: ctx.pending, issues: [], repoStates: [], events: [] };
     const st = ctx.store.status();
     if (!st.ok) return { ...base, online: false, notice: st.notice };
-    return { ...base, online: true, notice: st.notice, ...ctx.store.getViewState() };
+    // WR-03: st.ok가 true인 뒤에도 getViewState() 실행 중 SQLite 오류(디스크 I/O 등)가 날 수
+    // 있다 — 같은 파일의 history:get·itemOps처럼 try/catch로 감싸 렌더러의 처리되지 않은
+    // 프로미스 거부를 막는다.
+    try {
+      return { ...base, online: true, notice: st.notice, ...ctx.store.getViewState() };
+    } catch {
+      return { ...base, online: false, notice: '저장소 조회 중 오류가 있었습니다' };
+    }
   });
 
   ipcMain.handle('history:get', async (_e, days = 7) => {

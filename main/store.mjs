@@ -733,7 +733,10 @@ export function createStore(file) {
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     const dir = path.join(path.dirname(file), 'backups');
     fs.mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/..+$/, '');
+    // `.`을 이스케이프하지 않으면(/..+$/) 아무 문자에나 붙어 문자열 전체를 먹는다 —
+    // 실제로 그래서 이름이 `store-import-.sqlite`로 나왔고, 가져오기를 두 번 하면
+    // 두 번째가 첫 번째 백업을 덮어써 되돌릴 자리가 사라진다.
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
     const dest = path.join(dir, `store-${reason}-${stamp}.sqlite`);
     fs.copyFileSync(file, dest);
     pruneOldBackups(dir);

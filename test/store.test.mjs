@@ -790,3 +790,14 @@ test('가져오기가 거부되면 기존 데이터는 그대로다', () => {
   assert.deepEqual(a.exportAll().item.map((i) => i.id), ['safe']);
   a.close();
 });
+
+test('가져오기 백업 이름에 시각이 들어간다 — 두 번 가져와도 앞 백업을 덮지 않는다', () => {
+  const store = createStore(tmpFile());
+  store.open();
+  store.insertCaptures([{ id: 'a', title: '첫 번째', captured_at: '2026-09-01T00:00:00.000Z' }]);
+  const empty = { app: 'whenwork', schema_version: store.schemaVersion(), project: [], item: [], event: [] };
+  const first = store.importAll(empty).backup;
+  // 정규식의 . 을 이스케이프하지 않으면 문자열 전체가 잘려 'store-import-.sqlite'가 된다
+  assert.match(path.basename(first), /^store-import-\d{8}T\d{6}\.sqlite$/, path.basename(first));
+  store.close();
+});

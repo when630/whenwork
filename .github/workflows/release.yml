@@ -24,8 +24,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # 단위 테스트만 — 강제종료 스모크는 실제 Electron 창이 필요해 아래 build 잡에서 돈다
-      - run: npm test
+      # 강제종료 스모크(test/capture-crash-smoke.test.mjs)는 실제 Electron을 띄우므로
+      # 헤드리스 리눅스에서는 디스플레이가 없어 죽는다. 이 테스트는 "캡처를 잃지 않는다"를
+      # 증명하는 자리라 CI에서 빼면 지키는 것이 없어진다 — 빼는 대신 xvfb를 씌운다.
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: xvfb-run -a npm test
+        env:
+          # CI 컨테이너에는 user namespace가 없어 Electron 샌드박스가 뜨지 않는다
+          ELECTRON_DISABLE_SANDBOX: 1
 
   build:
     needs: test

@@ -111,8 +111,12 @@ function pruneOldBackups(dir) {
 
 // user_version이 실제로 오를 때만, 그리고 v0에서 시작하는 게 아닐 때만 백업한다(D-16).
 // 복사 실패가 이행을 막지 않도록 전체를 삼킨다.
-function backupBeforeMigrate(file, fromVersion) {
+function backupBeforeMigrate(db, file, fromVersion) {
   try {
+    // WR-02: 강제종료 직후 재기동해 마이그레이션이 겹치면 -wal에 아직 체크포인트되지 않은
+    // 캡처가 남아 있을 수 있다. 본 파일만 복사하면 그 캡처가 빠진 오래된 백업이 만들어져
+    // 나중에 이 백업으로 되돌릴 때 최근 캡처를 다시 잃는다 — 복사 전에 -wal을 합친다.
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     const dir = path.join(path.dirname(file), 'backups');
     fs.mkdirSync(dir, { recursive: true });
     const dest = path.join(dir, `store-v${fromVersion}-${todayStamp()}.sqlite`);
@@ -129,7 +133,7 @@ function migrate(db, file) {
     throw new NewerSchemaError(current, MIGRATIONS.length);
   }
   if (current === MIGRATIONS.length) return; // 이미 최신 — 백업도 이행도 필요 없다
-  if (current > 0) backupBeforeMigrate(file, current);
+  if (current > 0) backupBeforeMigrate(db, file, current);
   for (let v = current; v < MIGRATIONS.length; v++) {
     withTransaction(db, () => {
       MIGRATIONS[v](db);

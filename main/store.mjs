@@ -290,7 +290,10 @@ export function createStore(file) {
   // 캡처 반영 — id가 멱등 키라 재시도돼도 중복이 없다(D-02). 약어가 활성 프로젝트를
   // 가리키면 todo로 붙고, 어느 프로젝트도 아니면 원문을 그대로 되살려 인박스에 남긴다.
   function insertCaptures(entries) {
-    if (!db || !state.ok) return { inserted: 0 };
+    // 호출부(queue.replayPending·ipc.saveCapture)는 "던지면 실패, 안 던지면 성공"을 전제한다 —
+    // 여기서 조용히 {inserted:0}을 돌려주면 반영되지 않은 큐 항목이 성공으로 오인되어
+    // 대기 파일이 지워지고 캡처가 영구 유실된다(CR-01).
+    if (!db || !state.ok) throw new Error('store not open');
     const findAbbr = db.prepare(`SELECT id FROM project WHERE lower(abbr) = lower(?) AND status = 'active'`);
     const insert = db.prepare(
       `INSERT OR IGNORE INTO item (id, project_id, kind, title, captured_at, source, context)

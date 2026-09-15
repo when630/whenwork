@@ -190,10 +190,16 @@ test('MIGRATIONS.length보다 높은 user_version의 DB는 열지 않고 newer�
   assert.ok(st.notice && st.notice.length > 0);
   assert.ok(!st.notice.includes(file));
   assert.ok(!st.notice.includes('Error'));
-  const result = store.insertCaptures([
-    { id: 'x', title: 'x', abbr: null, captured_at: new Date().toISOString(), context: null },
-  ]);
-  assert.equal(result.inserted, 0, '상위 버전 DB에는 아무것도 쓰이지 않아야 한다');
+  // CR-01: 저장소가 열리지 않은 상태에서는 던져야 한다 — 호출부(queue.replayPending·
+  // ipc.saveCapture)가 "던지면 실패"를 계약으로 삼고 있어, 조용히 {inserted:0}을 돌려주면
+  // 반영 실패가 성공으로 오인되어 대기 큐 파일이 지워지고 캡처가 영구 유실된다.
+  assert.throws(
+    () =>
+      store.insertCaptures([
+        { id: 'x', title: 'x', abbr: null, captured_at: new Date().toISOString(), context: null },
+      ]),
+    '상위 버전 DB에는 아무것도 쓰이지 않아야 하고, 호출부가 실패로 인식하도록 던져야 한다'
+  );
   const dirFiles = fs.readdirSync(path.dirname(file));
   assert.ok(!dirFiles.some((f) => f.includes('corrupt')), '상위 버전 파일은 격리 대상이 아니다(옮기지 않는다)');
   const check = new DatabaseSync(file);

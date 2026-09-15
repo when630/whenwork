@@ -44,7 +44,7 @@ export function scheduleJobs(ctx) {
     try {
       ctx.dbOnline = await ctx.db.online();
       if (!ctx.dbOnline) return;
-      await ctx.queue.drain((entries) => ctx.db.insertCaptures(entries));
+      ctx.queue.replayPending((entries) => ctx.db.insertCaptures(entries));
     } catch {
       ctx.dbOnline = false;
     }

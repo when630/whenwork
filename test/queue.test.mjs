@@ -36,13 +36,18 @@ test('replayPending은 큐 두 항목을 반영하고 큐 파일과 대기 파�
 });
 
 test('replayPending 중 consume이 throw하면 대기 파일이 남고 반환은 0이며, 다시 부르면 반영된다', () => {
-  const q = createQueue(tmpFile());
+  const file = tmpFile();
+  const q = createQueue(file);
   q.append({ id: 'a' });
   const first = q.replayPending(() => {
     throw new Error('store down');
   });
   assert.equal(first, 0);
-  assert.equal(q.count(), 1); // 대기 파일에 그대로 남아 readAll에서도 보인다
+  // queue.jsonl은 이미 대기 파일로 옮겨졌다 — 항목은 그 대기 파일에 그대로 남는다(삭제되지 않는다)
+  const leftoverPending = fs
+    .readdirSync(path.dirname(file))
+    .filter((f) => f.includes('.pending-'));
+  assert.equal(leftoverPending.length, 1);
 
   const seen = [];
   const second = q.replayPending((entries) => seen.push(...entries));
@@ -68,9 +73,11 @@ test('이전 실행이 남긴 대기 파일도 오래된 것부터 함께 반영
   const file = tmpFile();
   const dir = path.dirname(file);
   const base = path.basename(file, '.jsonl');
-  // 이전 실행이 반영 도중 죽어 남긴 대기 파일을 흉내낸다 — 이름의 시각이 오래된 것부터
+  // 이전 실행이 반영 도중 죽어 남긴 대기 파일을 흉내낸다 — 이름의 시각이 오래된 것부터.
+  // 둘 다 지금 이 순간(Date.now())보다 작아야 한다 — 실제 rename이 만드는 파일이
+  // 언제나 가장 최근(가장 큰 시각)이어야 정렬 검증이 뜻대로 된다.
   const olderPending = path.join(dir, `${base}.pending-1000000000000.jsonl`);
-  const newerPending = path.join(dir, `${base}.pending-2000000000000.jsonl`);
+  const newerPending = path.join(dir, `${base}.pending-1500000000000.jsonl`);
   fs.writeFileSync(olderPending, JSON.stringify({ id: 'old' }) + '\n', 'utf8');
   fs.writeFileSync(newerPending, JSON.stringify({ id: 'stale' }) + '\n', 'utf8');
 

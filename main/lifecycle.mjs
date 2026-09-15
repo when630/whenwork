@@ -5,7 +5,6 @@ import {
   Tray,
   Menu,
   nativeImage,
-  Notification,
   globalShortcut,
   screen,
 } from 'electron';
@@ -13,7 +12,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createQueue } from './queue.mjs';
-import { createDb } from './db.mjs';
 import { createStore } from './store.mjs';
 import { createSettings } from './settings.mjs';
 import { pickPosition } from './place.mjs';
@@ -344,11 +342,8 @@ const CAPTURE_PROBE = `(async () => {
 })()`;
 
 // ── D-08: index.mjs 분할의 진입점. ctx를 만들고 창·트레이·단축키·앱 수명을 등록한 뒤 돌려준다.
-//
-// Task 1(이 커밋) 시점에는 백그라운드 작업(flush·collectAll·maybeBrief 등)과 IPC 핸들러가
-// 아직 main/index.mjs에 남아 있다 — index.mjs가 bootstrap() 직후 그 함수들을 ctx에 붙여 준다
-// (파일 맨 아래 "Task 1 전용 연결 다리" 참고). Task 2/3에서 jobs.mjs·ipc.mjs로 옮겨가면
-// 이 다리는 scheduleJobs(ctx)/registerIpc(ctx) 호출로 대체된다.
+// 백그라운드 작업(main/jobs.mjs의 scheduleJobs)과 IPC 핸들러(main/ipc.mjs의 registerIpc)는
+// 이 함수가 ctx를 만든 직후 각각 호출해 등록한다 — 세 모듈은 서로 순환 참조하지 않는다.
 export function bootstrap() {
   const ctx = {
     tray: null,
@@ -357,7 +352,6 @@ export function bootstrap() {
     todayHiddenAt: 0, // 트레이 클릭 토글용 — 방금 접혔는지
     quitting: false,
     hotkeyOk: false,
-    dbOnline: false,
     // 이번 실행에서 즉시 반영에 실패한 캡처 수(D-03) — 큐 줄 수가 아니다. 시작 시 0,
     // replayQueueOnce 성공에서 0으로 되돌아가고, saveCapture의 재시도까지 실패할 때만 늘어난다.
     pending: 0,
@@ -378,14 +372,12 @@ export function bootstrap() {
 
   ctx.queue = createQueue(path.join(app.getPath('userData'), 'queue.jsonl'));
   ctx.settings = createSettings(path.join(app.getPath('userData'), 'settings.json'));
-  // 01-05 전환 기간: main/jobs.mjs의 남은 함수(Task 2 이전)가 아직 이 저장소를 부른다.
-  // settings.json의 `db` 접속 설정은 더 이상 읽지 않는다 — main/db.mjs가 사라지면(01-06)
-  // 아무도 읽지 않을 죽은 설정이었다(RESEARCH Runtime State Inventory).
-  ctx.db = createDb();
+  // settings.json의 `db`(PostgreSQL 접속) 설정은 더 이상 읽지 않는다 — main/db.mjs는
+  // 이제 아무도 부르지 않는 죽은 파일이다(D-05, main/ipc.mjs·main/jobs.mjs 모두 store만
+  // 쓴다). 파일 자체의 삭제는 01-06 소관이다.
 
   // 새 저장소(D-14) — settings.json·queue.jsonl 옆의 store.sqlite 한 파일이다. 파일 이름에
-  // 앱 이름을 넣지 않아 Phase 5 개명이 파일명을 건드리지 않는다. ctx.db는 01-05 Task 2까지만
-  // main/jobs.mjs의 남은 배경 작업이 쓰고, 그 뒤로는 아무도 부르지 않는다(01-06이 지운다).
+  // 앱 이름을 넣지 않아 Phase 5 개명이 파일명을 건드리지 않는다.
   ctx.store = createStore(path.join(app.getPath('userData'), 'store.sqlite'));
 
   // 스모크는 매번 빈 저장소로 시작한다(의도된 "빈 첫 실행" 경로, D-05). 예전에는
@@ -622,56 +614,17 @@ export function bootstrap() {
     if (!st.ok) tooltipBits.push(st.notice ?? '저장소 대기');
     if (ctx.pending > 0) tooltipBits.push(`대기 ${ctx.pending}건`);
     ctx.tray.setToolTip(`WHENWORK${tooltipBits.length ? ' — ' + tooltipBits.join(' · ') : ''}`);
-    const lastCollect = ctx.settings.get('lastCollect');
-    const lastBackup = ctx.settings.get('lastBackup');
-    const backupError = ctx.settings.get('lastBackupError');
-    const reviewError = ctx.settings.get('lastReviewError');
+    // 01-05: 수집·백업·주간 리뷰 항목과 그 상태 줄을 걷어냈다(D-06) — 관련 배경 작업이
+    // main/jobs.mjs에서 이미 사라져 눌러도 할 일이 없었다.
     ctx.tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: '오늘 뷰', click: toggleToday },
         { label: `퀵캡처 (${ctx.hotkeyOk ? 'Ctrl+Alt+Space' : '단축키 등록 실패!'})`, click: showCapture },
         { type: 'separator' },
         {
-          label: '주간 리뷰 초안 만들기',
-          click: async () => {
-            const res = await ctx.jobs.makeWeeklyReview(0, { notify: true });
-            if (res?.ok) {
-              showToday();
-              ctx.todayWin?.webContents.send('today:openReview');
-            }
-          },
-        },
-        { label: '지금 수집 (git · 이슈 · PR)', click: () => ctx.jobs.collectAll() },
-        {
-          label: '지금 백업',
-          click: async () => {
-            const res = await ctx.jobs.backupNow();
-            new Notification({
-              title: 'WHENWORK 백업',
-              body: res.ok ? `저장됨 — ${path.basename(res.file)}` : `실패 — ${res.error ?? '원인 불명'}`,
-            }).show();
-          },
-        },
-        { type: 'separator' },
-        {
           label: storeStatusLine(),
           enabled: false,
         },
-        {
-          label: lastCollect ? `마지막 수집 ${new Date(lastCollect).toLocaleString('ko-KR')}` : '수집 이력 없음',
-          enabled: false,
-        },
-        {
-          // 실패를 먼저 말한다 — 마지막 백업 시각만 보이면 그 뒤로 못 남긴 걸 알 수 없다
-          label: backupError
-            ? `백업 실패 — ${backupError}`
-            : lastBackup
-              ? `마지막 백업 ${new Date(lastBackup).toLocaleString('ko-KR')}`
-              : '백업 이력 없음',
-          enabled: false,
-        },
-        // 성공은 리뷰 탭에 결과물로 남는다 — 여기서는 못 만든 것만 말한다
-        ...(reviewError ? [{ label: `주간 리뷰 실패 — ${reviewError}`, enabled: false }] : []),
         { type: 'separator' },
         {
           label: '로그인 시 자동 시작',

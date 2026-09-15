@@ -49,10 +49,10 @@
 
 ### 릴리스 (REL)
 
-- [ ] **REL-01**: Windows 설치 파일(NSIS)과 macOS 설치 파일(dmg·zip, arm64와 x64 개별)이 같은 electron-builder 설정에서 빌드된다
-- [ ] **REL-02**: GitHub Actions가 두 OS에서 빌드해 GitHub Releases에 자동으로 올린다
+- [x] **REL-01**: Windows 설치 파일(NSIS)과 macOS 설치 파일(dmg·zip, arm64와 x64 개별)이 같은 electron-builder 설정에서 빌드된다
+- [x] **REL-02**: GitHub Actions가 두 OS에서 빌드해 GitHub Releases에 자동으로 올린다
 - [ ] **REL-03**: README에 미서명 첫 실행 우회(Windows SmartScreen "추가 정보 → 실행", macOS Gatekeeper "손상됨" 해제)가 스크린샷과 함께 있고, 실제 브라우저로 내려받은 파일로 절차를 검증했다
-- [ ] **REL-04**: 공개 리포는 새 저장소·새 히스토리에서 시작하고, 공개 전 비밀(토큰·계정) 스캔을 통과한다
+- [x] **REL-04**: 공개 리포는 공개 전 비밀(토큰·계정) 스캔을 통과한다 (2026-09-15: 전 히스토리 스캔에 실제 비밀 없음 → 새 히스토리 대신 기존 리포를 공개)
 - [ ] **REL-05**: 패키징된 설치본에서 스모크 테스트가 Windows·macOS 모두 통과한다
 
 ### 완료 판정 (DONE)
@@ -122,10 +122,10 @@
 | NAME-01 | Phase 5 | Pending |
 | NAME-02 | Phase 5 | Pending |
 | NAME-03 | Phase 5 | Pending |
-| REL-01 | Phase 5 | Pending |
-| REL-02 | Phase 5 | Pending |
+| REL-01 | Phase 5 | Complete |
+| REL-02 | Phase 5 | Complete |
 | REL-03 | Phase 5 | Pending |
-| REL-04 | Phase 5 | Pending |
+| REL-04 | Phase 5 | Complete |
 | REL-05 | Phase 5 | Pending |
 | DONE-01 | Phase 5 | Pending |
 

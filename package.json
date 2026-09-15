@@ -11,12 +11,11 @@
     "smoke": "electron . --smoke",
     "test": "node --test \"test/**/*.test.mjs\"",
     "smoke:crash": "node --test test/capture-crash-smoke.test.mjs",
-    "db": "docker compose up -d",
     "icons": "node tools/make-icon.mjs",
-    "build": "electron-builder --win",
+    "build": "electron-builder --win --publish never",
     "postinstall": "node tools/make-icon.mjs",
-    "build:mac": "electron-builder --mac",
-    "build:all": "electron-builder --win --mac"
+    "build:mac": "electron-builder --mac --publish never",
+    "build:all": "electron-builder --win --mac --publish never"
   },
   "devDependencies": {
     "electron": "^43.2.0",

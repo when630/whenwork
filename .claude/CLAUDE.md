@@ -366,7 +366,7 @@ WHENWORK는 생각난 할 일을 글로벌 단축키 한 번으로 던져 두고
 - Project abbrs are alphanumeric + underscore
 - Due dates parsed via `parseDue()` with natural language support
 - Email parsed from git config (sender filter in collect)
-- PostgreSQL: host/port/database/user/password in settings.json (or docker-compose for dev)
+- PostgreSQL: 앱에서 제거됨. `tools/migrate-pg.mjs`(1회 이전 도구)만 PG* 환경변수로 접속한다
 - Claude: `claude` CLI must be logged in locally (verified at startup if claude -p called)
 - GitHub/GitLab: gh/glab CLIs must be authenticated (errors caught; collection skips)
 - Google Calendar: Apps Script webhook URL stored in masked form (maskUrl)

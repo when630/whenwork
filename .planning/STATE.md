@@ -3,7 +3,7 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: 아이콘·릴리스
 status: blocked_on_human
-stopped_at: Phase 05 — 공개 리포 게시·macOS 실기기·일주일 도그푸딩은 사람이 해야 한다
+stopped_at: Phase 05 — 공개 리포·v0.2.0 릴리스 완료. README 스크린샷·macOS 실기기·일주일 도그푸딩은 사람이 해야 한다
 last_updated: "2026-09-15T04:34:59.619Z"
 last_activity: 2026-09-15
 last_activity_desc: Phase 03~05 진행 — 아이콘·듀얼 OS 빌드·릴리스 워크플로까지
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-14)
 
 Phase: 05 (아이콘·릴리스) — BLOCKED ON HUMAN
 Plan: 코드·설정 완료
-Status: 공개 리포 게시·macOS 실기기 검증·일주일 도그푸딩이 남았다
+Status: 리포 공개·v0.2.0 릴리스(양 OS) 완료. 릴리스 워크플로 이중 드래프트 수정, PG 잔재 제거(docker-compose·db 스크립트) 반영. README 스크린샷(REL-03)·macOS 실기기 검증·일주일 도그푸딩(DONE-01)이 남았다
 Last activity: 2026-09-15 — Phase 03~05
 
 Progress: [████████░░] 85%

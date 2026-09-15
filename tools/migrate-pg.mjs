@@ -7,7 +7,7 @@
 //   node tools/migrate-pg.mjs --out <store.sqlite 경로> [--dry-run]
 //
 // 접속 정보는 PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE 환경변수를 따른다 —
-// 기본값은 개인용 docker-compose와 같다. 옮기는 표는 project·item·event 셋뿐이다:
+// 기본값은 개인용 PostgreSQL(127.0.0.1:5433, whenwork/whenwork)이다. 옮기는 표는 project·item·event 셋뿐이다:
 // activity·issue·resume_card·repo_state·cal_event·review는 제거된 기능의 것이라
 // 새 스키마에 자리가 없다(STOR-05, D-09).
 //

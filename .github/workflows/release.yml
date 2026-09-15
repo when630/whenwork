@@ -68,12 +68,14 @@ jobs:
           # 리눅스가 아니라 필요 없지만, 러너가 바뀌어도 같은 명령이 돌도록 둔다
           ELECTRON_DISABLE_SANDBOX: 1
 
+      # 여기서는 만들기만 한다. 올리는 것은 아래 publish 잡 하나가 맡는다 —
+      # 빌드 스크립트의 --publish never가 없고 GH_TOKEN까지 있으면 electron-builder가
+      # 태그를 보고 스스로 드래프트 릴리스를 하나 더 만들어 태그마다 릴리스가 둘이 된다.
       - name: build
         run: npm run ${{ matrix.script }}
         env:
           # 미서명 배포 — 러너 키체인을 뒤지지 않게 못 박는다
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-artifact@v4
         with:

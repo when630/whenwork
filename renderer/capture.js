@@ -109,7 +109,14 @@ document.addEventListener('keydown', async (e) => {
   saving = true;
   const res = await window.whenwork.save(title);
   saving = false;
-  if (!res.ok) return;
+  if (!res.ok) {
+    // IN-02: saveCapture가 { ok: false }를 돌려주는 유일한 경로(parseCaptureToken이 빈
+    // 제목을 반환)는 앞의 !title 가드로 지금은 도달하기 어렵지만, 이론적으로 도달 가능한
+    // 분기가 조용히 아무것도 하지 않으면 사용자는 왜 저장이 안 됐는지 알 방법이 없다.
+    // 입력은 지우지 않는다 — 저장되지 않았으므로 다시 고쳐 보낼 수 있어야 한다.
+    showMsg('warn', '저장할 내용이 없습니다', 1500);
+    return;
+  }
 
   sessionCount++;
   input.value = ''; // 다음 입력을 바로 받는다 — 창은 그대로 열려 있다

@@ -109,6 +109,10 @@ test('캡처 직후 강제 종료해도 재기동 시 그 캡처가 오늘 뷰 �
         `--- p2 stdout ---\n${done.stdout}`
     );
   } finally {
+    // WR-05: waitForOutput이 타임아웃해 내부에서 이미 SIGKILL한 경로에서는, 여기서 곧바로
+    // rmSync를 부르면 Windows에서 자식이 아직 store.sqlite(-wal 포함) 핸들을 쥔 채 종료
+    // 처리 중일 수 있어 EBUSY/EPERM으로 삭제가 실패하거나 원래 실패 원인을 가리는 2차
+    // 예외가 난다. kill 후 실제 종료를 기다리고, 삭제도 재시도를 둔다.
     for (const child of [p1, p2]) {
       if (child && child.exitCode === null && child.signalCode === null) {
         try {
@@ -116,8 +120,9 @@ test('캡처 직후 강제 종료해도 재기동 시 그 캡처가 오늘 뷰 �
         } catch {
           // 이미 죽었으면 무시
         }
+        await waitForExit(child);
       }
     }
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

@@ -15,7 +15,7 @@ const SETTING_FIELDS = [
     key: 'hotkey',
     label: '퀵캡처 단축키',
     kind: 'hotkey',
-    hint: '예: Control+Alt+Space · Command+Shift+K — 바꾸면 그 자리에서 등록을 확인합니다',
+    hint: 'Enter를 누르고 원하는 조합을 그대로 누르세요 — 등록되는지 그 자리에서 확인합니다',
   },
   {
     key: 'notifyEnabled',
@@ -144,6 +144,12 @@ function projChip(pid, name) {
   return chip;
 }
 
+// 지금 등록된 퀵캡처 조합의 사람 표기. main이 platform.hotkeyLabel로 만들어 getState에 실어 준다 —
+// 화면 어디서든 조합을 말할 때는 이것만 쓴다. 글자로 박아 두면 바꾼 사람에게 거짓말이 된다.
+function hotkeyLabel() {
+  return state?.hotkeyLabel || 'Ctrl+Alt+Space';
+}
+
 function fmtDate(d = new Date()) {
   return `${d.getMonth() + 1}/${d.getDate()} (${'일월화수목금토'[d.getDay()]})`;
 }
@@ -176,11 +182,7 @@ function currentList() {
   // 설정은 DB와 무관하게 항상 보여준다 — DB가 꺼져 있을 때 오히려 봐야 하는 화면이다
   if (tab === 'settings') return SETTING_FIELDS;
   if (!state?.online) return [];
-  // 지운 것을 활성 뒤에 붙인다 — 재시작 뒤에는 U 스택이 비어 있어 여기가 유일한 되돌릴 문이다.
-  // 그리는 순서와 같아야 선택 인덱스(sel)가 실제 대상과 어긋나지 않는다.
-  if (tab === 'projects') {
-    return [...filtered(state.projects ?? []), ...filtered(state.deletedProjects ?? [])];
-  }
+  if (tab === 'projects') return filtered(state.projects ?? []);
   if (tab === 'today') return todayView().flatMap((g) => g.items);
   return filtered(state[tab] ?? []);
 }
@@ -291,9 +293,9 @@ const KEYMAP = [
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
   ['완료 기록', [['←→', '7일·30일·전체'], ['/', '검색'], ['Esc', '뒤로']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
-  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제·되돌리기']]],
+  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '되돌리기']]],
   ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json']]],
-  ['퀵캡처', [['Ctrl+Alt+Space', '열기·닫기'], ['#약어', '프로젝트 지정'], ['Tab', '오늘 뷰']]],
+  ['퀵캡처', [['{hotkey}', '열기·닫기'], ['Enter', '저장'], ['Tab', '오늘 뷰']]],
 ];
 
 let keysOpen = false;
@@ -306,7 +308,8 @@ function openKeys() {
     const ks = el('div', 'ks');
     for (const [key, label] of keys) {
       const s = el('span');
-      s.append(el('kbd', null, key), document.createTextNode(' ' + label));
+      // {hotkey}는 사용자가 설정한 조합으로 — 기본값을 박아 두면 바꾼 사람에게 거짓말이 된다
+      s.append(el('kbd', null, key === '{hotkey}' ? hotkeyLabel() : key), document.createTextNode(' ' + label));
       ks.append(s);
     }
     body.append(ks);
@@ -558,7 +561,7 @@ async function editSetting(f) {
     return loadSettings();
   }
   if (f.kind === 'hotkey') {
-    const accel = await promptText(`${f.label} — ${f.hint}`, cfg.values.hotkey ?? '');
+    const accel = await captureHotkey(cfg.values.hotkey ?? '');
     if (!accel) return;
     const res = await window.whenwork.hotkeySet(accel);
     if (!res.ok) return toast(res.error ?? '단축키를 등록하지 못했습니다', { holdMs: 5000 });
@@ -633,10 +636,14 @@ function renderBody() {
     } else {
       const hint = el('div');
       hint.append(document.createTextNode('생각나면 '));
-      ['Ctrl', 'Alt', 'Space'].forEach((k, i) => {
-        if (i) hint.append(document.createTextNode('+'));
-        hint.append(el('kbd', null, k));
-      });
+      // 사용자가 바꾼 조합을 그대로 보여준다. macOS 표기(⌃⌥Space)는 +가 없어 한 덩이로 온다.
+      hotkeyLabel()
+        .split('+')
+        .filter(Boolean)
+        .forEach((k, i) => {
+          if (i) hint.append(document.createTextNode('+'));
+          hint.append(el('kbd', null, k));
+        });
       hint.append(document.createTextNode(' 로 던져두기'));
       e.append(el('div', 'big', '◎'), el('div', null, '항목 없음'), hint);
     }
@@ -646,18 +653,9 @@ function renderBody() {
 
 
   if (tab === 'projects') {
-    const activeCount = filtered(state.projects ?? []).length;
     list.forEach((p, idx) => {
-      // 지운 구간이 시작되는 자리에 머리글을 한 번 세운다 — 어디로 갔는지 보여야 한다
-      if (idx === activeCount) {
-        const h = el('div', 'group-h');
-        h.append(el('span', 'chip', '삭제됨 — X로 되돌리기'));
-        body.append(h);
-      }
-      const deleted = idx >= activeCount;
-      const row = el('div', 'item' + (idx === sel ? ' selected' : '') + (deleted ? ' done' : ''));
-      // 1~9는 활성 프로젝트의 번호다 — 지운 것에는 붙이지 않는다
-      row.append(el('span', 'proj-num', !deleted && idx < 9 ? String(idx + 1) : ''));
+      const row = el('div', 'item' + (idx === sel ? ' selected' : ''));
+      row.append(el('span', 'proj-num', idx < 9 ? String(idx + 1) : ''));
       // 색점만. #약어를 걷어내기 전에는 여기 약어 알약이 섰고, 약어가 없는 프로젝트는
       // 빈 자리를 '—'로 채웠다 — 그 작대기가 약어처럼 읽혔다. 색은 1~9 번호와 짝을 이뤄
       // 다른 탭에서도 같은 프로젝트를 가리키므로 그대로 쓸모가 있다.
@@ -717,7 +715,8 @@ function renderFooter() {
   } else if (tab === 'projects') {
     add('N', '추가');
     add('E', '이름');
-    add('X', '삭제·되돌리기');
+    add('X', '삭제');
+    add('U', '되돌리기');
   } else if (tab === 'inbox') {
     add('1~9', '프로젝트');
     add('W', '대기로');
@@ -828,6 +827,98 @@ function toast(text, { spinner = false, holdMs = 2400 } = {}) {
   if (holdMs) toastTimer = setTimeout(() => node.classList.remove('show'), holdMs);
 }
 
+// ── 단축키 잡기 — 글자로 치는 대신 실제로 누른다
+//
+// "Control+Alt+Space"를 타자로 치라는 건 Electron 표기법을 외우라는 말이다. 여기서는 조합을
+// 누르면 그 자리에서 읽어 준다. 수식키만 누르고 있으면 미리보기만 바뀌고, 글자·숫자·기능키
+// 하나가 떨어지는 순간 확정된다. Esc는 취소, 수식키 없는 키 하나는 받지 않는다 — 전역
+// 단축키가 맨 글자 하나를 가로채면 그 글자를 다른 앱에서 칠 수 없게 된다.
+let hotkeyCapture = null; // { resolve, isMac }
+
+// KeyboardEvent.code → Electron 가속기 키 이름. 레이아웃에 흔들리지 않게 code를 쓴다
+// (key를 쓰면 한글 자판에서 'ㅁ' 같은 것이 온다).
+const CODE_TO_ACCEL = {
+  Space: 'Space', Enter: 'Return', NumpadEnter: 'Return', Tab: 'Tab', Backspace: 'Backspace',
+  Delete: 'Delete', Insert: 'Insert', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+  // 백틱은 `으로 쓴다 — 맨 백틱이 작은따옴표 안에 있으면 renderer-refs 가드의
+  // 리터럴 제거기가 템플릿 시작으로 읽어 그 뒤 함수 정의를 통째로 지운다
+  Minus: '-', Equal: '=', Comma: ',', Period: '.', Slash: '/', Semicolon: ';',
+  BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+};
+// 따옴표와 백틱은 문자 코드로 넣는다. 소스에 맨 문자로 쓰면 renderer-refs 가드의 리터럴
+// 제거기가 다른 문자열의 시작으로 읽어 그 뒤 함수 정의를 통째로 지운다 — 실제로 그래서
+// captureHotkey가 "정의되지 않은 함수"로 잡혔다. 가드도 순서대로 스캔하게 고쳤지만,
+// 편집 도구가 \u 이스케이프를 실제 문자로 풀어 쓰는 일도 있어 코드로 두는 쪽이 안전하다.
+CODE_TO_ACCEL.Backquote = String.fromCharCode(96);
+CODE_TO_ACCEL.Quote = String.fromCharCode(39);
+function accelKeyOf(e) {
+  const code = e.code || '';
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+  if (/^Numpad[0-9]$/.test(code)) return 'num' + code.slice(6);
+  return CODE_TO_ACCEL[code] ?? null;
+}
+function accelModsOf(e, isMac) {
+  const mods = [];
+  if (e.ctrlKey) mods.push('Control');
+  if (e.altKey) mods.push('Alt');
+  if (e.shiftKey) mods.push('Shift');
+  if (e.metaKey) mods.push(isMac ? 'Command' : 'Super');
+  return mods;
+}
+// 미리보기용 사람 표기 — main의 platform.hotkeyLabel과 같은 규칙을 화면에서 흉내낸다
+function accelLabel(parts, isMac) {
+  if (isMac) {
+    const m = { Control: '⌃', Alt: '⌥', Shift: '⇧', Command: '⌘' };
+    return parts.map((x) => m[x] ?? x).join('');
+  }
+  return parts.map((x) => (x === 'Control' ? 'Ctrl' : x === 'Super' ? 'Win' : x)).join('+');
+}
+
+function captureHotkey(current = '') {
+  return new Promise((resolve) => {
+    const isMac = cfg?.platform === 'darwin';
+    hotkeyCapture = { resolve, isMac };
+    setModal(true);
+    $('dlgLabel').textContent = `퀵캡처 단축키 — 원하는 조합을 지금 누르세요 (Esc 취소)`;
+    const input = $('dlgIn');
+    input.readOnly = true;
+    input.value = current ? `지금: ${accelLabel(current.split('+'), isMac)}` : '';
+    $('dlg').classList.add('show');
+    input.focus();
+  });
+}
+function finishHotkeyCapture(accel) {
+  const cap = hotkeyCapture;
+  hotkeyCapture = null;
+  const input = $('dlgIn');
+  input.readOnly = false;
+  input.value = '';
+  setModal(false);
+  $('dlg').classList.remove('show');
+  cap?.resolve(accel);
+}
+function onHotkeyCaptureKey(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.key === 'Escape') return finishHotkeyCapture(null);
+  const mods = accelModsOf(e, hotkeyCapture.isMac);
+  const key = accelKeyOf(e);
+  const input = $('dlgIn');
+  if (!key) {
+    // 수식키만 눌린 상태 — 여기까지 잡혔다고 보여 준다. 아무 것도 안 눌렸으면 안내로 돌아간다.
+    input.value = mods.length ? accelLabel(mods, hotkeyCapture.isMac) + ' + …' : '';
+    return;
+  }
+  if (!mods.length) {
+    input.value = `${accelLabel([key], hotkeyCapture.isMac)} — 수식키(Ctrl·Alt·Shift)를 함께 눌러 주세요`;
+    return;
+  }
+  finishHotkeyCapture([...mods, key].join('+'));
+}
+
 function closeDlg(commit) {
   const resolve = dlgResolve;
   dlgResolve = null;
@@ -846,6 +937,8 @@ $('searchIn').addEventListener('input', (e) => {
 
 document.addEventListener('keydown', async (e) => {
   // 다이얼로그 입력 중에는 그 입력만 받는다
+  if (hotkeyCapture) return onHotkeyCaptureKey(e);
+
   if (dlgResolve) {
     if (e.key === 'Enter') closeDlg(true);
     if (e.key === 'Escape') closeDlg(false);
@@ -1016,14 +1109,6 @@ document.addEventListener('keydown', async (e) => {
       case 'x':
       case 'X': {
         if (!p) return;
-        // 지운 것을 고르고 X를 누르면 되돌린다. 확인을 묻지 않는다 — 되돌리기는 잃는 것이
-        // 없고, 한 번 더 X를 누르면 다시 지워진다. 인박스로 갔던 항목은 U로만 따라온다
-        // (여기서는 그 목록이 없다 — 재시작 뒤라면 사용자가 이미 다른 데로 옮겼을 수도 있다).
-        if (p.status && p.status !== 'active') {
-          await window.whenwork.projectRestore(p.id, []);
-          toast(`"${clip(p.name)}" 되돌림`);
-          return refresh();
-        }
         // 항목이 있으면 무슨 일이 일어나는지 미리 말한다 — 삭제는 항목의 X와 같은 소프트 삭제라
         // 완료 기록은 그대로 남고, 아직 안 끝난 것만 인박스로 간다.
         const live = [...(state.today ?? []), ...(state.inbox ?? []), ...(state.waiting ?? [])].filter(

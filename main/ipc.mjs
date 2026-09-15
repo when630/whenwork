@@ -107,7 +107,9 @@ export function registerIpc(ctx) {
     // 한 번 실어 보내면 비운다 — 같은 말이 새로고침마다 다시 뜨면 그게 더 성가시다.
     const notice = ctx.pendingNotice;
     ctx.pendingNotice = null;
-    const base = { pending: ctx.pending, notice };
+    // 화면이 조합을 말할 때 쓰는 사람 표기 — 설정을 바꾼 사람에게 기본값을 보여주면 거짓말이다
+    const hotkeyLabel = platform.hotkeyLabel(ctx.hotkey ?? platform.defaultHotkey);
+    const base = { pending: ctx.pending, notice, hotkeyLabel };
     const st = ctx.store.status();
     if (!st.ok) return { ...base, online: false, notice: st.notice };
     // WR-03: st.ok가 true인 뒤에도 getViewState() 실행 중 SQLite 오류(디스크 I/O 등)가 날 수

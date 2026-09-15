@@ -68,7 +68,9 @@ export function saveCapture(ctx, title, context = null) {
     }
   }
   ctx.refreshTrayMenu();
-  return { ok: true, pending: ctx.pending };
+  // id는 01-07의 --inject-capture 주입 분기가 CAPTURE_INJECTED 뒤에 찍는 값이다 —
+  // 기존 호출부(capture:save/capture:followUp)는 이 필드를 그냥 무시한다.
+  return { ok: true, pending: ctx.pending, id: entry.id };
 }
 
 // ── D-08: index.mjs에 남아 있던 모든 ipcMain.handle/.on 등록. ctx를 받아 그 안의

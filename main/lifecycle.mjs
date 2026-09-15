@@ -18,7 +18,7 @@ import { pickPosition } from './place.mjs';
 import { foregroundTitle } from './context.mjs';
 import { guessVaultRoot } from './vault.mjs';
 import { scheduleJobs } from './jobs.mjs';
-import { registerIpc } from './ipc.mjs';
+import { registerIpc, saveCapture } from './ipc.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -27,6 +27,15 @@ const TODAY_W = 880; // 오늘 뷰 — 화면 중앙, 가로 넓게
 const TODAY_H = 680;
 const CAPTURE_H = 88; // 퀵캡처 — 한 줄 입력 + 힌트 푸터에 딱 맞는 높이
 const SMOKE = process.argv.includes('--smoke');
+
+// 01-07: 둘 다 --smoke와 함께일 때만 의미가 있다. 없으면 --smoke는 지금까지와 똑같이 동작한다
+// (REL-05가 의존하는 경로를 건드리지 않기 위해서다 — RESEARCH Open Question 2의 권고).
+function argValue(prefix) {
+  const hit = process.argv.find((a) => a.startsWith(prefix));
+  return hit ? hit.slice(prefix.length) : null;
+}
+const SMOKE_DATA = argValue('--smoke-data=');
+const INJECT_CAPTURE = argValue('--inject-capture=');
 
 // 스모크에서 렌더러 안에서 돌리는 점검. 탭을 한 바퀴 돌리고 검색·완료 기록까지 열어보므로
 // "특정 화면에서만 터지는" 오류도 앱을 눈으로 보지 않고 잡힌다.
@@ -297,6 +306,12 @@ const SMOKE_PROBE = `(async () => {
     view: !!window.VIEW,
     tabs: document.getElementById('tabs') ? document.getElementById('tabs').children.length : -1,
     body: document.getElementById('body') ? document.getElementById('body').children.length : -1,
+    // 01-07: 강제종료 스모크가 재기동 후 오늘 뷰 상태에서 주입한 캡처를 찾는 창.
+    // 마지막 단계(item-badges)가 state.today/state.waiting은 갈아끼우지만 inbox는 건드리지
+    // 않으므로 이 값은 여기까지 와도 여전히 진짜다. 옵셔널 체이닝 대신 typeof/&& 가드를 쓴다.
+    inbox: (typeof state !== 'undefined' && state && state.inbox)
+      ? state.inbox.map(function (i) { return i.title; })
+      : [],
     errors,
   };
 })()`;
@@ -366,7 +381,7 @@ export function bootstrap() {
   // 스모크는 실사용 인스턴스와 부딪히지 않게 격리한다 — 안 그러면 단일 인스턴스 락에 걸려
   // 아무것도 검증하지 않고 종료 코드 0으로 끝난다(캐시 점유 오류만 남는다).
   // 덤으로 "설정·큐가 빈 첫 실행" 경로를 검증하게 된다.
-  if (SMOKE) app.setPath('userData', path.join(app.getPath('temp'), 'whenwork-smoke'));
+  if (SMOKE) app.setPath('userData', SMOKE_DATA || path.join(app.getPath('temp'), 'whenwork-smoke'));
 
   if (!SMOKE && !app.requestSingleInstanceLock()) app.quit();
 
@@ -680,7 +695,14 @@ export function bootstrap() {
       app.setLoginItemSettings({ openAtLogin: true, args: [] });
     }
 
-    if (SMOKE) {
+    if (SMOKE && INJECT_CAPTURE) {
+      // 01-07 주입 서브모드 — 프로브 대신이다. scheduleJobs(ctx)가 이미 시작 시 큐 반영을
+      // 끝낸 뒤, saveCapture(ctx, ...)로 진짜 캡처 경로를 그대로 밟아 한 건을 저장한다.
+      // 창을 만들지 않고 프로브도 돌리지 않으며 스스로 종료하지 않는다 —
+      // 밖에서 SIGKILL로 죽이는 것이 이 강제종료 스모크의 요점이다.
+      const res = saveCapture(ctx, INJECT_CAPTURE, null);
+      console.log(`CAPTURE_INJECTED ${res.id}`);
+    } else if (SMOKE) {
       // 렌더러가 실제로 그려지는지까지 본다 — main만 띄워서는 화면 로직 오류가 잡히지 않는다.
       // 창은 만들되 show하지 않으므로 화면에는 나타나지 않는다.
       const win = getTodayWin();

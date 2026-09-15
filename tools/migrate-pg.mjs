@@ -55,7 +55,7 @@ async function main() {
   await client.connect();
 
   const projects = (
-    await client.query('SELECT id, name, abbr, status, sort FROM project ORDER BY sort, id')
+    await client.query('SELECT id, name, status, sort FROM project ORDER BY sort, id')
   ).rows;
 
   // 제거된 기능이 만든 컬럼(suggested_project_id·issue_*·done_suggest_*)은 읽지 않는다 —
@@ -76,7 +76,6 @@ async function main() {
     project: projects.map((r) => ({
       id: Number(r.id),
       name: r.name,
-      abbr: r.abbr ?? null,
       status: r.status ?? 'active',
       sort: Number(r.sort ?? 0),
     })),

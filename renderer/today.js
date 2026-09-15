@@ -274,7 +274,7 @@ const KEYMAP = [
   ['항목', [['Space', '완료'], ['E', '제목'], ['D', '마감'], ['N', '메모'], ['W', '대기로'], ['X', '삭제'], ['U', '되돌리기'], ['1~9', '프로젝트']]],
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
-  ['프로젝트', [['N', '추가'], ['E', '이름'], ['A', '약어'], ['Shift+↑↓', '순서'], ['X', '보관']]],
+  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '보관']]],
   ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json']]],
   ['퀵캡처', [['Ctrl+Alt+Space', '열기·닫기'], ['#약어', '프로젝트 지정'], ['Tab', '오늘 뷰']]],
 ];
@@ -320,7 +320,6 @@ function renderLegend() {
   state.projects.slice(0, 9).forEach((p, i) => {
     const s = el('span');
     s.append(el('b', null, String(i + 1)), document.createTextNode(p.name));
-    if (p.abbr) s.append(el('span', 'ab', `#${p.abbr}`));
     band.append(s);
   });
 }
@@ -633,11 +632,12 @@ function renderBody() {
     list.forEach((p, idx) => {
       const row = el('div', 'item' + (idx === sel ? ' selected' : ''));
       row.append(el('span', 'proj-num', idx < 9 ? String(idx + 1) : ''));
-      const chip = el('span', 'chip');
-      const dot = el('span', 'dot');
+      // 색점만. #약어를 걷어내기 전에는 여기 약어 알약이 섰고, 약어가 없는 프로젝트는
+      // 빈 자리를 '—'로 채웠다 — 그 작대기가 약어처럼 읽혔다. 색은 1~9 번호와 짝을 이뤄
+      // 다른 탭에서도 같은 프로젝트를 가리키므로 그대로 쓸모가 있다.
+      const dot = el('span', 'dot bare');
       dot.style.background = projColor(p.id);
-      chip.append(dot, document.createTextNode(p.abbr ? `#${p.abbr}` : '—'));
-      row.append(el('div', 't', p.name), chip);
+      row.append(el('div', 't', p.name), dot);
       row.onclick = () => {
         sel = idx;
         render();
@@ -962,16 +962,6 @@ document.addEventListener('keydown', async (e) => {
         const name = await promptText('프로젝트 이름', p.name);
         if (name) {
           await window.whenwork.projectUpdate(p.id, { name });
-          await refresh();
-        }
-        return;
-      }
-      case 'a':
-      case 'A': {
-        if (!p) return;
-        const abbr = await promptText('약어 (#토큰용, 비우면 없음)', p.abbr ?? '');
-        if (abbr !== null) {
-          await window.whenwork.projectUpdate(p.id, { abbr });
           await refresh();
         }
         return;

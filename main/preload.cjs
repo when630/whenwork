@@ -5,9 +5,6 @@ contextBridge.exposeInMainWorld('whenwork', {
   // ── 퀵캡처
   save: (title) => ipcRenderer.invoke('capture:save', title),
   onReset: (cb) => ipcRenderer.on('capture:reset', () => cb()),
-  // 약어 목록은 렌더러가 직접 가져간다 — 갓 만든 창은 push를 받을 수 없다
-  projects: () => ipcRenderer.invoke('capture:projects'),
-
   // ── 오늘 뷰
   getState: () => ipcRenderer.invoke('today:getState'),
   onRefresh: (cb) => ipcRenderer.on('today:refresh', () => cb()),

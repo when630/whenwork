@@ -75,5 +75,7 @@ kbd {
   white-space: nowrap;
 }
 .chip .dot { width: 7px; height: 7px; border-radius: 99px; flex: none; }
+/* 알약 밖에 홀로 서는 색점 — 약어가 없는 프로젝트. 알약과 눈높이가 맞게 여백을 둔다. */
+.dot.bare { display: inline-block; width: 7px; height: 7px; border-radius: 99px; margin: 0 8px; }
 /* 인라인 SVG 아이콘 — 글줄 안에서 글자와 눈높이를 맞춘다 */
 .ico { flex: none; vertical-align: -1.5px; opacity: .75; }

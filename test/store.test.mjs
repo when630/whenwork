@@ -54,41 +54,43 @@ test('같은 id로 두 번 insertCaptures 하면 행이 하나만 남는다', ()
   store.close();
 });
 
-test('활성 프로젝트를 가리키는 약어는 todo로 붙고, 모르는 약어는 원문이 복원되어 inbox로 간다', () => {
-  const file = tmpFile();
-  const store = createStore(file);
+test('모든 캡처는 인박스로 간다 — 캡처 시점에 프로젝트를 정하는 길은 없다', () => {
+  const store = createStore(tmpFile());
+  store.createProject('샘플프로젝트');
+  store.insertCaptures([
+    { id: 'id-plain', title: '복사버튼 추가', captured_at: new Date().toISOString(), context: null },
+    // #이 든 제목도 그냥 제목이다 — 토큰으로 떼어내던 시절에는 여기서 프로젝트가 붙었다
+    { id: 'id-hash', title: '#201 이슈 확인', captured_at: new Date().toISOString(), context: null },
+  ]);
+  const state = store.getViewState();
+  for (const id of ['id-plain', 'id-hash']) {
+    const it = state.inbox.find((x) => x.id === id);
+    assert.ok(it, `${id}가 inbox에 있어야 한다`);
+    assert.equal(it.kind, 'inbox');
+    assert.equal(it.project_id, null);
+  }
+  // 제목이 통째로 남는다 — '#201'이 잘려 나가면 "왜 이걸 적었지"를 풀 단서가 사라진다
+  assert.equal(state.inbox.find((x) => x.id === 'id-hash').title, '#201 이슈 확인');
   store.close();
-  // Task 2는 프로젝트 CRUD를 구현하지 않는다(01-04 몫) — 테스트가 직접 시드한다.
-  const raw = new DatabaseSync(file);
-  raw.prepare(`INSERT INTO project (name, abbr, status) VALUES (?, ?, 'active')`).run('GoWrite', 'gw');
-  raw.close();
-  store.reopen();
+});
+
+test('#약어를 걷어내기 전에 쌓인 대기 항목은 raw(원문)로 되살아난다', () => {
+  // 업그레이드 직후 한 번만 생기는 경우다. title에는 토큰을 뗀 값이, raw에 원문이 있다 —
+  // title로 반영하면 사용자가 친 '#gw'가 조용히 사라진다.
+  const store = createStore(tmpFile());
   store.insertCaptures([
     {
-      id: 'id-known',
+      id: 'id-legacy',
       title: '복사버튼 추가',
       abbr: 'gw',
       raw: '복사버튼 추가 #gw',
       captured_at: new Date().toISOString(),
       context: null,
     },
-    {
-      id: 'id-unknown',
-      title: '엉뚱한 것',
-      abbr: 'zz',
-      raw: '엉뚱한 것 #zz',
-      captured_at: new Date().toISOString(),
-      context: null,
-    },
   ]);
-  const state = store.getViewState();
-  const known = state.today.find((it) => it.id === 'id-known');
-  assert.ok(known, 'gw로 붙은 항목이 today(todo)에 있어야 한다');
-  assert.equal(known.kind, 'todo');
-  assert.ok(known.project_id != null);
-  const unknown = state.inbox.find((it) => it.id === 'id-unknown');
-  assert.ok(unknown, '모르는 약어는 inbox에 남아야 한다');
-  assert.equal(unknown.title, '엉뚱한 것 #zz');
+  const it = store.getViewState().inbox.find((x) => x.id === 'id-legacy');
+  assert.ok(it, '옛 대기 항목이 inbox에 있어야 한다');
+  assert.equal(it.title, '복사버튼 추가 #gw');
   store.close();
 });
 
@@ -226,6 +228,7 @@ test('user_version이 실제로 오를 때만 이행 직전 백업이 생기고,
   store.close();
   // 다음 버전이 필요해진 상황을 흉내낸다 — 배포된 MIGRATIONS[0]은 건드리지 않고
   // 테스트 안에서만 임시로 밀어 넣었다가 되돌린다(D-12: 이미 배포된 함수는 고치지 않는다).
+  const BEFORE = MIGRATIONS.length; // 지금 최신 버전 — 아래에서 한 칸 더 밀어 올린다
   MIGRATIONS.push(() => {});
   try {
     store = createStore(file);
@@ -233,13 +236,13 @@ test('user_version이 실제로 오를 때만 이행 직전 백업이 생기고,
     const backupDir = path.join(path.dirname(file), 'backups');
     const backups = fs.existsSync(backupDir) ? fs.readdirSync(backupDir) : [];
     assert.ok(
-      backups.some((f) => /^store-v1-\d{8}\.sqlite$/.test(f)),
+      backups.some((f) => new RegExp(`^store-v${BEFORE}-\\d{8}\\.sqlite$`).test(f)),
       '백업 파일이 있어야 한다: ' + backups.join(',')
     );
     store.close();
     const raw = new DatabaseSync(file);
     const { user_version } = raw.prepare('PRAGMA user_version').get();
-    assert.equal(user_version, 2);
+    assert.equal(user_version, BEFORE + 1);
     raw.close();
   } finally {
     MIGRATIONS.pop();
@@ -267,6 +270,7 @@ test('WAL에만 있고 아직 체크포인트되지 않은 캡처도 이행 전 
   ]);
   // store1을 닫지 않는다 — 지금 커밋은 -wal에만 있고 메인 파일에는 아직 합쳐지지 않았다.
 
+  const BEFORE = MIGRATIONS.length;
   MIGRATIONS.push(() => {}); // 이 테스트 안에서만 다음 버전을 흉내낸다(D-12: 배포된 함수는 고치지 않는다)
   let store2;
   try {
@@ -274,7 +278,7 @@ test('WAL에만 있고 아직 체크포인트되지 않은 캡처도 이행 전 
     assert.equal(store2.status().ok, true);
     const backupDir = path.join(path.dirname(file), 'backups');
     const backups = fs.existsSync(backupDir) ? fs.readdirSync(backupDir) : [];
-    const backupFile = backups.find((f) => /^store-v1-\d{8}\.sqlite$/.test(f));
+    const backupFile = backups.find((f) => new RegExp(`^store-v${BEFORE}-\\d{8}\\.sqlite$`).test(f));
     assert.ok(backupFile, '백업 파일이 있어야 한다: ' + backups.join(','));
 
     const raw = new DatabaseSync(path.join(backupDir, backupFile));
@@ -295,6 +299,7 @@ test('백업 폴더를 만들 수 없어도 마이그레이션은 끝까지 진�
   store.close();
   const backupsPath = path.join(path.dirname(file), 'backups');
   fs.writeFileSync(backupsPath, '나는 폴더가 아니라 파일이다'); // mkdir이 실패하도록 자리를 막는다
+  const BEFORE = MIGRATIONS.length;
   MIGRATIONS.push(() => {});
   try {
     store = createStore(file);
@@ -302,7 +307,7 @@ test('백업 폴더를 만들 수 없어도 마이그레이션은 끝까지 진�
     store.close();
     const raw = new DatabaseSync(file);
     const { user_version } = raw.prepare('PRAGMA user_version').get();
-    assert.equal(user_version, 2);
+    assert.equal(user_version, BEFORE + 1);
     raw.close();
   } finally {
     MIGRATIONS.pop();

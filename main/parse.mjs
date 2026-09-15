@@ -1,29 +1,12 @@
 // 입력 문자열 해석 — Electron 없이 검증할 수 있게 순수 함수로 둔다.
 
-// 캡처의 #약어를 떼어낸다. 프로젝트 목록을 몰라도 되게 토큰만 뽑고,
-// 실제 프로젝트로 푸는 일은 DB가 살아난 뒤(플러시 시점)에 한다 — 캡처 경로는 DB를 모른다(D1).
+// 캡처 제목을 다듬는다. 던진 글을 **그대로** 받는 것이 전부다.
 //
-// **앞뒤 어디든 받는다.** 끝만 받던 동안 "#ex 오늘 할일"처럼 앞에 치면 조용히 인박스로 갔다 —
-// 손이 먼저 가는 자리가 앞이라면 그쪽이 맞다. 앞을 열면 "#201 이슈 확인"처럼 번호를 앞에 쓰는
-// 습관과 부딪히지만, 어느 프로젝트도 가리키지 않는 토큰은 플러시 때 **원문 그대로** 되살아나므로
-// 잃는 것이 없다(insertCaptures).
-const TOKEN_END = /\s#([A-Za-z0-9_-]{1,16})$/;
-const TOKEN_HEAD = /^#([A-Za-z0-9_-]{1,16})\s/;
-
-export function parseCaptureToken(raw) {
-  const text = String(raw ?? '').trim();
-  const end = text.match(TOKEN_END);
-  if (end) {
-    const title = text.slice(0, end.index).trim();
-    // 본문이 통째로 날아가면(예: "#ex"만 입력) 토큰으로 보지 않는다
-    return title ? { title, abbr: end[1] } : { title: text, abbr: null };
-  }
-  const head = text.match(TOKEN_HEAD);
-  if (head) {
-    const title = text.slice(head[0].length).trim();
-    return title ? { title, abbr: head[1] } : { title: text, abbr: null };
-  }
-  return { title: text, abbr: null };
+// 예전에는 여기서 `#약어`를 떼어내 프로젝트로 풀었다. 그 기능을 걷어내면서 이 함수도
+// 단순해졌다 — 이제 `#`는 그냥 글자다. "#201 이슈 확인"처럼 번호를 앞에 쓰는 습관이
+// 제목을 잃지 않는다. 분류는 던진 다음에 인박스에서 1~9로 한다.
+export function parseCapture(raw) {
+  return String(raw ?? '').trim();
 }
 
 function ymd(d) {

@@ -2,32 +2,28 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { parseCaptureToken, parseDue } from './parse.mjs';
+import { parseCapture, parseDue } from './parse.mjs';
 import { validateExport } from './store.mjs';
 import { platform } from './platform/index.mjs';
 import { updateLine } from './update.mjs';
 import { NOTIFY_AT_DEFAULT } from './brief.mjs';
 
-// 캡처 저장의 단일 경로(D-01/D-03). capture:save·capture:followUp 두 핸들러와
-// 01-07의 주입 모드가 모두 이 함수를 부른다 — 경로가 하나여야 테스트가 실경로를 밟는다.
+// 캡처 저장의 단일 경로(D-01/D-03). capture:save 핸들러와 01-07의 주입 모드가 모두
+// 이 함수를 부른다 — 경로가 하나여야 테스트가 실경로를 밟는다.
 //
 // 순서 자체가 계약이다:
-// 1) 제목을 다듬고 약어를 분리한다. 빈 제목이면 { ok: false }.
+// 1) 제목을 다듬는다(던진 글 그대로). 빈 제목이면 { ok: false }.
 // 2) queue.append — 동기, fs만 의존. 여기까지 오면 캡처는 이미 보존된 것이다.
 // 3) store.insertCaptures를 동기로 즉시 시도한다.
 // 4) 던지면 store.reopen() 후 한 번 더 시도한다(D-03).
 // 5) 그래도 던지면 ctx.pending += 1. 예외를 위로 올리지 않는다.
 // 6) refreshTrayMenu 후 { ok: true, pending: ctx.pending }을 돌려준다.
 export function saveCapture(ctx, title, context = null) {
-  const { title: text, abbr } = parseCaptureToken(title);
+  const text = parseCapture(title);
   if (!text) return { ok: false };
   const entry = {
     id: crypto.randomUUID(),
     title: text,
-    abbr, // #약어 — 프로젝트로 푸는 건 저장소 반영 시점에서
-    // 그 약어가 어느 프로젝트도 아니면 원문을 그대로 되살린다 — 앞에 붙은 "#201 이슈 확인"이
-    // 어순이 바뀐 채 남으면 안 된다
-    raw: abbr ? String(title).trim() : null,
     captured_at: new Date().toISOString(),
     context,
   };
@@ -103,12 +99,6 @@ export function registerIpc(ctx) {
     const err = await shell.openPath(ctx.settings.file);
     return { ok: !err };
   });
-
-  // ── IPC
-  // 목록은 **렌더러가 가져가게** 한다(push 아님). 첫 핫키에서는 getCaptureWin()이 창을
-  // 만드는 중이어서 곧바로 보낸 메시지를 받을 리스너가 아직 없다 — 그래서 앱 재시작 후
-  // 첫 퀵캡처에서는 약어 목록이 영원히 비어 있었고 어떤 약어도 인식하지 못했다.
-  ipcMain.handle('capture:projects', () => ctx.refreshAbbrHints());
 
   ipcMain.handle('capture:save', (_e, title) => saveCapture(ctx, title));
 

@@ -102,39 +102,27 @@ const SMOKE_PROBE = `(async () => {
   };
 })()`;
 
-// 퀵캡처 렌더러 점검. 창 폭이 560px로 고정이라 힌트가 하나 늘면 안내가 조용히 잘리고,
-// `#약어` 피드백은 이 창에만 있으므로 실제로 쳐 보지 않으면 깨진 것을 알 수 없다.
+// 퀵캡처 렌더러 점검. 창 폭이 560px로 고정이라 안내가 하나 늘면 조용히 잘린다 —
+// 잘린 것은 눈으로 보기 전에는 알 수 없으므로 여기서 폭을 재 본다.
 const CAPTURE_PROBE = `(async () => {
   const errors = [];
-  // 창을 만들자마자 보낸 push는 리스너가 없어 사라진다 — 렌더러가 직접 가져와야 한다.
-  // 가져오기는 비동기라 잠깐 기다려 준다(그래도 안 오면 그게 결함이다).
-  for (let i = 0; i < 30 && !projects.length; i++) await new Promise((r) => setTimeout(r, 50));
-  if (!projects.length) errors.push('약어 목록을 가져오지 못했다 (#약어가 통하지 않는 상태)');
-  if (document.getElementById('tokenHint').textContent === '#약어') {
-    errors.push('힌트가 실제 약어를 보여주지 않는다: ' + document.getElementById('tokenHint').textContent);
-  }
   const foot = document.querySelector('.foot');
   if (foot.scrollWidth > foot.clientWidth + 1) {
     errors.push('푸터가 폭을 넘었다: ' + foot.scrollWidth + ' > ' + foot.clientWidth);
   }
-  projects = [{ abbr: 'ex', name: '샘플프로젝트' }];
   const type = function (v) {
     input.value = v;
     input.dispatchEvent(new Event('input'));
     return msg.textContent;
   };
-  const hit = type('보고서 초안 #ex');
-  if (hit.indexOf('샘플프로젝트') < 0) errors.push('아는 약어인데 프로젝트를 알려주지 않았다: ' + hit);
-  // 앞에 치는 손도 받는다 (끝만 받던 동안 조용히 인박스로 갔다)
-  const head = type('#ex 보고서 초안');
-  if (head.indexOf('샘플프로젝트') < 0) errors.push('앞에 붙인 약어를 알아보지 못했다: ' + head);
-  const miss = type('보고서 초안 #exx');
-  if (miss.indexOf('없는 약어') < 0) errors.push('없는 약어를 알려주지 않았다: ' + miss);
+  // #는 이제 그냥 글자다 — 토큰으로 떼어내던 시절에는 "#201 이슈 확인"이 제목을 잃었다
+  const hash = type('#201 이슈 확인');
+  if (hash.indexOf('인박스') < 0) errors.push('# 가 든 입력에서 기본 안내가 아니다: ' + hash);
   const none = type('보고서 초안');
-  if (none.indexOf('인박스') < 0) errors.push('토큰이 없으면 기본 안내로 돌아와야 한다: ' + none);
+  if (none.indexOf('인박스') < 0) errors.push('기본 안내가 아니다: ' + none);
   // 가장 긴 저장 안내가 들어가는지 — 힌트가 늘면 여기가 먼저 잘린다
   msg.className = 'msg ok';
-  msg.textContent = '✓ 샘플프로젝트로 저장 · 이번에 3건';
+  msg.textContent = '✓ 인박스로 저장 · 이번에 3건';
   if (msg.scrollWidth > msg.clientWidth + 1) {
     errors.push('저장 안내가 잘린다: ' + msg.scrollWidth + ' > ' + msg.clientWidth);
   }
@@ -158,7 +146,6 @@ export function bootstrap() {
     pending: 0,
     // 폴더 선택 같은 네이티브 다이얼로그가 뜨면 창이 blur된다 — 그때 창을 숨기면 안 된다
     suppressHide: false,
-    abbrHints: [],
     // 현재 단축키와 그 등록 성공 여부(PLAT-02). applyHotkey가 둘 다 갱신한다.
     hotkey: null,
     // 알림이 막혀 화면으로 대신 보여줄 말(PLAT-04). 오늘 뷰가 읽어 가면 비운다.
@@ -206,15 +193,6 @@ export function bootstrap() {
   // 새 저장소(D-14) — settings.json·queue.jsonl 옆의 store.sqlite 한 파일이다. 파일 이름에
   // 앱 이름을 넣지 않아 Phase 5 개명이 파일명을 건드리지 않는다.
   ctx.store = createStore(path.join(app.getPath('userData'), 'store.sqlite'));
-
-  // 스모크는 매번 빈 저장소로 시작한다(의도된 "빈 첫 실행" 경로, D-05). 예전에는
-  // capture:projects가 저장소의 프로젝트 데이터에 기대어 약어(#ex) 인식을
-  // 검증했지만, 이제 그 데이터가 없는 것이 정상이다 — 검증용 프로젝트 하나를 직접 심어
-  // CAPTURE_PROBE가 외부 데이터 없이도 같은 것을 확인하게 한다.
-  if (SMOKE) {
-    const seedId = ctx.store.createProject('스모크프로젝트');
-    if (seedId) ctx.store.updateProject(seedId, { abbr: 'gw' });
-  }
 
   // ipcMain.handle/.on 등록은 원래도 모듈 로드 시점(동기)이었다 — app.whenReady보다 먼저,
   // ctx를 만든 직후 등록한다. 핸들러 본문의 ctx.jobs.* 호출은 실제 IPC가 올 때(항상
@@ -302,20 +280,6 @@ export function bootstrap() {
     return ctx.captureWin;
   }
   ctx.getCaptureWin = getCaptureWin;
-
-  // 퀵캡처가 약어 목록을 알아야 "#ex"가 어느 프로젝트인지 **그 자리에서** 알려줄 수 있다.
-  // 약어를 타이핑하는 곳은 이 창뿐인데 정작 확인할 화면(번호 띠·프로젝트 탭)은 그때 볼 수 없었다.
-  // 저장소가 꺼져 있으면 마지막 목록으로 답한다 — 캡처 경로에 저장소 실패를 끌어들이지 않는다(D1).
-  async function refreshAbbrHints() {
-    try {
-      const rows = ctx.store.getProjects();
-      ctx.abbrHints = rows.filter((p) => p.abbr).map((p) => ({ abbr: p.abbr, name: p.name }));
-    } catch {
-      // 못 읽으면 이전 목록을 그대로 쓴다
-    }
-    return ctx.abbrHints;
-  }
-  ctx.refreshAbbrHints = refreshAbbrHints;
 
   function showCapture() {
     const win = getCaptureWin();

@@ -50,7 +50,7 @@
   function matches(row, q) {
     if (!q) return true;
     // 이슈는 번호로 부른다 — "#210"도 "210"도 걸리게 넣는다
-    const hay = [row.title, row.note, row.project_name, row.waiting_for, row.name, row.abbr,
+    const hay = [row.title, row.note, row.project_name, row.waiting_for, row.name,
       row.number != null ? `#${row.number}` : null]
       .filter(Boolean)
       .join(' ')

@@ -1,32 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCaptureToken, parseDue, isoWeek, weekRange } from '../main/parse.mjs';
+import { parseCapture, parseDue, isoWeek, weekRange } from '../main/parse.mjs';
 
-// ── #약어 토큰
-test('끝에 붙은 #약어를 떼어낸다', () => {
-  assert.deepEqual(parseCaptureToken('웹훅 재시도 답장 #ef'), { title: '웹훅 재시도 답장', abbr: 'ef' });
+// ── 캡처 제목
+//
+// #약어를 걷어낸 뒤로 이 함수가 하는 일은 다듬기뿐이다. 그래서 여기서 지키는 것은
+// **아무것도 떼어내지 않는다**는 것이다 — 예전에는 `#`가 토큰이라 "#201 이슈 확인"이
+// "이슈 확인"이 되어, 어느 프로젝트도 아닌 약어일 때만 원문이 되살아났다.
+test('앞뒤 공백만 다듬고 나머지는 그대로 둔다', () => {
+  assert.equal(parseCapture('  웹훅 재시도 답장  '), '웹훅 재시도 답장');
 });
 
-test('토큰이 없으면 제목 그대로', () => {
-  assert.deepEqual(parseCaptureToken('그냥 할 일'), { title: '그냥 할 일', abbr: null });
+test('#는 그냥 글자다 — 어디에 있어도 떼어내지 않는다', () => {
+  assert.equal(parseCapture('#201 이슈 확인하기'), '#201 이슈 확인하기');
+  assert.equal(parseCapture('이슈 #201 확인하기'), '이슈 #201 확인하기');
+  assert.equal(parseCapture('웹훅 재시도 답장 #ef'), '웹훅 재시도 답장 #ef');
+  assert.equal(parseCapture('#gw'), '#gw');
 });
 
-test('앞에 붙은 #약어도 떼어낸다 — 손이 먼저 가는 자리가 앞이면 그쪽도 받는다', () => {
-  assert.deepEqual(parseCaptureToken('#gw 오늘 할일'), { title: '오늘 할일', abbr: 'gw' });
-});
-
-// 앞을 열면 이 습관과 부딪힌다. 다만 어느 프로젝트도 아닌 토큰은 플러시 때 원문(raw)이
-// 그대로 되살아나므로(insertCaptures) 제목을 잃지 않는다.
-test('앞의 이슈 번호도 일단 토큰으로 본다 — 못 풀면 원문이 되살아난다', () => {
-  assert.deepEqual(parseCaptureToken('#201 이슈 확인하기'), { title: '이슈 확인하기', abbr: '201' });
-});
-
-test('본문 중간의 #는 토큰이 아니다', () => {
-  assert.deepEqual(parseCaptureToken('이슈 #201 확인하기'), { title: '이슈 #201 확인하기', abbr: null });
-});
-
-test('토큰만 입력하면 본문으로 둔다', () => {
-  assert.deepEqual(parseCaptureToken('#gw'), { title: '#gw', abbr: null });
+test('빈 입력과 없는 값은 빈 문자열 — 호출부가 이것으로 저장을 막는다', () => {
+  assert.equal(parseCapture(''), '');
+  assert.equal(parseCapture('   '), '');
+  assert.equal(parseCapture(null), '');
+  assert.equal(parseCapture(undefined), '');
 });
 
 // ── 마감일

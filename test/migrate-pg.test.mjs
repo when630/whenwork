@@ -20,8 +20,8 @@ function tmpFile() {
 function payload() {
   return {
     project: [
-      { id: 1, name: '가나', abbr: 'ga', status: 'active', sort: 0 },
-      { id: 2, name: '다라', abbr: null, status: 'archived', sort: 1 },
+      { id: 1, name: '가나', status: 'active', sort: 0 },
+      { id: 2, name: '다라', status: 'archived', sort: 1 },
     ],
     item: [
       {

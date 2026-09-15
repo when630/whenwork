@@ -57,12 +57,23 @@ CREATE INDEX item_kind ON item (kind);
 CREATE INDEX event_at ON event (at DESC);
 `;
 
+// v2 — #약어 기능을 걷어내면서 project.abbr을 지운다. V1_SQL은 손대지 않는다:
+// 한 번 배포된 마이그레이션 함수를 고치면 이미 v1을 밟은 DB와 새로 만드는 DB가
+// 서로 다른 길을 걷게 된다. 새 DB는 v1으로 컬럼을 만들었다가 v2에서 지운다 — 낭비처럼
+// 보이지만 그 대신 "경로가 하나"가 지켜진다(D-12).
+//
+// 이행 전 백업은 migrate()가 알아서 남긴다(D-16). 지우는 컬럼이라 되돌릴 일이 생기면
+// 그 백업이 유일한 근거다.
+const V2_SQL = `
+ALTER TABLE project DROP COLUMN abbr;
+`;
+
 // PRAGMA user_version 순번 마이그레이션(D-12). 새 DB도 빈 상태(v0)에서 이 배열을 처음부터
 // 끝까지 밟아 올라간다 — 경로가 하나다. 한 번 배포된 함수는 절대 고치지 않는다.
-export const MIGRATIONS = [(db) => db.exec(V1_SQL)];
+export const MIGRATIONS = [(db) => db.exec(V1_SQL), (db) => db.exec(V2_SQL)];
 
 // schemaTables()가 대조하는 원본 — MIGRATIONS와 함수 대 함수로 짝을 이룬다.
-const MIGRATION_SQL = [V1_SQL];
+const MIGRATION_SQL = [V1_SQL, V2_SQL];
 
 // 스키마가 실제로 만드는 테이블 이름 — STOR-05 가드 테스트가 이것과 대조한다.
 export function schemaTables() {
@@ -338,7 +349,6 @@ export function createStore(file) {
     // 여기서 조용히 {inserted:0}을 돌려주면 반영되지 않은 큐 항목이 성공으로 오인되어
     // 대기 파일이 지워지고 캡처가 영구 유실된다(CR-01).
     if (!db || !state.ok) throw new Error('store not open');
-    const findAbbr = db.prepare(`SELECT id FROM project WHERE lower(abbr) = lower(?) AND status = 'active'`);
     const insert = db.prepare(
       `INSERT OR IGNORE INTO item (id, project_id, kind, title, captured_at, source, context)
        VALUES (?, ?, ?, ?, ?, 'manual', ?)`
@@ -359,26 +369,23 @@ export function createStore(file) {
         // 예외는 전부 진짜 저장 실패(디스크 풀·I/O 등)이므로 트랜잭션 전체를 롤백시켜
         // 위로 올라가고, replayPending이 대기 파일을 보존해 다음 기동에서 재시도하게
         // 둔다(WR-06 이전 동작으로 복귀).
-        if (!e?.id || !e?.captured_at || (e.abbr ? false : !e.title)) {
+        if (!e?.id || !e?.captured_at) {
           console.error('insertCaptures: 필수 필드 결함으로 항목을 건너뛴다', e?.id);
           skipped += 1;
           continue;
         }
-        let projectId = null;
-        if (e.abbr) {
-          const row = findAbbr.get(e.abbr);
-          projectId = row?.id ?? null;
-        }
-        // 약어가 어느 프로젝트도 아니면(오타 등) 원문을 그대로 되살린다 — 조용히 떼어내면
-        // 인박스에서 "왜 여기 있지"를 풀 단서가 사라진다. raw가 없는 옛 항목은 뒤에 붙인다.
-        const title = e.abbr && !projectId ? (e.raw ?? `${e.title} #${e.abbr}`) : e.title;
+        // #약어를 걷어내기 전에 쌓인 대기 파일에는 title이 토큰을 뗀 값이고 raw에 원문이
+        // 들어 있다. 그 항목을 title로 반영하면 사용자가 친 "#gw"가 조용히 사라진다 —
+        // 원문이 있으면 그것을 쓴다. 지금 캡처에는 raw가 없으므로 title이 곧 원문이다.
+        const title = e.raw ?? e.title;
         if (!title) {
           console.error('insertCaptures: title 결함으로 항목을 건너뛴다', e.id);
           skipped += 1;
           continue;
         }
         const context = e.context != null ? JSON.stringify(e.context) : null;
-        const result = insert.run(e.id, projectId, projectId ? 'todo' : 'inbox', title, e.captured_at, context);
+        // 분류는 던진 다음에 인박스에서 한다 — 캡처 시점에 프로젝트를 정하는 길은 없어졌다
+        const result = insert.run(e.id, null, 'inbox', title, e.captured_at, context);
         if (result.changes) inserted += 1;
       }
     });
@@ -410,7 +417,7 @@ export function createStore(file) {
       )
       .all(cutoff);
     const items = rows.map((r) => ({ ...r, context: r.context ? JSON.parse(r.context) : null }));
-    const projects = db.prepare(`SELECT id, name, abbr, status, sort FROM project ORDER BY sort, name`).all();
+    const projects = db.prepare(`SELECT id, name, status, sort FROM project ORDER BY sort, name`).all();
     return {
       projects,
       today: items.filter((r) => r.kind === 'todo'),
@@ -438,7 +445,7 @@ export function createStore(file) {
   function getProjects() {
     if (!db || !state.ok) return [];
     return db
-      .prepare(`SELECT id, name, abbr, status, sort FROM project WHERE status = 'active' ORDER BY sort, id`)
+      .prepare(`SELECT id, name, status, sort FROM project WHERE status = 'active' ORDER BY sort, id`)
       .all();
   }
 
@@ -457,7 +464,6 @@ export function createStore(file) {
   function updateProject(id, fields) {
     if (!db || !state.ok) return;
     if (fields.name != null) db.prepare('UPDATE project SET name = ? WHERE id = ?').run(fields.name, id);
-    if (fields.abbr != null) db.prepare('UPDATE project SET abbr = ? WHERE id = ?').run(fields.abbr || null, id);
   }
 
   function archiveProject(id) {
@@ -669,7 +675,7 @@ export function createStore(file) {
       export_version: EXPORT_VERSION,
       schema_version: MIGRATIONS.length,
       exported_at: new Date().toISOString(),
-      project: db.prepare('SELECT id, name, abbr, status, sort FROM project ORDER BY sort, id').all(),
+      project: db.prepare('SELECT id, name, status, sort FROM project ORDER BY sort, id').all(),
       item: db
         .prepare(
           `SELECT id, project_id, kind, title, due, waiting_for, captured_at, done_at,
@@ -697,8 +703,10 @@ export function createStore(file) {
       db.exec('DELETE FROM item');
       db.exec('DELETE FROM event');
       db.exec('DELETE FROM project');
-      const ip = db.prepare('INSERT INTO project (id, name, abbr, status, sort) VALUES (?, ?, ?, ?, ?)');
-      for (const r of data.project) ip.run(r.id, r.name, r.abbr ?? null, r.status ?? 'active', r.sort ?? 0);
+      const ip = db.prepare('INSERT INTO project (id, name, status, sort) VALUES (?, ?, ?, ?)');
+      // 옛 내보내기 파일에는 abbr이 들어 있다 — 그 필드는 그냥 버린다(스키마에 자리가 없다).
+      // schema_version이 지금보다 낮은 파일은 validateExport가 통과시키므로 여기서 깨지면 안 된다.
+      for (const r of data.project) ip.run(r.id, r.name, r.status ?? 'active', r.sort ?? 0);
       const ii = db.prepare(
         `INSERT INTO item (id, project_id, kind, title, due, waiting_for, captured_at, done_at,
                            source, context, note, nudged_at, nudge_count, deleted_at)

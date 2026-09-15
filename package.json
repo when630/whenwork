@@ -10,6 +10,7 @@
     "start": "electron .",
     "smoke": "electron . --smoke",
     "test": "node --test \"test/**/*.test.mjs\"",
+    "smoke:crash": "node --test test/capture-crash-smoke.test.mjs",
     "icons": "node tools/make-icon.mjs",
     "db": "docker compose up -d",
     "build": "electron-builder --win",

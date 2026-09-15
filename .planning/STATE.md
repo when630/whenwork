@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: 내장 저장소 전환
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-09-15T00:12:35.729Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-09-15T00:35:19.309Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 01 execution started
-state_head: 3e6c15d6e52baec12896a0e0a667ac608f27c16c
+state_head: fc5e29777a2b6218c5a5ac715f8189b13238d4fe
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-14)
 ## Current Position
 
 Phase: 01 (내장 저장소 전환) — EXECUTING
-Plan: 3 of 7
+Plan: 4 of 7
 Status: Ready to execute
 Last activity: 2026-09-14 — Phase 01 execution started
 
@@ -60,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 01 P01 | 54 min | 3 tasks | 4 files |
 | Phase 01 P02 | 12 min | 2 tasks | 4 files |
+| Phase 01 P03 | 12min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,9 @@ Recent decisions affecting current work:
 - [Phase 01]: reviewing/generatingCards/lastCalendarError는 여러 파일이 함께 읽고 써야 해서 jobs.mjs 클로저 대신 ctx 필드로 둠
 - [Phase 01]: 01-02: v1 스키마 lean 채택 — 인덱스 최소, 외래키 강제 끔, event.id 정수 autoincrement — PG 스키마와 같은 보장 수준, Phase 3 이전 스크립트가 삽입 순서를 신경 쓰지 않아도 됨, 프로젝트는 archive만 하고 삭제 않는 설계에서 외래키 강제 이득 작음
 - [Phase 01]: 01-02: open()의 손상/newer/그 외 오류 판정을 하나의 경계로 통합해 되돌리기 확인이 실제로 유효하도록 재구성 — construction 실패를 무조건 non-corrupt로 하드코딩하면 잠김 테스트가 isCorruptError를 거치지 않아 되돌리기 확인이 무의미해짐
+- [Phase 01]: [Phase 01] 01-03: main/jobs.mjs의 옛 ctx.queue.drain 호출부를 Task 1에서 replayPending으로 최소 수정 — Task 1 acceptance criteria(grep)가 main/ 전체를 검사해 방치하면 통과 불가능했고, 실제로도 없는 함수를 부르는 런타임 버그였다. flush() 전체 재작성은 계획대로 Task 2가 맡았다
+- [Phase 01]: [Phase 01] 01-03: capture:save/capture:followUp을 saveCapture(ctx,title,context)로 통합하며 followUp도 parseCaptureToken을 거치게 됨 — D-01의 두 경로가 같다는 원칙을 그대로 따른 결과(회귀 아님)
+- [Phase 01]: [Phase 01] 01-03: ctx.pending은 이번 세션에서 즉시 반영에 실패한 캡처 수로 한정 — 큐 파일 줄 수와는 분리한다(D-02, 큐는 실행 중 append-only라 성공한 캡처까지 쌓인다)
 
 ### Pending Todos
 
@@ -100,6 +104,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-15T00:12:35.713Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-09-15T00:35:19.294Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None

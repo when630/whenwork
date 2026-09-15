@@ -12,7 +12,7 @@ WHENWORK는 1인 개발자 전용으로 돌아가던 트레이 할 일 앱을, �
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 1: 내장 저장소 전환** - PostgreSQL·Docker 없이 내장 저장소(node:sqlite)로 교체, 캡처 유실 제로 보장 유지
-- [ ] **Phase 2: 레거시 기능 제거** - AI·git 수집·캘린더·Obsidian·창 컨텍스트를 UI부터 저장소까지 전 계층에서 삭제
+- [x] **Phase 2: 레거시 기능 제거** - AI·git 수집·캘린더·Obsidian·창 컨텍스트를 UI부터 저장소까지 전 계층에서 삭제
 - [ ] **Phase 3: 내보내기·가져오기·이전** - JSON 왕복 내보내기/가져오기, 기존 PostgreSQL 데이터 1회 이전
 - [ ] **Phase 4: 첫 실행·플랫폼 대응** - 무설정 첫 실행, 단축키 재바인딩, macOS 실기기 동작 검증
 - [ ] **Phase 5: 아이콘·릴리스** - 새 아이콘 적용(이름은 WHENWORK 유지), 듀얼 OS 배포, 일주일 도그푸딩 완료 판정
@@ -139,7 +139,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. 내장 저장소 전환 | 7/7 | Complete | 2026-09-15 |
-| 2. 레거시 기능 제거 | 0/TBD | Not started | - |
+| 2. 레거시 기능 제거 | 1/1 | Complete | 2026-09-15 |
 | 3. 내보내기·가져오기·이전 | 0/TBD | Not started | - |
 | 4. 첫 실행·플랫폼 대응 | 0/TBD | Not started | - |
 | 5. 이름·아이콘·릴리스 | 0/TBD | Not started | - |

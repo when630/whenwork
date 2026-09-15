@@ -1,8 +1,8 @@
-# Roadmap: WHENNOTE
+# Roadmap: WHENWORK
 
 ## Overview
 
-WHENNOTE(구 WHENWORK)는 1인 개발자 전용으로 돌아가던 트레이 할 일 앱을, 다른 준비 없이 설치 파일 하나로 쓰는 공개 앱으로 다시 세우는 브라운필드 대체(subtract-and-replatform) 작업이다. 저장소를 PostgreSQL·Docker에서 내장 파일 저장소로 바꿔 "캡처는 절대 잃지 않는다"는 원래 보장을 지키는 데서 시작해(Phase 1), 그 위에서 AI·git 수집·캘린더·Obsidian처럼 "누구나"라는 기준에 맞지 않는 기능을 화면부터 저장소까지 전 계층에서 걷어내고(Phase 2), 사용자에게 데이터 소유권을 돌려주는 내보내기·가져오기와 작성자 자신의 기존 데이터 이전을 만든다(Phase 3). 그다음 지금까지 Windows에 치우쳐 있던 첫 실행·단축키·자동 실행·알림 처리를 macOS까지 실기기에서 검증하고(Phase 4), 마지막으로 이름과 아이콘을 WHENNOTE로 바꿔 두 OS 설치 파일을 새 공개 리포에서 배포하고 작성자 본인이 일주일 실사용으로 완료를 확인한다(Phase 5).
+WHENWORK는 1인 개발자 전용으로 돌아가던 트레이 할 일 앱을, 다른 준비 없이 설치 파일 하나로 쓰는 공개 앱으로 다시 세우는 브라운필드 대체(subtract-and-replatform) 작업이다. 저장소를 PostgreSQL·Docker에서 내장 파일 저장소로 바꿔 "캡처는 절대 잃지 않는다"는 원래 보장을 지키는 데서 시작해(Phase 1), 그 위에서 AI·git 수집·캘린더·Obsidian처럼 "누구나"라는 기준에 맞지 않는 기능을 화면부터 저장소까지 전 계층에서 걷어내고(Phase 2), 사용자에게 데이터 소유권을 돌려주는 내보내기·가져오기와 작성자 자신의 기존 데이터 이전을 만든다(Phase 3). 그다음 지금까지 Windows에 치우쳐 있던 첫 실행·단축키·자동 실행·알림 처리를 macOS까지 실기기에서 검증하고(Phase 4), 마지막으로 새 아이콘을 적용해 두 OS 설치 파일을 새 공개 리포에서 배포하고 작성자 본인이 일주일 실사용으로 완료를 확인한다(Phase 5).
 
 ## Phases
 
@@ -15,7 +15,7 @@ WHENNOTE(구 WHENWORK)는 1인 개발자 전용으로 돌아가던 트레이 할
 - [ ] **Phase 2: 레거시 기능 제거** - AI·git 수집·캘린더·Obsidian·창 컨텍스트를 UI부터 저장소까지 전 계층에서 삭제
 - [ ] **Phase 3: 내보내기·가져오기·이전** - JSON 왕복 내보내기/가져오기, 기존 PostgreSQL 데이터 1회 이전
 - [ ] **Phase 4: 첫 실행·플랫폼 대응** - 무설정 첫 실행, 단축키 재바인딩, macOS 실기기 동작 검증
-- [ ] **Phase 5: 이름·아이콘·릴리스** - WHENNOTE 개명·아이콘 적용, 듀얼 OS 배포, 일주일 도그푸딩 완료 판정
+- [ ] **Phase 5: 아이콘·릴리스** - 새 아이콘 적용(이름은 WHENWORK 유지), 듀얼 OS 배포, 일주일 도그푸딩 완료 판정
 
 ## Phase Details
 
@@ -113,16 +113,16 @@ Plans:
 **UI hint**: yes
 **Research flag**: yes — macOS 실기기에서 Accessibility 권한과 무관하게 globalShortcut 등록이 조용히 실패하는지(`isRegistered()`가 true를 반환해도 실제로는 눌리지 않는 경우), 미서명 앱의 로그인 항목(`setLoginItemSettings`)이 실제로 켜지는지 실기기로 검증이 필요하다
 
-### Phase 5: 이름·아이콘·릴리스
+### Phase 5: 아이콘·릴리스
 
-**Goal**: 앱이 WHENNOTE라는 이름과 아이콘으로 Windows·macOS 설치 파일을 새 공개 리포에서 배포하고, 작성자 본인이 새 버전으로 완전히 갈아타 일주일 실사용으로 완료를 확인한다.
+**Goal**: 앱이 WHENWORK 이름과 새 아이콘으로 Windows·macOS 설치 파일을 새 공개 리포에서 배포하고, 작성자 본인이 새 버전으로 완전히 갈아타 일주일 실사용으로 완료를 확인한다.
 **Depends on**: Phase 3, Phase 4
 **Requirements**: NAME-01, NAME-02, NAME-03, REL-01, REL-02, REL-03, REL-04, REL-05, DONE-01
 **Success Criteria** (what must be TRUE):
 
-  1. 패키지명·productName·appId·설치 파일명·트레이 툴팁·창 제목·README가 모두 WHENNOTE를 쓴다
-  2. 앱 데이터 폴더도 새 이름을 쓰고, 기존 whenwork 설정(단축키·창 위치·브리핑 시각)이 있으면 첫 실행에 한 번 가져온다
-  3. 제공된 WHENNOTE 아이콘이 설치 파일·실행 파일·창·macOS Dock/dmg에 적용되고, 트레이/메뉴바에는 그로부터 파생한 단순 글리프가 작게 봐도 알아보이도록 표시된다
+  1. 패키지명·productName·appId·설치 파일명·트레이 툴팁·창 제목·README가 모두 WHENWORK를 일관되게 쓰고 다른 이름 언급이 남지 않는다
+  2. 앱 데이터 폴더(`whenwork`)와 기존 설정(단축키·창 위치·브리핑 시각)이 새 버전 첫 실행에서 그대로 이어진다
+  3. 제공된 WHENWORK 아이콘(`assets/icon/whenwork.png`)이 설치 파일·실행 파일·창·macOS Dock/dmg에 적용되고, 트레이/메뉴바에는 그로부터 파생한 단순 글리프가 작게 봐도 알아보이도록 표시된다
   4. 같은 electron-builder 설정에서 Windows NSIS와 macOS(arm64·x64) dmg·zip이 만들어지고, GitHub Actions가 두 OS를 빌드해 GitHub Releases에 자동으로 올린다
   5. README에 스크린샷과 함께 미서명 우회 절차(Windows SmartScreen, macOS Gatekeeper)가 있고, 실제 브라우저로 내려받은 파일로 검증되어 있다
   6. 공개 리포는 새 저장소·새 히스토리에서 시작해 비밀(토큰·계정) 스캔을 통과하고, 패키징된 설치본 스모크 테스트가 Windows·macOS 모두 통과한다

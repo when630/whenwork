@@ -1,4 +1,4 @@
-# Requirements: WHENNOTE (구 WHENWORK)
+# Requirements: WHENWORK
 
 **Defined:** 2026-09-14
 **Core Value:** 설치 파일 하나를 받아 실행한 사람이, 다른 것을 아무것도 깔지 않고, 단축키로 던진 할 일을 절대 잃지 않는다.
@@ -43,9 +43,9 @@
 
 ### 이름 (NAME)
 
-- [ ] **NAME-01**: 앱 이름이 WHENNOTE로 바뀐다. 패키지명, productName, appId, 설치 파일명, 트레이 툴팁, 창 제목, README와 문서가 모두 새 이름을 쓴다
-- [ ] **NAME-02**: 앱 데이터 폴더도 새 이름을 쓴다. 기존 whenwork 설정 파일(단축키·창 위치·브리핑 시각)이 있으면 첫 실행에 한 번 가져온다
-- [ ] **NAME-03**: 앱 아이콘이 제공된 WHENNOTE 아이콘(`assets/icon/whennote.png`, 1254×1254 — 파란 그라데이션 라운드 사각 위 시계 달린 문서)으로 바뀐다. 설치 파일·실행 파일·창·macOS Dock/dmg에 적용되고, `tools/make-icon.mjs`의 픽셀아트 생성이 이를 덮어쓰지 않는다. 트레이 아이콘은 같은 아이콘에서 파생한 단순 글리프(16·32px, macOS는 템플릿 이미지)로 작게 봐도 알아볼 수 있다
+- [ ] **NAME-01**: 앱 이름은 WHENWORK를 유지한다(2026-09-15 개명 철회). 패키지명, productName, appId, 설치 파일명, 트레이 툴팁, 창 제목, README와 문서가 일관되게 WHENWORK를 쓰고 다른 이름 언급이 남지 않는다
+- [ ] **NAME-02**: 앱 데이터 폴더는 기존 `whenwork` 그대로 쓰고, 기존 설정 파일(단축키·창 위치·브리핑 시각)은 새 버전 첫 실행에서 그대로 이어진다
+- [ ] **NAME-03**: 앱 아이콘이 제공된 WHENWORK 아이콘(`assets/icon/whenwork.png`, 1254×1254 RGBA — 파란 그라데이션 원형 시계에 체크 마크, 투명 배경)으로 바뀐다. 설치 파일·실행 파일·창·macOS Dock/dmg에 적용되고, `tools/make-icon.mjs`의 픽셀아트 생성이 이를 덮어쓰지 않는다. 트레이 아이콘은 같은 아이콘에서 파생한 단순 글리프(16·32px, macOS는 템플릿 이미지)로 작게 봐도 알아볼 수 있다
 
 ### 릴리스 (REL)
 

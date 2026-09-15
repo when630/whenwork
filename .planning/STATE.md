@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: 내장 저장소 전환
 status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-09-15T00:48:38.205Z"
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-09-15T01:11:12.119Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 01 execution started
-state_head: 6f248115f231c3b80e01c9dfcb2de8f0f9095c47
+state_head: a1b15d5b4ce40343f2ccf4d3b3975b4aecc96b1b
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-14)
 ## Current Position
 
 Phase: 01 (내장 저장소 전환) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
 Last activity: 2026-09-14 — Phase 01 execution started
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P02 | 12 min | 2 tasks | 4 files |
 | Phase 01 P03 | 12min | 3 tasks | 7 files |
 | Phase 01 P04 | 3min | 2 tasks | 2 files |
+| Phase 01 P05 | 17min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,10 @@ Recent decisions affecting current work:
 - [Phase 01]: [Phase 01] 01-03: ctx.pending은 이번 세션에서 즉시 반영에 실패한 캡처 수로 한정 — 큐 파일 줄 수와는 분리한다(D-02, 큐는 실행 중 append-only라 성공한 캡처까지 쌓인다)
 - [Phase 01]: [Phase 01] 01-04: getProjects()는 신설한 독립 함수이며, 01-02가 getViewState() 안에 이미 인라인해 둔 프로젝트 조회(정렬 기준 다름: sort,name)는 그대로 둠 — 기존 통과 테스트를 건드리지 않는 최소 변경 범위 판단
 - [Phase 01]: [Phase 01] 01-04: briefing()의 oldest_todo_days는 MIN(captured_at) FILTER 대신 ORDER BY captured_at ASC LIMIT 1로 가져와 JS에서 날수 계산 — count(*) FILTER만 research_resolution이 확인했으므로 다른 집계 함수의 FILTER 지원 불확실성을 피함
+- [Phase 01]: D1: review:get의 주 라벨 계산을 jobs.mjs의 weekOf에서 ipc.mjs의 지역 순수 함수(weekLabel)로 옮김 — 주간 리뷰 클러스터 전량 제거(Task 2)와 review:get 존속(Task 1)이 서로 부딪히지 않게 분리
+- [Phase 01]: D2: 레거시 IPC 채널(issue/resume/review/calendar/backup/inbox 등)은 삭제 대신 D-06 무해 스텁으로 전환 — 저장소·파일·프로세스에 아무것도 쓰지 않음
+- [Phase 01]: D3: main/jobs.mjs에서 collectAll·backupNow·makeWeeklyReview·resumePayload·maybeSuggestDone 등 제거 대상 배경 작업과 타이머를 전량 삭제(471→98줄), replayQueueOnce·maybeBrief·purgeOnce만 남김
+- [Phase 01]: D4: main/ 어디에서도 ctx.db·main/db.mjs를 부르지 않게 됨 — main/db.mjs는 이제 아무도 부르지 않는 죽은 파일(삭제는 01-06)
 
 ### Pending Todos
 
@@ -107,6 +112,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-15T00:48:38.188Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-09-15T01:11:12.102Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None

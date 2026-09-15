@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('whenwork', {
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSet: (key, value) => ipcRenderer.invoke('settings:set', key, value),
   settingsOpenFile: () => ipcRenderer.invoke('settings:openFile'),
+  dataExport: () => ipcRenderer.invoke('data:export'),
+  dataImport: () => ipcRenderer.invoke('data:import'),
 
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),

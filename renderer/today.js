@@ -269,7 +269,7 @@ const KEYMAP = [
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['A', '약어'], ['Shift+↑↓', '순서'], ['X', '보관']]],
-  ['설정', [['Enter', '변경'], ['X', '기본값'], ['O', 'settings.json']]],
+  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['O', 'settings.json']]],
   ['퀵캡처', [['Ctrl+Alt+Space', '열기·닫기'], ['#약어', '프로젝트 지정'], ['Tab', '오늘 뷰']]],
 ];
 
@@ -450,11 +450,44 @@ function renderSettings() {
   dbSec.append(
     el('div', 'ctx', `${cfg.store.file} — ${cfg.store.ok ? '정상' : (cfg.store.notice ?? '대기 중')}`)
   );
-  const open = el('div', 'rv-file');
+  const open = el('div', 'set-act');
   open.append(window.ICONS.context(), document.createTextNode(` ${cfg.file} — 열기`));
   open.onclick = () => window.whenwork.settingsOpenFile();
   dbSec.append(open);
+
+  // ── 내 데이터 (DATA-01~03)
+  const dataSec = el('div', 'set-foot');
+  dataSec.append(el('div', 'sec-h', '내 데이터'));
+  dataSec.append(el('div', 'ctx', 'JSON 파일 하나로 내보내고, 다른 PC에서 그 파일로 되살립니다'));
+  const exp = el('div', 'set-act');
+  exp.append(window.ICONS.context(), document.createTextNode(' 내보내기 (E)'));
+  exp.onclick = runExport;
+  const imp = el('div', 'set-act');
+  imp.append(window.ICONS.context(), document.createTextNode(' 가져오기 (I) — 지금 데이터를 덮어씁니다'));
+  imp.onclick = runImport;
+  dataSec.append(exp, imp);
+  body.append(dataSec);
   body.append(dbSec);
+}
+
+async function runExport() {
+  const res = await window.whenwork.dataExport();
+  if (res.canceled) return;
+  if (!res.ok) return toast(res.error ?? '내보내기 실패');
+  toast(`내보냄 — 프로젝트 ${res.project}건 · 항목 ${res.item}건`);
+}
+
+// 가져오기는 되돌릴 수 없게 보이면 안 된다 — 직전 백업이 자동으로 남는다는 사실을
+// 확인 문구에 함께 적는다(그 백업이 없으면 store.importAll이 아예 가져오지 않는다).
+async function runImport() {
+  const yes = await promptText('가져오면 지금 데이터가 파일의 내용으로 바뀝니다 (직전 상태는 자동 백업). 계속하려면 y', '');
+  if (yes?.toLowerCase() !== 'y') return;
+  const res = await window.whenwork.dataImport();
+  if (res.canceled) return;
+  if (!res.ok) return toast(res.error ?? '가져오기 실패', { holdMs: 6000 });
+  toast(`가져옴 — 프로젝트 ${res.project}건 · 항목 ${res.item}건`, { holdMs: 4000 });
+  await loadSettings();
+  return refresh();
 }
 
 async function loadSettings() {
@@ -603,7 +636,8 @@ function renderFooter() {
     add('Esc', '뒤로');
   } else if (tab === 'settings') {
     add('Enter', '변경');
-    add('X', '기본값으로');
+    add('E', '내보내기');
+    add('I', '가져오기');
   } else if (tab === 'projects') {
     add('N', '추가');
     add('E', '이름');
@@ -840,6 +874,14 @@ document.addEventListener('keydown', async (e) => {
       case 'o':
       case 'O':
         return window.whenwork.settingsOpenFile();
+      case 'e':
+      case 'E':
+        e.preventDefault();
+        return runExport();
+      case 'i':
+      case 'I':
+        e.preventDefault();
+        return runImport();
     }
     return;
   }

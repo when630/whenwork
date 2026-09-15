@@ -1,7 +1,9 @@
 // main/ipc.mjs — 모든 ipcMain 핸들러 등록 (D-08 분할, main/index.mjs에서 이동)
 import { BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { parseCaptureToken, parseDue } from './parse.mjs';
+import { validateExport } from './store.mjs';
 import { NOTIFY_AT_DEFAULT } from './brief.mjs';
 
 // 캡처 저장의 단일 경로(D-01/D-03). capture:save·capture:followUp 두 핸들러와
@@ -165,6 +167,62 @@ export function registerIpc(ctx) {
       return { ok: true, due: parsed.value };
     } catch {
       return { ok: false };
+    }
+  });
+
+  // ── 내보내기·가져오기 (DATA-01~03)
+  //
+  // 파일 대화상자를 여는 동안 창이 blur된다 — settings:pickFolder가 쓰던 suppressHide를
+  // 같은 이유로 쓴다(그걸로 창을 접으면 사용자가 고른 경로가 갈 곳이 없어진다).
+  ipcMain.handle('data:export', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    ctx.suppressHide = true;
+    try {
+      const stamp = new Date().toISOString().slice(0, 10);
+      const res = await dialog.showSaveDialog(win, {
+        title: '데이터 내보내기',
+        defaultPath: `whenwork-${stamp}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+      const data = ctx.store.exportAll();
+      fs.writeFileSync(res.filePath, JSON.stringify(data, null, 2), 'utf8');
+      return { ok: true, path: res.filePath, project: data.project.length, item: data.item.length };
+    } catch {
+      // 경로를 이유에 넣지 않는다(01-02) — 사용자가 볼 화면에는 사실만 짧게
+      return { ok: false, error: '내보내기에 실패했습니다' };
+    } finally {
+      ctx.suppressHide = false;
+      win?.focus();
+    }
+  });
+
+  ipcMain.handle('data:import', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    ctx.suppressHide = true;
+    try {
+      const res = await dialog.showOpenDialog(win, {
+        title: '데이터 가져오기 — 지금 데이터는 이 파일의 내용으로 바뀝니다',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+        properties: ['openFile'],
+      });
+      if (res.canceled || !res.filePaths?.[0]) return { ok: false, canceled: true };
+      let parsed;
+      try {
+        parsed = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8'));
+      } catch {
+        return { ok: false, error: '읽을 수 없는 파일입니다' };
+      }
+      const bad = validateExport(parsed);
+      if (bad) return { ok: false, error: bad };
+      const out = ctx.store.importAll(parsed);
+      ctx.todayWin?.webContents.send('today:refresh');
+      return { ok: true, ...out };
+    } catch {
+      return { ok: false, error: '가져오기에 실패했습니다' };
+    } finally {
+      ctx.suppressHide = false;
+      win?.focus();
     }
   });
 

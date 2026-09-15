@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
-import { createStore, MIGRATIONS, schemaTables } from '../main/store.mjs';
+import { createStore, MIGRATIONS, schemaTables, validateExport } from '../main/store.mjs';
 import { briefingLines } from '../main/brief.mjs';
 import { createQueue } from '../main/queue.mjs';
 
@@ -657,4 +657,131 @@ test('대기 파일 안 항목 전부가 title 결함을 공유하면 반영은 
     '결함 있는 항목 자체는 저장소에도 써지지 않아야 한다(구조 결함은 여전히 격리된다)'
   );
   store.close();
+});
+
+// ── 내보내기·가져오기 왕복 (DATA-01~03) ──
+
+// 왕복이 "같은 상태"인지를 표 전체를 비교해 본다 — 화면에 보이는 몇 줄만 맞춰 보면
+// deleted_at·nudge_count처럼 눈에 안 보이는 칸이 조용히 빠져도 통과한다.
+function seedFull(store) {
+  store.createProject('가나');
+  store.createProject('다라');
+  const [p1, p2] = store.getProjects();
+  store.updateProject(p1.id, { abbr: 'ga' });
+  store.insertCaptures([
+    { id: 'i1', title: '인박스 하나', captured_at: '2026-09-01T00:10:00.000Z', context: { note: '왕복' } },
+    { id: 'i2', abbr: 'ga', title: '할 일', captured_at: '2026-09-02T01:00:00.000Z' },
+    { id: 'i3', title: '대기 건', captured_at: '2026-09-03T02:00:00.000Z' },
+    { id: 'i4', title: '지운 것', captured_at: '2026-09-04T03:00:00.000Z' },
+  ]);
+  store.toWaiting('i3', '상대방');
+  store.nudgeItem('i3');
+  store.setDue('i2', '2026-09-30');
+  store.setNote('i2', '메모');
+  store.completeItem('i1');
+  store.removeItem('i4');
+  store.logEvent('test', 'detail');
+  return { p1, p2 };
+}
+
+const dump = (store) => {
+  const d = store.exportAll();
+  return { project: d.project, item: d.item, event: d.event };
+};
+
+test('내보내기→가져오기 왕복이 모든 표를 그대로 되살린다', () => {
+  const a = createStore(tmpFile());
+  a.open();
+  seedFull(a);
+  const exported = JSON.parse(JSON.stringify(a.exportAll())); // 파일을 거친 것과 같게
+  const before = dump(a);
+
+  const b = createStore(tmpFile());
+  b.open();
+  const out = b.importAll(exported);
+  assert.equal(out.project, before.project.length);
+  assert.equal(out.item, before.item.length);
+
+  assert.deepEqual(dump(b), before);
+  a.close();
+  b.close();
+});
+
+test('가져오기는 기존 데이터를 합치지 않고 갈아끼운다', () => {
+  const a = createStore(tmpFile());
+  a.open();
+  a.createProject('원래');
+  a.insertCaptures([{ id: 'old', title: '원래 있던 것', captured_at: '2026-09-01T00:00:00.000Z' }]);
+
+  const src = createStore(tmpFile());
+  src.open();
+  src.createProject('새로');
+  src.insertCaptures([{ id: 'new', title: '가져온 것', captured_at: '2026-09-05T00:00:00.000Z' }]);
+
+  a.importAll(JSON.parse(JSON.stringify(src.exportAll())));
+  const after = a.exportAll();
+  assert.deepEqual(after.item.map((i) => i.id), ['new']);
+  assert.deepEqual(after.project.map((p) => p.name), ['새로']);
+  a.close();
+  src.close();
+});
+
+test('가져오기 직전 상태가 백업으로 남아 되돌릴 수 있다', () => {
+  const file = tmpFile();
+  const a = createStore(file);
+  a.open();
+  a.createProject('되돌릴 것');
+  a.insertCaptures([{ id: 'keep', title: '잃으면 안 되는 캡처', captured_at: '2026-09-01T00:00:00.000Z' }]);
+
+  const src = createStore(tmpFile());
+  src.open();
+  src.createProject('덮어쓸 것');
+
+  const out = a.importAll(JSON.parse(JSON.stringify(src.exportAll())));
+  assert.ok(out.backup && fs.existsSync(out.backup), '가져오기 직전 백업이 남아야 한다');
+  assert.equal(a.exportAll().item.length, 0);
+  a.close();
+  src.close();
+
+  // 백업 파일을 그대로 열면 가져오기 전 상태다
+  const restored = createStore(out.backup);
+  restored.open();
+  assert.deepEqual(restored.exportAll().item.map((i) => i.title), ['잃으면 안 되는 캡처']);
+  restored.close();
+});
+
+test('context는 객체로 왕복한다 — 문자열로 굳지 않는다', () => {
+  const a = createStore(tmpFile());
+  a.open();
+  a.insertCaptures([{ id: 'c1', title: '맥락', captured_at: '2026-09-01T00:00:00.000Z', context: { a: 1, b: '둘' } }]);
+  const b = createStore(tmpFile());
+  b.open();
+  b.importAll(JSON.parse(JSON.stringify(a.exportAll())));
+  const row = b.getViewState().inbox.find((i) => i.id === 'c1');
+  assert.deepEqual(row.context, { a: 1, b: '둘' });
+  a.close();
+  b.close();
+});
+
+test('남의 파일·손상된 파일·상위 스키마는 가져오지 않는다', () => {
+  const ok = { app: 'whenwork', schema_version: MIGRATIONS.length, project: [], item: [], event: [] };
+  assert.equal(validateExport(ok), null);
+  assert.match(validateExport(null), /읽을 수 없는/);
+  assert.match(validateExport({ app: 'other', schema_version: 1, project: [], item: [] }), /WHENWORK가 내보낸/);
+  assert.match(validateExport({ ...ok, schema_version: MIGRATIONS.length + 1 }), /업데이트/);
+  assert.match(validateExport({ ...ok, item: [{ id: 'x' }] }), /항목 자료가 손상/);
+  assert.match(validateExport({ ...ok, project: [{ id: 'notnum', name: '가' }] }), /프로젝트 자료가 손상/);
+  assert.match(
+    validateExport({ ...ok, item: [{ id: 'x', title: '제목', captured_at: '2026-09-01T00:00:00.000Z', project_id: 99 }] }),
+    /가리키는 프로젝트가 파일에 없/
+  );
+});
+
+test('가져오기가 거부되면 기존 데이터는 그대로다', () => {
+  const a = createStore(tmpFile());
+  a.open();
+  a.insertCaptures([{ id: 'safe', title: '남아야 한다', captured_at: '2026-09-01T00:00:00.000Z' }]);
+  assert.throws(() => a.importAll({ app: 'other', schema_version: 1, project: [], item: [] }));
+  assert.deepEqual(a.exportAll().item.map((i) => i.id), ['safe']);
+  a.close();
 });

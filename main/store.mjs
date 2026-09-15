@@ -127,6 +127,45 @@ function backupBeforeMigrate(db, file, fromVersion) {
   }
 }
 
+// 가져오기 파일 검증. 통과하면 null, 아니면 사람이 읽을 수 있는 이유 한 줄을 돌려준다.
+// **절대 경로나 내부 구조를 이유에 넣지 않는다**(01-02 규칙) — 사용자가 고칠 수 있는 말만 한다.
+//
+// 상위 스키마를 거부하는 이유는 저장소를 여는 쪽과 같다(D-13): 모르는 버전의 데이터를
+// 지금 표에 밀어 넣으면 조용히 컬럼이 잘린다. 앱을 올린 뒤 다시 가져오게 한다.
+export function validateExport(data) {
+  if (!data || typeof data !== 'object') return '읽을 수 없는 파일입니다';
+  if (data.app !== 'whenwork') return 'WHENWORK가 내보낸 파일이 아닙니다';
+  if (!Array.isArray(data.project) || !Array.isArray(data.item)) {
+    return '내보내기 파일의 형식이 올바르지 않습니다';
+  }
+  if (data.event != null && !Array.isArray(data.event)) {
+    return '내보내기 파일의 형식이 올바르지 않습니다';
+  }
+  const sv = Number(data.schema_version);
+  if (!Number.isFinite(sv) || sv < 1) return '내보내기 파일의 형식이 올바르지 않습니다';
+  if (sv > MIGRATIONS.length) {
+    return '더 새로운 버전에서 내보낸 파일입니다 — 앱을 업데이트한 뒤 다시 가져오세요';
+  }
+  for (const r of data.project) {
+    if (!Number.isInteger(r?.id) || typeof r?.name !== 'string' || !r.name.trim()) {
+      return '프로젝트 자료가 손상되었습니다';
+    }
+  }
+  const KINDS = new Set(['inbox', 'todo', 'waiting']);
+  for (const r of data.item) {
+    if (typeof r?.id !== 'string' || !r.id) return '항목 자료가 손상되었습니다';
+    if (typeof r?.title !== 'string' || !r.title) return '항목 자료가 손상되었습니다';
+    if (typeof r?.captured_at !== 'string' || !r.captured_at) return '항목 자료가 손상되었습니다';
+    if (r.kind != null && !KINDS.has(r.kind)) return '항목 자료가 손상되었습니다';
+  }
+  // 항목이 가리키는 프로젝트가 파일 안에 없으면 외래키가 깨진 채로 들어간다
+  const ids = new Set(data.project.map((r) => r.id));
+  for (const r of data.item) {
+    if (r.project_id != null && !ids.has(r.project_id)) return '항목이 가리키는 프로젝트가 파일에 없습니다';
+  }
+  return null;
+}
+
 function migrate(db, file) {
   const { user_version: current } = db.prepare('PRAGMA user_version').get();
   if (current > MIGRATIONS.length) {
@@ -616,6 +655,83 @@ export function createStore(file) {
 
   open();
 
+  // ── 내보내기·가져오기 (DATA-01~03)
+  //
+  // 사람이 읽을 수 있는 JSON 하나로 전부 내보낸다. 표 이름·컬럼 이름을 그대로 쓰고
+  // 들여쓰기를 둔다 — 사용자가 열어 보고 필요하면 손으로 고칠 수 있어야 데이터를
+  // 자기 것으로 소유한다고 할 수 있다. schema는 가져오기 쪽이 호환을 판단하는 근거다.
+  const EXPORT_VERSION = 1;
+
+  function exportAll() {
+    if (!db || !state.ok) throw new Error('store not open');
+    return {
+      app: 'whenwork',
+      export_version: EXPORT_VERSION,
+      schema_version: MIGRATIONS.length,
+      exported_at: new Date().toISOString(),
+      project: db.prepare('SELECT id, name, abbr, status, sort FROM project ORDER BY sort, id').all(),
+      item: db
+        .prepare(
+          `SELECT id, project_id, kind, title, due, waiting_for, captured_at, done_at,
+                  source, context, note, nudged_at, nudge_count, deleted_at
+             FROM item ORDER BY captured_at`
+        )
+        .all(),
+      event: db.prepare('SELECT id, at, kind, detail FROM event ORDER BY at').all(),
+    };
+  }
+
+  // 가져오기는 **전부 갈아끼운다**(합치지 않는다). 합치기는 같은 id가 양쪽에 있을 때
+  // 무엇이 이기는지를 사용자가 알 수 없어, 되돌릴 수 없는 방식으로 조용히 섞인다.
+  // 갈아끼우기는 "이 파일의 상태가 된다"는 한 문장으로 설명되고, 직전 백업으로 되돌아간다.
+  //
+  // 백업이 실패하면 가져오지 않는다(D-16의 예외) — 이행 전 백업은 실패해도 이행이
+  // 진행될 이유가 있지만(스키마를 안 올리면 앱을 못 쓴다), 가져오기는 사용자가 지금
+  // 고른 행위라 되돌릴 자리가 없으면 하지 않는 편이 낫다.
+  function importAll(data) {
+    if (!db || !state.ok) throw new Error('store not open');
+    const bad = validateExport(data);
+    if (bad) throw new Error(bad);
+    const backup = backupNow('import');
+    withTransaction(db, () => {
+      db.exec('DELETE FROM item');
+      db.exec('DELETE FROM event');
+      db.exec('DELETE FROM project');
+      const ip = db.prepare('INSERT INTO project (id, name, abbr, status, sort) VALUES (?, ?, ?, ?, ?)');
+      for (const r of data.project) ip.run(r.id, r.name, r.abbr ?? null, r.status ?? 'active', r.sort ?? 0);
+      const ii = db.prepare(
+        `INSERT INTO item (id, project_id, kind, title, due, waiting_for, captured_at, done_at,
+                           source, context, note, nudged_at, nudge_count, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const r of data.item) {
+        ii.run(
+          r.id, r.project_id ?? null, r.kind ?? 'inbox', r.title, r.due ?? null, r.waiting_for ?? null,
+          r.captured_at, r.done_at ?? null, r.source ?? 'manual',
+          // context는 객체로 내보냈으면 객체로 돌아와야 한다 — 문자열이면 그대로 둔다
+          r.context == null ? null : typeof r.context === 'string' ? r.context : JSON.stringify(r.context),
+          r.note ?? null, r.nudged_at ?? null, Number(r.nudge_count ?? 0), r.deleted_at ?? null
+        );
+      }
+      const ie = db.prepare('INSERT INTO event (id, at, kind, detail) VALUES (?, ?, ?, ?)');
+      for (const r of data.event ?? []) ie.run(r.id ?? null, r.at, r.kind, r.detail ?? null);
+    });
+    return { backup, project: data.project.length, item: data.item.length, event: (data.event ?? []).length };
+  }
+
+  // 가져오기 직전 백업 — 이행 전 백업과 같은 자리에 같은 방식으로 둔다(WAL 먼저 합친다).
+  // 여기서는 실패를 삼키지 않는다: 되돌릴 자리가 없으면 가져오기 자체를 하지 않는다.
+  function backupNow(reason = 'manual') {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    const dir = path.join(path.dirname(file), 'backups');
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/..+$/, '');
+    const dest = path.join(dir, `store-${reason}-${stamp}.sqlite`);
+    fs.copyFileSync(file, dest);
+    pruneOldBackups(dir);
+    return dest;
+  }
+
   return {
     open,
     close,
@@ -645,6 +761,10 @@ export function createStore(file) {
     purgeDeleted,
     getHistory,
     briefing,
+    schemaVersion: () => MIGRATIONS.length,
+    exportAll,
+    importAll,
+    backupNow,
     file,
   };
 }

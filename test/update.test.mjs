@@ -72,6 +72,11 @@ test('흔한 실패는 사람이 고칠 수 있는 말로 갈린다', () => {
   // 릴리스가 하나도 없을 때 electron-updater가 실제로 내는 문장 (패키징본으로 확인)
   assert.match(friendlyUpdateError(new Error('No published versions on GitHub')), /릴리스가 없/);
   assert.match(friendlyUpdateError(new Error('403 API rate limit exceeded')), /한도/);
+  // 릴리스를 막 공개한 직후 실제로 나온 문장 — 피드 전파 전까지 몇 분간 이렇게 온다
+  assert.match(
+    friendlyUpdateError(new Error('Cannot parse releases feed: Unable to find latest version on GitHub: HttpError: 406')),
+    /잠시 뒤 다시/
+  );
   assert.match(friendlyUpdateError(new Error('code signature validation failed')), /직접 내려받아/);
   assert.match(friendlyUpdateError(new Error('무언가 이상한 일')), /알 수 없/);
 });

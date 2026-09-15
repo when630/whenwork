@@ -80,7 +80,10 @@ export function setupUpdater(ctx) {
   // 받는 것까지만 자동이고, 설치는 앱을 끌 때 한다(위 주석의 이유).
   autoUpdater.autoDownload = platform.canAutoUpdate;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.logger = null; // 기본 console 로거가 stdout을 채우지 않게
+  // 평상시에는 조용히 — 기본 console 로거가 stdout을 채운다. 다만 --check-update는
+  // "왜 실패하는지"를 보려고 있는 모드라 거기서만 켠다(실패 원인이 요청 헤더나 피드
+  // 파싱처럼 이벤트로는 드러나지 않는 자리에 있을 때 이것 말고는 볼 방법이 없다).
+  autoUpdater.logger = process.argv.includes('--check-update') ? console : null;
 
   autoUpdater.on('checking-for-update', () => {
     ctx.update.status = 'checking';
@@ -168,6 +171,11 @@ export function friendlyUpdateError(err) {
   // 패키징본으로 실제 확인해서 알았다(--check-update). 404만 보면 놓친다.
   if (/404|No published versions/i.test(msg)) return '아직 올라온 릴리스가 없습니다';
   if (/403|rate limit/i.test(msg)) return 'GitHub 요청 한도에 걸렸습니다 — 잠시 뒤 다시';
+  // 릴리스를 막 공개한 뒤 몇 분간은 GitHub 피드가 아직 그것을 모른다 — 실제로 406이
+  // 왔고, 그동안 "원인을 알 수 없습니다"가 떴다. 곧 풀리는 일이므로 그렇게 말한다.
+  if (/406|Cannot parse releases feed|Unable to find latest version/i.test(msg)) {
+    return 'GitHub가 아직 최신 릴리스를 알려주지 않습니다 — 잠시 뒤 다시';
+  }
   if (/signature|code sign/i.test(msg)) return '서명 확인에 실패했습니다 — 직접 내려받아 주세요';
   return '원인을 알 수 없습니다';
 }

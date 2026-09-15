@@ -12,6 +12,12 @@ const TABS = [
 // 앱에서 만지는 설정. DB 접속은 여기 없다 — settings.json을 고치고 재시작하는 쪽이 안전하다.
 const SETTING_FIELDS = [
   {
+    key: 'hotkey',
+    label: '퀵캡처 단축키',
+    kind: 'hotkey',
+    hint: '예: Control+Alt+Space · Command+Shift+K — 바꾸면 그 자리에서 등록을 확인합니다',
+  },
+  {
     key: 'notifyEnabled',
     label: '아침 브리핑 알림',
     kind: 'bool',
@@ -434,7 +440,7 @@ function renderSettings() {
     row.append(el('div', 't', f.label));
     const v = cfg.values[f.key];
     const isDefault = f.kind === 'bool' ? false : !v;
-    row.append(el('span', 'set-val' + (isDefault ? ' dim' : ''), settingDisplay(f, cfg.values, cfg.defaults)));
+    row.append(el('span', 'set-val' + (isDefault ? ' dim' : ''), settingDisplay(f, cfg.values, cfg.defaults, { hotkeyOk: cfg.hotkeyOk })));
     row.append(el('div', 'ctx', f.hint));
     row.onclick = () => {
       sel = idx;
@@ -499,6 +505,14 @@ async function editSetting(f) {
   if (!f || !cfg) return;
   if (f.kind === 'bool') {
     await window.whenwork.settingsSet(f.key, cfg.values[f.key] === false);
+    return loadSettings();
+  }
+  if (f.kind === 'hotkey') {
+    const accel = await promptText(`${f.label} — ${f.hint}`, cfg.values.hotkey ?? '');
+    if (!accel) return;
+    const res = await window.whenwork.hotkeySet(accel);
+    if (!res.ok) return toast(res.error ?? '단축키를 등록하지 못했습니다', { holdMs: 5000 });
+    toast(`단축키 ${res.label} 로 바뀌었습니다`);
     return loadSettings();
   }
   const raw = await promptText(`${f.label} (${f.hint})`, cfg.values[f.key] ?? cfg.defaults?.notifyAt ?? '');
@@ -673,6 +687,8 @@ async function toggleDone(it) {
 // ── 동작
 async function refresh() {
   state = await window.whenwork.getState();
+  // PLAT-04: 알림이 막혀 대체된 말 — 알림 대신이므로 오래 세워 둔다
+  if (state?.notice) toast(state.notice, { holdMs: 9000 });
   // 첫 로드에서만 탭을 고른다 — 인박스에 쌓인 게 있으면 그것부터 치우는 게 순서다.
   // 매번 고르면 일하는 중에 탭이 저절로 바뀐다.
   // DB가 아직 안 붙었으면 판단을 미룬다 — 오프라인 첫 로드에서 기회를 잃지 않게

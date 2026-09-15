@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { parseCaptureToken, parseDue } from './parse.mjs';
 import { validateExport } from './store.mjs';
+import { platform } from './platform/index.mjs';
 import { NOTIFY_AT_DEFAULT } from './brief.mjs';
 
 // 캡처 저장의 단일 경로(D-01/D-03). capture:save·capture:followUp 두 핸들러와
@@ -54,7 +55,7 @@ export function registerIpc(ctx) {
   //
   // DB가 꺼져 있어도 봐야 하는 화면이라(접속 정보 확인) DB 경로를 타지 않는다.
   // 앱에서 만지는 건 아래 네 개뿐이고, DB 접속은 settings.json을 직접 고쳐 재시작한다.
-  const SETTING_KEYS = ['notifyEnabled', 'notifyAt'];
+  const SETTING_KEYS = ['notifyEnabled', 'notifyAt', 'hotkey'];
 
   ipcMain.handle('settings:get', () => {
     // 01-05: PostgreSQL 접속 정보 대신 저장소(store.mjs) 파일 위치와 상태를 보여준다
@@ -63,14 +64,26 @@ export function registerIpc(ctx) {
     const st = ctx.store.status();
     return {
       ok: true,
-      values: Object.fromEntries(SETTING_KEYS.map((k) => [k, ctx.settings.get(k)])),
-      defaults: { notifyAt: NOTIFY_AT_DEFAULT },
+      values: Object.fromEntries(
+        SETTING_KEYS.map((k) => [k, k === 'hotkey' ? (ctx.hotkey ?? platform.defaultHotkey) : ctx.settings.get(k)])
+      ),
+      defaults: { notifyAt: NOTIFY_AT_DEFAULT, hotkey: platform.defaultHotkey },
+      // PLAT-02: 지금 조합이 실제로 잡혀 있는지. 화면이 이 값으로 실패를 드러낸다.
+      hotkeyOk: ctx.hotkeyOk,
+      platform: platform.name,
+      // PLAT-04: 알림이 막혀 화면으로 대신 보여줄 말. 한 번 읽어 가면 비운다.
+      notice: (() => {
+        const n = ctx.pendingNotice;
+        ctx.pendingNotice = null;
+        return n;
+      })(),
       store: { file: ctx.store.file, ok: st.ok, notice: st.notice },
       file: ctx.settings.file,
     };
   });
 
   ipcMain.handle('settings:set', (_e, key, value) => {
+    if (key === 'hotkey') return { ok: false, reason: 'use hotkey:set' };
     if (!SETTING_KEYS.includes(key)) return { ok: false };
     if (value === null || value === '') ctx.settings.remove(key);
     else ctx.settings.set(key, value);
@@ -93,7 +106,11 @@ export function registerIpc(ctx) {
   ipcMain.handle('capture:save', (_e, title) => saveCapture(ctx, title));
 
   ipcMain.handle('today:getState', async () => {
-    const base = { pending: ctx.pending };
+    // PLAT-04: OS 알림이 막혀 대체된 말은 어느 화면에서든 한 번은 보여야 한다.
+    // 한 번 실어 보내면 비운다 — 같은 말이 새로고침마다 다시 뜨면 그게 더 성가시다.
+    const notice = ctx.pendingNotice;
+    ctx.pendingNotice = null;
+    const base = { pending: ctx.pending, notice };
     const st = ctx.store.status();
     if (!st.ok) return { ...base, online: false, notice: st.notice };
     // WR-03: st.ok가 true인 뒤에도 getViewState() 실행 중 SQLite 오류(디스크 I/O 등)가 날 수
@@ -168,6 +185,22 @@ export function registerIpc(ctx) {
     } catch {
       return { ok: false };
     }
+  });
+
+  // PLAT-02: 조합을 바꾸면 **그 조합의 등록 성공 여부까지** 확인해서 돌려준다.
+  // 실패하면 설정에 저장하지 않고 이전 조합으로 되돌린다 — 저장해 두면 다음 실행에서도
+  // 안 잡히는 조합으로 조용히 시작한다.
+  ipcMain.handle('hotkey:set', (_e, accel) => {
+    const next = String(accel ?? '').trim();
+    if (!next) return { ok: false, error: '조합이 비어 있습니다' };
+    const prev = ctx.hotkey;
+    if (ctx.applyHotkey(next)) {
+      ctx.settings.set('hotkey', next);
+      ctx.settings.flush();
+      return { ok: true, hotkey: next, label: platform.hotkeyLabel(next) };
+    }
+    ctx.applyHotkey(prev); // 되돌린다 — 새 조합이 안 잡히는데 옛 조합까지 풀려 있으면 안 된다
+    return { ok: false, error: '그 조합은 다른 앱이 쓰고 있거나 잘못된 형식입니다' };
   });
 
   // ── 내보내기·가져오기 (DATA-01~03)

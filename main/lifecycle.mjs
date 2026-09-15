@@ -4,13 +4,14 @@ import {
   BrowserWindow,
   Tray,
   Menu,
-  nativeImage,
   globalShortcut,
   screen,
+  Notification,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { platform } from './platform/index.mjs';
 import { createQueue } from './queue.mjs';
 import { createStore } from './store.mjs';
 import { createSettings } from './settings.mjs';
@@ -20,7 +21,8 @@ import { registerIpc, saveCapture } from './ipc.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
-const HOTKEY = 'Control+Alt+Space'; // 설계 11절 — Claude 쪽 바인딩은 사용자가 해제함
+// 기본 조합은 플랫폼 모듈이 정한다(PLAT-06). 사용자가 바꾼 값은 settings의 hotkey에 있다.
+const APP_ID = 'com.when630.whenwork';
 const TODAY_W = 880; // 오늘 뷰 — 화면 중앙, 가로 넓게
 const TODAY_H = 680;
 const CAPTURE_H = 88; // 퀵캡처 — 한 줄 입력 + 힌트 푸터에 딱 맞는 높이
@@ -152,7 +154,29 @@ export function bootstrap() {
     // 폴더 선택 같은 네이티브 다이얼로그가 뜨면 창이 blur된다 — 그때 창을 숨기면 안 된다
     suppressHide: false,
     abbrHints: [],
+    // 현재 단축키와 그 등록 성공 여부(PLAT-02). applyHotkey가 둘 다 갱신한다.
+    hotkey: null,
+    // 알림이 막혀 화면으로 대신 보여줄 말(PLAT-04). 오늘 뷰가 읽어 가면 비운다.
+    pendingNotice: null,
     SMOKE,
+  };
+  // PLAT-04: 알림은 조용히 사라지면 안 된다. OS가 지원하지 않거나(리눅스 일부),
+  // 권한이 거부됐거나, show()가 던지면 **앱 안 표시로 대체**한다 — 아침 브리핑이
+  // 알림 하나에만 얹혀 있으면 권한을 한 번 거부한 사람에게는 영영 말이 없어진다.
+  // 돌려주는 값은 "OS 알림으로 실제로 보여줬는가"다(false면 호출부가 대체를 고른다).
+  ctx.notify = (title, body, { onClick } = {}) => {
+    if (ctx.SMOKE) return true; // 스모크에서 실제 알림을 띄우지 않는다
+    try {
+      if (!Notification.isSupported()) throw new Error('unsupported');
+      const note = new Notification({ title, body });
+      if (onClick) note.on('click', onClick);
+      note.show();
+      return true;
+    } catch {
+      ctx.pendingNotice = body ? `${title} — ${body}` : title;
+      ctx.todayWin?.webContents.send('today:refresh');
+      return false;
+    }
   };
 
   // 스모크는 실사용 인스턴스와 부딪히지 않게 격리한다 — 안 그러면 단일 인스턴스 락에 걸려
@@ -354,12 +378,7 @@ export function bootstrap() {
   ctx.showToday = showToday;
 
   // ── 트레이
-  function trayImage() {
-    const p = path.join(ROOT, 'build', 'tray.png');
-    return fs.existsSync(p)
-      ? nativeImage.createFromBuffer(fs.readFileSync(p))
-      : nativeImage.createEmpty();
-  }
+  const trayImage = () => platform.trayImage(ROOT);
 
   // 저장소 상태(D-03) — 예전에 DB 접속 상태를 보여주던 툴팁·메뉴 자리를 그대로 쓴다.
   // 값을 다룰 때는 status().notice의 요약 문구와 정수 건수뿐이다(내부 경로·예외 문자열은 노출하지 않는다).
@@ -382,7 +401,12 @@ export function bootstrap() {
     ctx.tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: '오늘 뷰', click: toggleToday },
-        { label: `퀵캡처 (${ctx.hotkeyOk ? 'Ctrl+Alt+Space' : '단축키 등록 실패!'})`, click: showCapture },
+        {
+          label: ctx.hotkeyOk
+            ? `퀵캡처 (${platform.hotkeyLabel(ctx.hotkey)})`
+            : `퀵캡처 — 단축키 등록 실패! (설정에서 다른 조합으로)`,
+          click: showCapture,
+        },
         { type: 'separator' },
         {
           label: storeStatusLine(),
@@ -392,10 +416,13 @@ export function bootstrap() {
         {
           label: '로그인 시 자동 시작',
           type: 'checkbox',
-          checked: app.getLoginItemSettings().openAtLogin,
+          checked: platform.getLoginItem(app),
           click: (menuItem) => {
-            app.setLoginItemSettings({ openAtLogin: menuItem.checked, args: [] });
-            ctx.settings.set('openAtLogin', menuItem.checked);
+            // PLAT-03: 미서명 macOS에서는 켜지지 않을 수 있다 — 돌려받은 값으로 확인하고
+            // 실패하면 설정에 저장하지 않는다(다음에 켜졌다고 거짓으로 보이지 않게).
+            const ok = platform.setLoginItem(app, menuItem.checked);
+            if (ok) ctx.settings.set('openAtLogin', menuItem.checked);
+            else ctx.notify('자동 시작을 켜지 못했습니다', '시스템 설정의 로그인 항목에서 직접 추가해 주세요');
             refreshTrayMenu();
           },
         },
@@ -420,7 +447,7 @@ export function bootstrap() {
   ctx.refreshTrayMenu = refreshTrayMenu;
 
   // ── 앱 수명
-  app.setAppUserModelId('com.when630.whenwork');
+  platform.prepareApp(app, { appId: APP_ID });
   // 개발 실행과 설치본이 같은 userData(큐·설정)를 쓰도록 이름을 고정한다 —
   // 안 그러면 productName 기준으로 갈려서 큐에 쌓인 캡처가 한쪽에만 남는다.
   app.setName('whenwork');
@@ -434,14 +461,45 @@ export function bootstrap() {
       if (ctx.captureWin && !ctx.captureWin.isDestroyed() && ctx.captureWin.isVisible()) return ctx.captureWin.hide();
       showCapture();
     };
-    // register()는 이미 남이 쓰는 조합이면 조용히 false만 낸다 — 메뉴에 실패를 드러낸다
-    ctx.hotkeyOk = globalShortcut.register(HOTKEY, onHotkey);
-    refreshTrayMenu();
+    // PLAT-02: 등록은 한 곳에서만 한다 — 설정에서 조합을 바꿔도 같은 함수를 부르므로
+    // "바꾼 조합이 실제로 잡혔는지"가 처음 등록과 같은 방식으로 확인된다.
+    ctx.applyHotkey = (accel) => {
+      globalShortcut.unregisterAll();
+      const next = accel || ctx.settings.get('hotkey') || platform.defaultHotkey;
+      // register()는 이미 남이 쓰는 조합이면 조용히 false만 낸다. isRegistered()로 한 번 더
+      // 확인하는 이유는 macOS에서 register()가 true를 내고도 실제로는 안 잡히는 보고가
+      // 있어서다(Phase 4 리서치 플래그) — 두 값이 어긋나면 실패로 본다.
+      let ok = false;
+      try {
+        ok = globalShortcut.register(next, onHotkey) && globalShortcut.isRegistered(next);
+      } catch {
+        ok = false; // 조합 문자열 자체가 잘못된 경우 register가 던진다
+      }
+      ctx.hotkey = next;
+      ctx.hotkeyOk = ok;
+      refreshTrayMenu();
+      return ok;
+    };
+    ctx.applyHotkey();
+    if (!ctx.hotkeyOk) {
+      ctx.notify('단축키를 등록하지 못했습니다', `${platform.hotkeyLabel(ctx.hotkey)} 를 다른 앱이 쓰고 있습니다 — 설정에서 다른 조합으로 바꿔 주세요`);
+    }
     scheduleJobs(ctx); // 큐 flush·수집·브리핑·백업·리뷰·캘린더 타이머 등록 (main/jobs.mjs)
 
     // 패키징본에서만 자동 시작을 걸어둔다 — 개발 실행(electron.exe)을 등록해봐야 쓸모없다
     if (app.isPackaged && ctx.settings.get('openAtLogin') !== false) {
-      app.setLoginItemSettings({ openAtLogin: true, args: [] });
+      platform.setLoginItem(app, true);
+    }
+
+    // PLAT-05: 첫 실행 한 번만. 트레이/메뉴바 아이콘이 어디 있는지 모르면 앱이 뜬 줄도
+    // 모른다 — 알림이 막혀 있으면 오늘 뷰를 열어 같은 말을 화면으로 보여준다.
+    if (!SMOKE && !ctx.settings.get('firstRunShown')) {
+      const hint = platform.firstRunHint(platform.hotkeyLabel(ctx.hotkey));
+      ctx.settings.set('firstRunShown', true);
+      if (!ctx.notify(hint.title, hint.body)) {
+        ctx.pendingNotice = `${hint.title} — ${hint.body}`;
+        ctx.showToday();
+      }
     }
 
     if (SMOKE && INJECT_CAPTURE) {

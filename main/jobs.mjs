@@ -2,7 +2,6 @@
 //
 // Phase 2: 제거 대상 기능의 배경 작업을 전부 걷어냈다. 남는 것은 큐 반영 1회, 아침 브리핑,
 // purge뿐이다 — 모두 저장소(store.mjs)만 거치고 외부 프로세스를 부르지 않는다.
-import { Notification } from 'electron';
 import { briefDecision, briefingLines, dayKey, NOTIFY_AT_DEFAULT, STALE_WAITING_DAYS } from './brief.mjs';
 
 const PURGE_DAYS = 30; // 소프트 삭제한 항목을 실제로 비우기까지 두는 기간
@@ -33,7 +32,6 @@ export function scheduleJobs(ctx) {
   // 일정·지난주 리뷰는 이 페이즈에서 걷어낸 기능이라 인자 없이 부른다 — briefingLines()가
   // events/review를 falsy 가드로 이미 감싸고 있어 문구가 깨지지 않는다(RESEARCH Pitfall 1).
   async function maybeBrief() {
-    if (!Notification.isSupported()) return;
     const today = dayKey();
     const decision = briefDecision({
       at: ctx.settings.get('notifyAt') ?? NOTIFY_AT_DEFAULT,
@@ -50,9 +48,8 @@ export function scheduleJobs(ctx) {
       const parts = briefingLines(ctx.store.briefing(STALE_WAITING_DAYS));
       ctx.settings.set('lastBriefing', today);
       if (!parts.length) return; // 챙길 게 없으면 조용히
-      const note = new Notification({ title: '오늘 WHENWORK', body: parts.join(' · ') });
-      note.on('click', () => ctx.showToday());
-      note.show();
+      // PLAT-04: 알림이 막혀 있으면 ctx.notify가 앱 안 표시로 대체한다 — 조용히 사라지지 않는다
+      ctx.notify('오늘 WHENWORK', parts.join(' · '), { onClick: () => ctx.showToday() });
     } catch {
       // 브리핑 실패는 조용히 — 다음 날 다시
     }

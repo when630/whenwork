@@ -6,13 +6,19 @@
 //                           원본 비율 그대로 512px로 줄인다(여백도 함께 남긴다 —
 //                           설치 관리자와 Dock은 자기 여백을 따로 두지 않는다).
 //
-//   build/tray*.png       — 트레이/메뉴바 글리프. 원본을 **여백을 잘라내고** 줄인 것이다.
-//                           처음에는 16px 격자에 손으로 다시 그렸는데, 원·바늘·체크 셋이
-//                           서로 뭉개져 무엇인지 알 수 없었다. 알파를 곱해 평균하는 박스
-//                           축소는 원본의 얇은 획을 반투명 픽셀로 남겨 형태를 지켜 준다 —
-//                           16px에서도 시계와 체크가 갈린다. 여백을 먼저 자르는 것이
-//                           핵심이다: 원본은 사방이 비어 있어 그대로 줄이면 알맹이가
-//                           그만큼 작아져 트레이에서 점처럼 보인다.
+//   build/tray*.png       — 트레이/메뉴바 글리프. 원본에서 **흰 도형만 떼어내** 그
+//                           도형의 경계로 잘라 줄인 것이다. 아이콘은 배경 위에 도형이
+//                           얹힌 앱 아이콘이라, 알파를 그대로 쓰면 둥근 사각형 전체가
+//                           글리프가 되어 16px 트레이에서는 파란 덩어리가 되고 macOS
+//                           Template에서는 까만 사각형이 된다(둘 다 실제로 그랬다).
+//                           떼어내는 기준은 밝기가 아니라 가장 어두운 채널이다 —
+//                           배경 그라디언트의 하늘색은 밝기가 높아 밝기로 자르면
+//                           배경까지 글리프가 된다(이것도 실제로 그랬다). 자세한 이유는
+//                           glyphMask에 적었다.
+//
+//                           16px 격자에 손으로 다시 그려 본 적도 있는데, 원·바늘·체크
+//                           셋이 서로 뭉개져 무엇인지 알 수 없었다. 알파를 곱해 평균하는
+//                           박스 축소가 얇은 획을 반투명 픽셀로 남겨 형태를 지켜 준다.
 //
 //   build/tray-Template*.png — macOS 메뉴바용. 알파만 남긴 검정 — OS가 다크/라이트에
 //                           맞춰 칠한다(main/platform/darwin.mjs가 이 파일을 먼저 찾는다).
@@ -201,15 +207,70 @@ export function resize(src, w, h, size, bb = null) {
   return out;
 }
 
-// macOS Template: 색은 버리고 알파만 남긴다(검정) — OS가 다크/라이트에 맞춰 칠한다.
-export function toTemplate(rgba) {
-  const out = Buffer.from(rgba);
-  for (let i = 0; i < out.length; i += 4) {
-    out[i] = 0;
-    out[i + 1] = 0;
-    out[i + 2] = 0;
+// 앱 아이콘에서 **흰 도형만** 떼어낸다.
+//
+// 새 아이콘은 둥근 사각형 배경 위에 흰 시계·체크가 얹힌 앱 아이콘이다. 알파를 그대로
+// 쓰면 사각형 전체가 글리프가 되어, 16px 트레이에서는 파란 덩어리로 뭉개지고 macOS
+// Template에서는 **까만 사각형**이 된다(둘 다 실제로 그렇게 나왔다). 트레이·메뉴바가
+// 원하는 것은 배경이 아니라 그 위의 도형이다.
+//
+// 가르는 기준은 밝기가 아니라 **가장 어두운 채널**이다. 배경은 그라디언트라 왼쪽 위
+// 하늘색은 밝기가 0.7을 넘어 밝기로 자르면 배경까지 글리프가 된다(실제로 그랬다 —
+// 글리프 경계가 아이콘 전체 크기로 잡혔다). 흰색만 세 채널이 모두 높다:
+//   흰색 (255,255,255) → 1.00   하늘색 (125,211,252) → 0.49   진파랑 (30,64,175) → 0.12
+// 경계의 반투명 픽셀이 남아야 16px에서 획이 이어지므로 이진화하지 않는다.
+export function glyphMask(rgba, w, h) {
+  const out = Buffer.alloc(w * h * 4);
+  const FLOOR = 0.62;
+  for (let i = 0; i < w * h; i++) {
+    const d = i * 4;
+    const a = rgba[d + 3] / 255;
+    const minCh = Math.min(rgba[d], rgba[d + 1], rgba[d + 2]) / 255;
+    const v = Math.max(0, (minCh - FLOOR) / (1 - FLOOR));
+    out[d] = rgba[d];
+    out[d + 1] = rgba[d + 1];
+    out[d + 2] = rgba[d + 2];
+    out[d + 3] = Math.round(255 * v * a);
   }
   return out;
+}
+
+// 마스크를 한 가지 색으로 칠한다. Windows 트레이는 밝은·어두운 작업 표시줄 양쪽에
+// 서므로 아이콘의 파랑을 그대로 쓴다 — 흰 글리프는 밝은 작업 표시줄에서 사라진다.
+export function tint(rgba, [r, g, b]) {
+  const out = Buffer.from(rgba);
+  for (let i = 0; i < out.length; i += 4) {
+    out[i] = r;
+    out[i + 1] = g;
+    out[i + 2] = b;
+  }
+  return out;
+}
+
+// macOS Template: 색은 버리고 알파만 남긴다(검정) — OS가 다크/라이트에 맞춰 칠한다.
+export function toTemplate(rgba) {
+  return tint(rgba, [0, 0, 0]);
+}
+
+// 아이콘의 대표 색 — **배경 픽셀의 평균**이다. 가장 진한 한 픽셀을 고르면 그라디언트
+// 끝의 극단값(#000ada 같은)이 잡혀 아이콘과 다른 색이 된다. 글리프(흰 도형)는 마스크로
+// 빼고, 남은 배경만 평균 낸다.
+export function accentColor(rgba, mask, w, h) {
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  for (let i = 0; i < w * h; i++) {
+    const d = i * 4;
+    if (rgba[d + 3] < 200) continue; // 투명한 바깥
+    if (mask[d + 3] > 40) continue; // 흰 도형
+    r += rgba[d];
+    g += rgba[d + 1];
+    b += rgba[d + 2];
+    n++;
+  }
+  if (!n) return [0x2f, 0x5c, 0xf5];
+  return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
 }
 
 export function buildIcons() {
@@ -217,18 +278,29 @@ export function buildIcons() {
   const src = decodePng(fs.readFileSync(SRC));
   const bb = bbox(src.rgba, src.w, src.h);
 
+  // 앱 아이콘 — 원본 그대로. 둥근 사각형 배경이 곧 앱 아이콘의 모양이다.
   fs.writeFileSync(path.join(OUT_DIR, 'icon.png'), encodePng(512, 512, resize(src.rgba, src.w, src.h, 512)));
 
+  // 트레이/메뉴바 — 배경을 버리고 흰 도형만 떼어내 **그 도형의 경계로** 다시 자른다.
+  // 앱 아이콘의 경계 상자(사각형 전체)로 자르면 도형이 프레임 안에서 작아진다.
+  const mask = glyphMask(src.rgba, src.w, src.h);
+  const gb = bbox(mask, src.w, src.h);
+  const accent = accentColor(src.rgba, mask, src.w, src.h);
   for (const size of [16, 32]) {
-    const px = resize(src.rgba, src.w, src.h, size, bb);
+    const px = resize(mask, src.w, src.h, size, gb);
     const suffix = size === 16 ? '' : '@2x';
-    fs.writeFileSync(path.join(OUT_DIR, `tray${suffix}.png`), encodePng(size, size, px));
+    fs.writeFileSync(path.join(OUT_DIR, `tray${suffix}.png`), encodePng(size, size, tint(px, accent)));
     fs.writeFileSync(path.join(OUT_DIR, `tray-Template${suffix}.png`), encodePng(size, size, toTemplate(px)));
   }
-  return { src: `${src.w}x${src.h}`, crop: bb.x1 - bb.x0 + 1 };
+  return {
+    src: `${src.w}x${src.h}`,
+    crop: bb.x1 - bb.x0 + 1,
+    glyph: gb.x1 - gb.x0 + 1,
+    accent: accent.map((v) => v.toString(16).padStart(2, '0')).join(''),
+  };
 }
 
 if (process.argv[1] && process.argv[1].endsWith('make-icon.mjs')) {
   const info = buildIcons();
-  console.log(`icons written to build/ (source ${info.src}, crop ${info.crop}px → icon.png 512, tray 16/32 + Template)`);
+  console.log(`icons written to build/ (source ${info.src} → icon.png 512, glyph ${info.glyph}px crop, accent #${info.accent})`);
 }

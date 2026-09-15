@@ -18,31 +18,71 @@ test('append 후 readAll로 그대로 읽힌다', () => {
   assert.equal(q.count(), 2);
 });
 
-test('drain 성공 시 소비한 항목이 파일에서 사라진다', async () => {
-  const q = createQueue(tmpFile());
+test('replayPending은 큐 두 항목을 반영하고 큐 파일과 대기 파일을 모두 지운다', () => {
+  const file = tmpFile();
+  const q = createQueue(file);
   q.append({ id: 'a' });
   q.append({ id: 'b' });
   const seen = [];
-  const n = await q.drain(async (entries) => seen.push(...entries));
+  const n = q.replayPending((entries) => seen.push(...entries));
   assert.equal(n, 2);
   assert.deepEqual(seen.map((e) => e.id), ['a', 'b']);
   assert.equal(q.count(), 0);
+  assert.equal(fs.existsSync(file), false);
+  const leftoverPending = fs
+    .readdirSync(path.dirname(file))
+    .filter((f) => f.includes('.pending-'));
+  assert.deepEqual(leftoverPending, []);
 });
 
-test('drain 실패(throw) 시 큐는 그대로 남는다', async () => {
+test('replayPending 중 consume이 throw하면 대기 파일이 남고 반환은 0이며, 다시 부르면 반영된다', () => {
   const q = createQueue(tmpFile());
   q.append({ id: 'a' });
-  await assert.rejects(q.drain(async () => { throw new Error('db down'); }));
-  assert.equal(q.count(), 1);
+  const first = q.replayPending(() => {
+    throw new Error('store down');
+  });
+  assert.equal(first, 0);
+  assert.equal(q.count(), 1); // 대기 파일에 그대로 남아 readAll에서도 보인다
+
+  const seen = [];
+  const second = q.replayPending((entries) => seen.push(...entries));
+  assert.equal(second, 1);
+  assert.deepEqual(seen.map((e) => e.id), ['a']);
+  assert.equal(q.count(), 0);
 });
 
-test('drain 도중 append된 항목은 꼬리에 살아남는다', async () => {
+test('반영 중 들어온 캡처는 새 큐 파일에 남고 이번 반영 대상에 섞이지 않는다', () => {
   const q = createQueue(tmpFile());
   q.append({ id: 'a' });
-  await q.drain(async () => {
+  const seen = [];
+  const n = q.replayPending((entries) => {
+    seen.push(...entries);
     q.append({ id: 'late' }); // consume이 도는 사이에 끼어드는 캡처
   });
+  assert.equal(n, 1);
+  assert.deepEqual(seen.map((e) => e.id), ['a']);
   assert.deepEqual(q.readAll().map((e) => e.id), ['late']);
+});
+
+test('이전 실행이 남긴 대기 파일도 오래된 것부터 함께 반영된다', () => {
+  const file = tmpFile();
+  const dir = path.dirname(file);
+  const base = path.basename(file, '.jsonl');
+  // 이전 실행이 반영 도중 죽어 남긴 대기 파일을 흉내낸다 — 이름의 시각이 오래된 것부터
+  const olderPending = path.join(dir, `${base}.pending-1000000000000.jsonl`);
+  const newerPending = path.join(dir, `${base}.pending-2000000000000.jsonl`);
+  fs.writeFileSync(olderPending, JSON.stringify({ id: 'old' }) + '\n', 'utf8');
+  fs.writeFileSync(newerPending, JSON.stringify({ id: 'stale' }) + '\n', 'utf8');
+
+  const q = createQueue(file);
+  q.append({ id: 'fresh' });
+  const seen = [];
+  const n = q.replayPending((entries) => seen.push(...entries));
+  assert.equal(n, 3);
+  assert.deepEqual(seen.map((e) => e.id), ['old', 'stale', 'fresh']);
+  assert.equal(q.count(), 0);
+  assert.equal(fs.existsSync(olderPending), false);
+  assert.equal(fs.existsSync(newerPending), false);
 });
 
 test('깨진 줄은 건너뛰고 나머지는 살린다', () => {
@@ -54,7 +94,11 @@ test('깨진 줄은 건너뛰고 나머지는 살린다', () => {
   assert.deepEqual(q.readAll().map((e) => e.id), ['a', 'b']);
 });
 
-test('빈 파일 drain은 0을 돌려준다', async () => {
-  const q = createQueue(tmpFile());
-  assert.equal(await q.drain(async () => {}), 0);
+test('큐 파일이 없거나 비어 있으면 replayPending은 0을 돌려주고 아무 파일도 만들지 않는다', () => {
+  const file = tmpFile();
+  const dir = path.dirname(file);
+  const before = fs.readdirSync(dir);
+  const q = createQueue(file);
+  assert.equal(q.replayPending(() => {}), 0);
+  assert.deepEqual(fs.readdirSync(dir).sort(), before.sort());
 });

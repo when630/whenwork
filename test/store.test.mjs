@@ -145,3 +145,123 @@ test('due가 null인 항목은 due가 있는 항목보다 뒤에 온다', () => 
   assert.ok(ids.indexOf('id-due') < ids.indexOf('id-nodue'), 'due 있는 항목이 앞에 와야 한다: ' + ids.join(','));
   store.close();
 });
+
+// ── 열기 실패를 정직하게 다루기 (Task 3: 손상 격리·상위 버전 거부·이행 전 백업) ──
+
+test('쓰레기 바이트 파일은 store.corrupt-*.sqlite로 보존되고 빈 DB로 새로 열린다', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, 'not a database at all');
+  const store = createStore(file);
+  const st = store.status();
+  assert.equal(st.ok, true, '손상된 원본은 옆으로 옮기고 빈 DB로 열려야 한다');
+  assert.equal(st.reason, 'corrupt');
+  assert.ok(st.notice && st.notice.length > 0);
+  assert.ok(!st.notice.includes(file), '안내 문구에 절대 경로가 없어야 한다');
+  assert.ok(!st.notice.includes('Error'), '안내 문구에 에러 객체 문자열이 없어야 한다');
+  assert.ok(st.quarantined, '격리 파일 이름이 있어야 한다');
+  assert.ok(
+    fs.existsSync(path.join(path.dirname(file), st.quarantined)),
+    '격리 파일이 실제로 남아 있어야 한다'
+  );
+  store.close();
+});
+
+test('격리 파일 이름에는 콜론과(확장자 앞을 뺀) 점이 들어가지 않는다', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, 'garbage');
+  const store = createStore(file);
+  const { quarantined } = store.status();
+  assert.match(quarantined, /^store\.corrupt-[^:.]+\.sqlite$/, 'Windows 파일명 제약을 지켜야 한다: ' + quarantined);
+  store.close();
+});
+
+test('MIGRATIONS.length보다 높은 user_version의 DB는 열지 않고 newer로 거부한다', () => {
+  const file = tmpFile();
+  let store = createStore(file);
+  store.close();
+  const raw = new DatabaseSync(file);
+  raw.exec(`PRAGMA user_version = ${MIGRATIONS.length + 1}`);
+  raw.close();
+  store = createStore(file);
+  const st = store.status();
+  assert.equal(st.ok, false);
+  assert.equal(st.reason, 'newer');
+  assert.ok(st.notice && st.notice.length > 0);
+  assert.ok(!st.notice.includes(file));
+  assert.ok(!st.notice.includes('Error'));
+  const result = store.insertCaptures([
+    { id: 'x', title: 'x', abbr: null, captured_at: new Date().toISOString(), context: null },
+  ]);
+  assert.equal(result.inserted, 0, '상위 버전 DB에는 아무것도 쓰이지 않아야 한다');
+  const dirFiles = fs.readdirSync(path.dirname(file));
+  assert.ok(!dirFiles.some((f) => f.includes('corrupt')), '상위 버전 파일은 격리 대상이 아니다(옮기지 않는다)');
+  const check = new DatabaseSync(file);
+  const { user_version } = check.prepare('PRAGMA user_version').get();
+  assert.equal(user_version, MIGRATIONS.length + 1, 'user_version은 그대로여야 한다');
+  check.close();
+});
+
+test('열기 자체가 실패하면(디렉터리 등) 파일을 옮기지 않고 locked/error로 처리한다', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whenwork-s-'));
+  const file = path.join(dir, 'store.sqlite');
+  fs.mkdirSync(file); // 파일 자리에 디렉터리를 두어 열기 자체가 실패하게 만든다(권한·잠김류와 같은 취급)
+  const store = createStore(file);
+  const st = store.status();
+  assert.ok(st.reason === 'locked' || st.reason === 'error', 'locked 또는 error여야 한다: ' + JSON.stringify(st));
+  assert.equal(st.quarantined, null);
+  assert.ok(fs.statSync(file).isDirectory(), '디렉터리가 그대로 있어야 한다(옮기지 않음)');
+});
+
+test('user_version이 실제로 오를 때만 이행 직전 백업이 생기고, 그 뒤 버전이 N이다', () => {
+  const file = tmpFile();
+  let store = createStore(file); // v1까지 정상적으로 마이그레이션
+  store.close();
+  // 다음 버전이 필요해진 상황을 흉내낸다 — 배포된 MIGRATIONS[0]은 건드리지 않고
+  // 테스트 안에서만 임시로 밀어 넣었다가 되돌린다(D-12: 이미 배포된 함수는 고치지 않는다).
+  MIGRATIONS.push(() => {});
+  try {
+    store = createStore(file);
+    assert.equal(store.status().ok, true);
+    const backupDir = path.join(path.dirname(file), 'backups');
+    const backups = fs.existsSync(backupDir) ? fs.readdirSync(backupDir) : [];
+    assert.ok(
+      backups.some((f) => /^store-v1-\d{8}\.sqlite$/.test(f)),
+      '백업 파일이 있어야 한다: ' + backups.join(',')
+    );
+    store.close();
+    const raw = new DatabaseSync(file);
+    const { user_version } = raw.prepare('PRAGMA user_version').get();
+    assert.equal(user_version, 2);
+    raw.close();
+  } finally {
+    MIGRATIONS.pop();
+  }
+});
+
+test('새로 만든 빈 DB(v0에서 시작)는 백업 파일을 만들지 않는다', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  const backupDir = path.join(path.dirname(file), 'backups');
+  assert.equal(fs.existsSync(backupDir), false, 'v0에서 시작하면 백업 폴더 자체가 생기면 안 된다');
+  store.close();
+});
+
+test('백업 폴더를 만들 수 없어도 마이그레이션은 끝까지 진행된다', () => {
+  const file = tmpFile();
+  let store = createStore(file); // v1까지
+  store.close();
+  const backupsPath = path.join(path.dirname(file), 'backups');
+  fs.writeFileSync(backupsPath, '나는 폴더가 아니라 파일이다'); // mkdir이 실패하도록 자리를 막는다
+  MIGRATIONS.push(() => {});
+  try {
+    store = createStore(file);
+    assert.equal(store.status().ok, true, '백업 실패에도 이행은 끝까지 진행돼야 한다');
+    store.close();
+    const raw = new DatabaseSync(file);
+    const { user_version } = raw.prepare('PRAGMA user_version').get();
+    assert.equal(user_version, 2);
+    raw.close();
+  } finally {
+    MIGRATIONS.pop();
+  }
+});

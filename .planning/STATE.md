@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: 내장 저장소 전환
 status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-09-15T00:35:19.309Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-09-15T00:48:38.205Z"
 last_activity: 2026-09-14
 last_activity_desc: Phase 01 execution started
-state_head: fc5e29777a2b6218c5a5ac715f8189b13238d4fe
+state_head: 6f248115f231c3b80e01c9dfcb2de8f0f9095c47
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 7
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-14)
 ## Current Position
 
 Phase: 01 (내장 저장소 전환) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-09-14 — Phase 01 execution started
 
@@ -61,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P01 | 54 min | 3 tasks | 4 files |
 | Phase 01 P02 | 12 min | 2 tasks | 4 files |
 | Phase 01 P03 | 12min | 3 tasks | 7 files |
+| Phase 01 P04 | 3min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,8 @@ Recent decisions affecting current work:
 - [Phase 01]: [Phase 01] 01-03: main/jobs.mjs의 옛 ctx.queue.drain 호출부를 Task 1에서 replayPending으로 최소 수정 — Task 1 acceptance criteria(grep)가 main/ 전체를 검사해 방치하면 통과 불가능했고, 실제로도 없는 함수를 부르는 런타임 버그였다. flush() 전체 재작성은 계획대로 Task 2가 맡았다
 - [Phase 01]: [Phase 01] 01-03: capture:save/capture:followUp을 saveCapture(ctx,title,context)로 통합하며 followUp도 parseCaptureToken을 거치게 됨 — D-01의 두 경로가 같다는 원칙을 그대로 따른 결과(회귀 아님)
 - [Phase 01]: [Phase 01] 01-03: ctx.pending은 이번 세션에서 즉시 반영에 실패한 캡처 수로 한정 — 큐 파일 줄 수와는 분리한다(D-02, 큐는 실행 중 append-only라 성공한 캡처까지 쌓인다)
+- [Phase 01]: [Phase 01] 01-04: getProjects()는 신설한 독립 함수이며, 01-02가 getViewState() 안에 이미 인라인해 둔 프로젝트 조회(정렬 기준 다름: sort,name)는 그대로 둠 — 기존 통과 테스트를 건드리지 않는 최소 변경 범위 판단
+- [Phase 01]: [Phase 01] 01-04: briefing()의 oldest_todo_days는 MIN(captured_at) FILTER 대신 ORDER BY captured_at ASC LIMIT 1로 가져와 JS에서 날수 계산 — count(*) FILTER만 research_resolution이 확인했으므로 다른 집계 함수의 FILTER 지원 불확실성을 피함
 
 ### Pending Todos
 
@@ -104,6 +107,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-15T00:35:19.294Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-09-15T00:48:38.188Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None

@@ -372,9 +372,8 @@ export function bootstrap() {
 
   ctx.queue = createQueue(path.join(app.getPath('userData'), 'queue.jsonl'));
   ctx.settings = createSettings(path.join(app.getPath('userData'), 'settings.json'));
-  // settings.json의 `db`(PostgreSQL 접속) 설정은 더 이상 읽지 않는다 — main/db.mjs는
-  // 이제 아무도 부르지 않는 죽은 파일이다(D-05, main/ipc.mjs·main/jobs.mjs 모두 store만
-  // 쓴다). 파일 자체의 삭제는 01-06 소관이다.
+  // settings.json의 `db`(PostgreSQL 접속) 설정은 더 이상 읽지 않는다 — 이전 PostgreSQL
+  // 저장소 모듈은 삭제되었다(D-05, main/ipc.mjs·main/jobs.mjs 모두 store만 쓴다).
 
   // 새 저장소(D-14) — settings.json·queue.jsonl 옆의 store.sqlite 한 파일이다. 파일 이름에
   // 앱 이름을 넣지 않아 Phase 5 개명이 파일명을 건드리지 않는다.

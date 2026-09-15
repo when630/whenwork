@@ -1,4 +1,4 @@
-// main/store.mjs — node:sqlite 기반 단일 파일 저장소 (main/db.mjs 대체, D-05)
+// main/store.mjs — node:sqlite 기반 단일 파일 저장소 (이전 PostgreSQL 저장소 모듈 대체, D-05)
 // 캡처는 큐에 먼저 남고(main/queue.mjs), 여기서는 그 뒤 즉시 반영만 맡는다(D-01).
 // DatabaseSync는 동기 API라 이 파일의 모든 함수도 동기다. Electron을 import하지 않는
 // 순수 Node 모듈이라 node --test로 검증한다.
@@ -533,8 +533,8 @@ export function createStore(file) {
     }
     const today = new Date().toISOString().slice(0, 10);
     const cutoff = new Date(new Date().getTime() - staleDays * 86400_000).toISOString();
-    // 마감은 어느 탭에 있든 챙겨야 한다 — kind로 거르지 않는다(원본 db.mjs의 이유를 그대로
-    // 옮긴다: kind='todo'만 세면 인박스·대기 항목의 마감이 화면 배지로는 뜨는데 아침에는
+    // 마감은 어느 탭에 있든 챙겨야 한다 — kind로 거르지 않는다(원본 PostgreSQL 저장소 모듈의
+    // 이유를 그대로 옮긴다: kind='todo'만 세면 인박스·대기 항목의 마감이 화면 배지로는 뜨는데 아침에는
     // 조용히 빠진다). 재촉한 건은 그때부터 다시 센다 — 처음 부탁한 날로 세면 방금 재촉한
     // 것까지 묶여 나온다.
     const counts = db

@@ -507,6 +507,71 @@ export function createStore(file) {
     return result.changes;
   }
 
+  // 완료 기록 — 오늘 뷰는 12시간만 보여주므로 "어제 뭐 했지"를 볼 창구가 없었다.
+  // 커밋 목록은 제거 대상 테이블(수집기)에서 오던 것이라 여기서는 계산하지 않고 항상
+  // 빈 배열을 돌려준다 — 호출부와 렌더러가 이 키(commits)를 그대로 읽으므로 모양은 유지한다.
+  function getHistory(days = 7) {
+    if (!db || !state.ok) return { items: [], commits: [] };
+    const cutoff = new Date(new Date().getTime() - days * 86400_000).toISOString();
+    const rows = db
+      .prepare(
+        `SELECT i.id, i.title, i.kind, i.done_at, i.project_id, p.name AS project_name
+         FROM item i LEFT JOIN project p ON p.id = i.project_id
+         WHERE i.deleted_at IS NULL AND i.done_at IS NOT NULL AND i.done_at > ?
+         ORDER BY i.done_at DESC`
+      )
+      .all(cutoff);
+    return { items: rows, commits: [] };
+  }
+
+  // 아침 브리핑 재료 — 이번 페이즈에서 걷어낸 테이블·칼럼에 기대는 원본의 서브쿼리·조인은
+  // 통째로 드롭한다(RESEARCH Pitfall 1). main/brief.mjs의 briefingLines()가 이 여섯 필드
+  // 밖의 값을 모두 falsy 가드로 감싸고 있어 축소된 결과만 넘겨도 문구가 깨지지 않는다.
+  function briefing(staleDays = 5) {
+    if (!db || !state.ok) {
+      return { overdue: 0, due_today: 0, inbox: 0, open_todo: 0, oldest_todo_days: 0, stale_waiting: 0 };
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const cutoff = new Date(new Date().getTime() - staleDays * 86400_000).toISOString();
+    // 마감은 어느 탭에 있든 챙겨야 한다 — kind로 거르지 않는다(원본 db.mjs의 이유를 그대로
+    // 옮긴다: kind='todo'만 세면 인박스·대기 항목의 마감이 화면 배지로는 뜨는데 아침에는
+    // 조용히 빠진다). 재촉한 건은 그때부터 다시 센다 — 처음 부탁한 날로 세면 방금 재촉한
+    // 것까지 묶여 나온다.
+    const counts = db
+      .prepare(
+        `SELECT
+           count(*) FILTER (WHERE due < ?) AS overdue,
+           count(*) FILTER (WHERE due = ?) AS due_today,
+           count(*) FILTER (WHERE kind = 'inbox') AS inbox,
+           count(*) FILTER (WHERE kind = 'todo') AS open_todo,
+           count(*) FILTER (WHERE kind = 'waiting'
+                              AND coalesce(nudged_at, captured_at) < ?) AS stale_waiting
+         FROM item
+         WHERE deleted_at IS NULL AND done_at IS NULL`
+      )
+      .get(today, today, cutoff);
+    // 가장 오래된 미완료 할 일이 잡힌 지 며칠인가 — SQL에서는 해당 그룹의 최소 captured_at만
+    // 가져오고 날수 계산은 JS에서 한다(D-10, RESEARCH Pattern 3).
+    const oldest = db
+      .prepare(
+        `SELECT captured_at FROM item
+         WHERE kind = 'todo' AND deleted_at IS NULL AND done_at IS NULL
+         ORDER BY captured_at ASC LIMIT 1`
+      )
+      .get();
+    const oldestTodoDays = oldest
+      ? Math.floor((new Date().getTime() - new Date(oldest.captured_at).getTime()) / 86400_000)
+      : 0;
+    return {
+      overdue: Number(counts.overdue) || 0,
+      due_today: Number(counts.due_today) || 0,
+      inbox: Number(counts.inbox) || 0,
+      open_todo: Number(counts.open_todo) || 0,
+      oldest_todo_days: oldestTodoDays,
+      stale_waiting: Number(counts.stale_waiting) || 0,
+    };
+  }
+
   open();
 
   return {
@@ -536,6 +601,8 @@ export function createStore(file) {
     nudgeRestore,
     getInbox,
     purgeDeleted,
+    getHistory,
+    briefing,
     file,
   };
 }

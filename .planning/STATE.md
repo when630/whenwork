@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 01
-current_phase_name: 내장 저장소 전환
-status: verifying
-stopped_at: Completed 01-07-PLAN.md
-last_updated: "2026-09-15T01:36:28.685Z"
-last_activity: 2026-09-14
-last_activity_desc: Phase 01 execution started
+current_phase: 02
+current_phase_name: 레거시 기능 제거
+status: ready_to_plan
+stopped_at: Phase 01 완료 (UAT partial — macOS 검증 Phase 4/5 이월)
+last_updated: "2026-09-15T02:49:07.266Z"
+last_activity: 2026-09-15
+last_activity_desc: Phase 01 완료, 코드리뷰 2회·수정 11건 반영
 state_head: 51789eb85c873f75958f104701dc0be20f7a007d
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 7
   completed_plans: 7
-  percent: 0
+  percent: 20
 ---
 
 # Project State
@@ -27,12 +27,12 @@ See: .planning/PROJECT.md (updated 2026-09-14)
 
 ## Current Position
 
-Phase: 01 (내장 저장소 전환) — EXECUTING
-Plan: 7 of 7
-Status: Phase complete — ready for verification
-Last activity: 2026-09-14 — Phase 01 execution started
+Phase: 02 (레거시 기능 제거) — READY TO PLAN
+Plan: 0 of TBD
+Status: Phase 01 완료 — 계획 수립 대기
+Last activity: 2026-09-15 — Phase 01 완료
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██░░░░░░░░] 20%
 
 ## Performance Metrics
 

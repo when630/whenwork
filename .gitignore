@@ -3,3 +3,8 @@ node_modules/
 dist/
 build/
 *.log
+
+# GSD 비활성화 보관 — 되돌리려면 .claude/ 아래로 다시 옮긴다
+.claude/_gsd-disabled/
+.claude/.gsd-staging/
+.claude/worktrees/

@@ -830,3 +830,21 @@ test('보관해도 그 프로젝트의 항목은 사라지지 않는다 — 보�
   assert.ok(all.some((i) => i.id === 'keep'), '보관된 프로젝트의 항목이 함께 사라졌다');
   store.close();
 });
+
+test('보관한 프로젝트는 archivedProjects로 따로 내려온다 — 되돌릴 길이 있어야 한다', () => {
+  const store = createStore(tmpFile());
+  store.open();
+  const gone = store.createProject('보관할 것');
+  store.createProject('남을 것');
+  store.archiveProject(gone);
+
+  const st = store.getViewState();
+  assert.deepEqual(st.projects.map((p) => p.name), ['남을 것']);
+  assert.deepEqual(st.archivedProjects.map((p) => p.name), ['보관할 것']);
+
+  store.restoreProject(gone);
+  const after = store.getViewState();
+  assert.equal(after.archivedProjects.length, 0, '되돌린 뒤에는 보관 목록이 비어야 한다');
+  assert.deepEqual(after.projects.map((p) => p.name).sort(), ['남을 것', '보관할 것']);
+  store.close();
+});

@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('whenwork', {
   projectCreate: (name) => ipcRenderer.invoke('project:create', name),
   projectUpdate: (id, fields) => ipcRenderer.invoke('project:update', id, fields),
   projectArchive: (id) => ipcRenderer.invoke('project:archive', id),
+  projectRestore: (id) => ipcRenderer.invoke('project:restore', id),
   projectMove: (id, dir) => ipcRenderer.invoke('project:move', id, dir),
 
   // ── 설정

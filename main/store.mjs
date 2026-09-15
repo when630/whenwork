@@ -423,8 +423,14 @@ export function createStore(file) {
     const projects = db
       .prepare(`SELECT id, name, status, sort FROM project WHERE status = 'active' ORDER BY sort, name`)
       .all();
+    // 보관한 것도 함께 내려보낸다. 안 내려보내면 화면에서 사라진 뒤 되돌릴 길이 없다 —
+    // 보관은 삭제가 아니므로 돌아오는 문이 있어야 한다.
+    const archivedProjects = db
+      .prepare(`SELECT id, name, status, sort FROM project WHERE status != 'active' ORDER BY sort, name`)
+      .all();
     return {
       projects,
+      archivedProjects,
       today: items.filter((r) => r.kind === 'todo'),
       inbox: items.filter((r) => r.kind === 'inbox'),
       waiting: items.filter((r) => r.kind === 'waiting'),
@@ -474,6 +480,12 @@ export function createStore(file) {
   function archiveProject(id) {
     if (!db || !state.ok) return;
     db.prepare(`UPDATE project SET status = 'archived' WHERE id = ?`).run(id);
+  }
+
+  // 보관을 푼다. 보관은 삭제가 아니라 "지금은 안 보이게" 두는 것이라 짝이 필요하다.
+  function restoreProject(id) {
+    if (!db || !state.ok) return;
+    db.prepare(`UPDATE project SET status = 'active' WHERE id = ?`).run(id);
   }
 
   // 순서 변경 — 이웃과 자리를 바꾸고 sort를 0..n으로 정규화해 충돌을 없앤다
@@ -761,6 +773,7 @@ export function createStore(file) {
     createProject,
     updateProject,
     archiveProject,
+    restoreProject,
     moveProject,
     completeItem,
     uncompleteItem,

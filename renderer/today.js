@@ -176,7 +176,11 @@ function currentList() {
   // 설정은 DB와 무관하게 항상 보여준다 — DB가 꺼져 있을 때 오히려 봐야 하는 화면이다
   if (tab === 'settings') return SETTING_FIELDS;
   if (!state?.online) return [];
-  if (tab === 'projects') return filtered(state.projects ?? []);
+  // 보관한 것을 활성 뒤에 붙인다 — 화면에서 사라지기만 하면 되돌릴 길이 없다.
+  // 그리는 순서와 같아야 선택 인덱스(sel)가 실제 대상과 어긋나지 않는다.
+  if (tab === 'projects') {
+    return [...filtered(state.projects ?? []), ...filtered(state.archivedProjects ?? [])];
+  }
   if (tab === 'today') return todayView().flatMap((g) => g.items);
   return filtered(state[tab] ?? []);
 }
@@ -274,7 +278,7 @@ const KEYMAP = [
   ['항목', [['Space', '완료'], ['E', '제목'], ['D', '마감'], ['N', '메모'], ['W', '대기로'], ['X', '삭제'], ['U', '되돌리기'], ['1~9', '프로젝트']]],
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
-  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '보관']]],
+  ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '보관·되돌리기']]],
   ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json']]],
   ['퀵캡처', [['Ctrl+Alt+Space', '열기·닫기'], ['#약어', '프로젝트 지정'], ['Tab', '오늘 뷰']]],
 ];
@@ -629,9 +633,18 @@ function renderBody() {
 
 
   if (tab === 'projects') {
+    const activeCount = filtered(state.projects ?? []).length;
     list.forEach((p, idx) => {
-      const row = el('div', 'item' + (idx === sel ? ' selected' : ''));
-      row.append(el('span', 'proj-num', idx < 9 ? String(idx + 1) : ''));
+      // 보관 구간이 시작되는 자리에 머리글을 한 번 세운다 — 어디로 갔는지 보여야 한다
+      if (idx === activeCount) {
+        const h = el('div', 'group-h');
+        h.append(el('span', 'chip', '보관됨 — X로 되돌리기'));
+        body.append(h);
+      }
+      const archived = idx >= activeCount;
+      const row = el('div', 'item' + (idx === sel ? ' selected' : '') + (archived ? ' done' : ''));
+      // 1~9는 활성 프로젝트의 번호다 — 보관된 것에는 붙이지 않는다
+      row.append(el('span', 'proj-num', !archived && idx < 9 ? String(idx + 1) : ''));
       // 색점만. #약어를 걷어내기 전에는 여기 약어 알약이 섰고, 약어가 없는 프로젝트는
       // 빈 자리를 '—'로 채웠다 — 그 작대기가 약어처럼 읽혔다. 색은 1~9 번호와 짝을 이뤄
       // 다른 탭에서도 같은 프로젝트를 가리키므로 그대로 쓸모가 있다.
@@ -690,6 +703,7 @@ function renderFooter() {
   } else if (tab === 'projects') {
     add('N', '추가');
     add('E', '이름');
+    add('X', '보관·되돌리기');
   } else if (tab === 'inbox') {
     add('1~9', '프로젝트');
     add('W', '대기로');
@@ -969,7 +983,14 @@ document.addEventListener('keydown', async (e) => {
       case 'x':
       case 'X': {
         if (!p) return;
-        const yes = await promptText(`"${p.name}" 보관? 지우려면 y 입력`, '');
+        // 보관된 것을 고르고 X를 누르면 되돌린다. 확인을 묻지 않는다 — 되돌리기는
+        // 잃는 것이 없고, 한 번 더 X를 누르면 다시 보관된다.
+        if (p.status && p.status !== 'active') {
+          await window.whenwork.projectRestore(p.id);
+          toast(`"${clip(p.name)}" 되돌림`);
+          return refresh();
+        }
+        const yes = await promptText(`"${p.name}" 보관? 되돌리려면 목록 아래 보관됨에서 X (지우려면 y 입력)`, '');
         if (yes?.toLowerCase() === 'y') {
           await window.whenwork.projectArchive(p.id);
           await refresh();

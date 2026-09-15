@@ -140,6 +140,7 @@ export function registerIpc(ctx) {
     'project:create': (name) => ctx.store.createProject(name),
     'project:update': (id, fields) => ctx.store.updateProject(id, fields),
     'project:archive': (id) => ctx.store.archiveProject(id),
+    'project:restore': (id) => ctx.store.restoreProject(id),
     'project:move': (id, dir) => ctx.store.moveProject(id, dir),
   };
   for (const [ch, fn] of Object.entries(itemOps)) {

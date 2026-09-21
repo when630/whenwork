@@ -13,6 +13,12 @@ window.whenwork.onReset(() => {
   showDefaultMsg();
   input.focus();
 });
+// 딥링크 whenwork://capture?text= (when-protocol) — reset 뒤에 온다. 글을 넣고 커서를 끝에
+window.whenwork.onPrefill((text) => {
+  input.value = String(text ?? '');
+  input.setSelectionRange(input.value.length, input.value.length);
+  input.focus();
+});
 
 // 기본 안내
 function showDefaultMsg() {

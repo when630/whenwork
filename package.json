@@ -25,6 +25,7 @@
   "build": {
     "appId": "com.when630.whenwork",
     "productName": "WHENWORK",
+    "protocols": [{ "name": "WHENWORK", "schemes": ["whenwork"] }],
     "files": [
       "main/**/*",
       "renderer/**/*",

@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('whenwork', {
   // ── 퀵캡처
   save: (title) => ipcRenderer.invoke('capture:save', title),
   onReset: (cb) => ipcRenderer.on('capture:reset', () => cb()),
+  // 딥링크 whenwork://capture?text= 가 넘긴 글(when-protocol) — reset 뒤에 온다
+  onPrefill: (cb) => ipcRenderer.on('capture:prefill', (_e, text) => cb(text)),
   // ── 오늘 뷰
   getState: () => ipcRenderer.invoke('today:getState'),
   onRefresh: (cb) => ipcRenderer.on('today:refresh', () => cb()),

@@ -69,6 +69,10 @@ xattr -dr com.apple.quarantine /Applications/WHENWORK.app
 
 마우스로는 체크박스를 눌러 완료할 수 있습니다.
 
+### WHENCOMMAND에서
+
+[WHENCOMMAND](https://github.com/when630/whencommand)(시리즈의 입력줄)에서 `할 일 추가 회의 준비` `Enter`면 창 없이 인박스에 들어갑니다. `퀵캡처` · `오늘 할 일` · `인박스`도 거기서 부릅니다 — `whenwork://` 딥링크입니다. WHENCOMMAND가 없으면 아무 차이도 없습니다.
+
 ### 아침 브리핑
 
 하루 한 번, 정한 시각에 오늘 마감·지연·오래 기다린 항목을 알립니다. 설정에서 시각을 바꾸거나 끌 수 있습니다. 알림 권한이 막혀 있으면 앱 안 표시로 대신 보여줍니다 — 조용히 사라지지 않습니다.

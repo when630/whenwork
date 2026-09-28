@@ -1020,6 +1020,8 @@ $('searchIn').addEventListener('input', (e) => {
   render();
 });
 
+// 캡처 중에는 keyup도 막는다 — keydown만 막으면 Alt를 뗄 때의 keyup이 OS로 흘러 Windows가 메뉴바·시스템 메뉴를 연다(2026-09-28)
+document.addEventListener('keyup', (e) => { if (hotkeyCapture) { e.preventDefault(); e.stopPropagation(); } });
 document.addEventListener('keydown', async (e) => {
   // 다이얼로그 입력 중에는 그 입력만 받는다
   if (hotkeyCapture) return onHotkeyCaptureKey(e);

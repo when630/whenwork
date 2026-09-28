@@ -277,6 +277,9 @@ export function bootstrap() {
       maxHeight: CAPTURE_H,
       backgroundColor: '#1e2027',
     });
+    // Electron 기본 메뉴를 뗀다 — 메뉴가 있으면 Windows에서 Alt 한 번에 메뉴바가 떠 단축키 잡기 중 Alt 조합을 가로챈다(2026-09-28).
+    // setMenu는 Windows·Linux 전용이라 옵셔널 호출 — macOS는 앱 메뉴를 쓰므로 건드리지 않는다
+    ctx.captureWin.setMenu?.(null);
     pinOnTop(ctx.captureWin);
     rememberPosition(ctx.captureWin, 'captureBounds');
     ctx.captureWin.loadFile(path.join(ROOT, 'renderer', 'capture.html'));
@@ -312,6 +315,7 @@ export function bootstrap() {
       minHeight: 420,
       backgroundColor: '#16171c',
     });
+    ctx.todayWin.setMenu?.(null); // 위 captureWin과 같은 이유
     pinOnTop(ctx.todayWin);
     rememberPosition(ctx.todayWin, 'todayBounds');
     ctx.todayWin.on('resized', () => {

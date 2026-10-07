@@ -290,8 +290,10 @@ export function registerIpc(ctx) {
     }
   });
 
+  // Esc·헤더 ×가 부른다. 숨기는 순서는 platform이 안다(D8) — Windows는 minimize를 거쳐야 직전 창에 포커스가 돌아온다
   ipcMain.on('win:hide', (e) => {
-    BrowserWindow.fromWebContents(e.sender)?.hide();
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (win && !win.isDestroyed()) platform.deactivate(win);
   });
 
   // 퀵캡처에서 Tab — 캡처를 접고 오늘 뷰를 **인박스 탭으로** 연다. 방금 던진 것을 정리하러 온 길이다.

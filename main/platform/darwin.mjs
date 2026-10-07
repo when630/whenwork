@@ -43,6 +43,18 @@ export default {
     app.dock?.hide();
   },
 
+  // 창을 보이고 숨기는 순서(D8). macOS는 `hide()`로 직전 앱에 포커스가 돌아간다 — 최소화를 거치지 않는다.
+  // `app.hide()`(WHENCOMMAND 방식)는 쓰지 않는다 — 캡처를 닫을 때 열려 있던 오늘 뷰까지 함께 사라진다.
+  activate(win, place) {
+    if (win.isMinimized()) win.restore();
+    place?.();
+    win.show();
+    win.focus();
+  },
+  deactivate(win) {
+    win.hide();
+  },
+
   // macOS 메뉴바는 다크/라이트에 따라 아이콘 색이 뒤집혀야 한다. Template 이미지로
   // 넘기면 OS가 알아서 칠한다 — 컬러 아이콘을 그대로 주면 다크 모드에서 뭉개진다.
   // tray-Template.png가 있으면 그것을, 없으면 tray.png를 Template으로 표시한다.

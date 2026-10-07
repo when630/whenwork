@@ -22,6 +22,8 @@ const CONTRACT = [
   'trayImage',
   'setLoginItem',
   'getLoginItem',
+  'activate',
+  'deactivate',
 ];
 
 for (const impl of ['win32.mjs', 'darwin.mjs']) {
@@ -79,6 +81,26 @@ test('두 OS의 첫 실행 안내는 아이콘 위치와 단축키를 모두 말
     assert.match(read(impl), /firstRunHint: \(hotkeyLabel\)/, `${impl}의 안내가 단축키를 받지 않는다`);
     assert.match(read(impl), /1~9/, `${impl}의 안내에 숫자키 분류가 없다`);
   }
+});
+
+test('Windows는 minimize→hide로 숨기고 restore→자리→show→focus로 보인다 (D8)', () => {
+  // hide()만으로는 직전 창에 포커스가 돌아오지 않는다 — minimize를 거쳐 숨기고, 그래서 보일 때 restore가 먼저다.
+  // restore 뒤 show()를 빼면 렌더러가 프레임을 내지 않아 화면이 굳는다(WHENCOMMAND D-29).
+  // 최소화 중의 setPosition은 버려지므로(실측 2026-10-07) 자리 잡기는 restore 뒤여야 한다.
+  const win = read('win32.mjs');
+  assert.match(win, /deactivate\(win\) \{\s*if \(!win\.isMinimized\(\)\) win\.minimize\(\);\s*win\.hide\(\);/, 'minimize → hide 순서가 아니다');
+  assert.match(win, /activate\(win, place\) \{\s*if \(win\.isMinimized\(\)\) win\.restore\(\);\s*place\?\.\(\);\s*win\.show\(\);\s*win\.focus\(\);/, 'restore → place → show → focus 순서가 아니다');
+  // macOS는 hide()로 직전 앱에 돌아간다. app.hide()는 다른 창(오늘 뷰)까지 숨기므로 쓰지 않는다
+  const mac = read('darwin.mjs');
+  assert.match(mac, /deactivate\(win\) \{\s*win\.hide\(\);\s*\}/);
+  assert.ok(!/^\s*app\.hide\(\);/m.test(mac), 'app.hide()는 열려 있던 다른 창까지 숨긴다');
+});
+
+test('창을 숨기는 곳은 전부 platform.deactivate를 탄다 — 맨 hide()가 남으면 그 길만 포커스가 안 돌아온다 (D8)', () => {
+  const count = (f) => (fs.readFileSync(path.join(ROOT, 'main', f), 'utf8').match(/\.hide\(\)/g) ?? []).length;
+  assert.equal(count('lifecycle.mjs'), 0, 'lifecycle.mjs가 hide()를 직접 부른다');
+  // ipc.mjs의 하나는 app:open — 캡처를 접고 바로 오늘 뷰를 띄우므로 직전 창으로 돌아갈 일이 없다
+  assert.equal(count('ipc.mjs'), 1, 'ipc.mjs의 hide()는 app:open 하나여야 한다');
 });
 
 test('macOS 구현에는 실기기 미검증 경고가 남아 있다', () => {

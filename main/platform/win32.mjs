@@ -29,6 +29,23 @@ export default {
     app.setAppUserModelId(appId);
   },
 
+  // 창을 보이고 숨기는 순서(D8). **`hide()`만으로는 직전 창에 포커스가 돌아오지 않는다** — 항상-위·작업표시줄-제외 창을
+  // 숨기면 OS가 Z순서에서 아무 창이나 고른다(WHENCOMMAND 실측 2026-09-21). 숨기기 전에 `minimize()`를 거치면 최소화의
+  // 정규 활성화 경로가 직전 포그라운드 창을 복귀시킨다. 이미 최소화된 창은 다시 최소화하지 않는다 — blur가 재진입해도 안전하게.
+  // 최소화된 창은 `isVisible()=false`라 보일 때 `restore()`가 먼저고, 그 뒤 `show()`를 **반드시** 부른다 —
+  // restore만으로는 렌더러가 프레임을 내지 않아 직전 화면이 굳은 채 키를 안 받는다(WHENCOMMAND D-29).
+  // 자리 잡기(`place`)는 restore **뒤**에 — 최소화 중의 `setPosition`은 버려진다(실측 2026-10-07: 100,100 → setPosition(600,400) → restore 뒤 100,100).
+  activate(win, place) {
+    if (win.isMinimized()) win.restore();
+    place?.();
+    win.show();
+    win.focus();
+  },
+  deactivate(win) {
+    if (!win.isMinimized()) win.minimize();
+    win.hide();
+  },
+
   // 트레이/메뉴바 아이콘. Windows는 컬러 그대로 쓴다.
   trayImage(root) {
     const p = path.join(root, 'build', 'tray.png');

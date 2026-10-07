@@ -258,7 +258,8 @@ export function bootstrap() {
   // 옮기거나 크기를 바꾸면 그 자리를 기억한다
   function rememberPosition(win, key) {
     const save = () => {
-      if (win.isDestroyed() || !win.isVisible()) return;
+      // 최소화 중의 자리는 화면 밖(-32000)이다 — 숨길 때 minimize를 거치므로(D8) 그 값을 적으면 안 된다
+      if (win.isDestroyed() || !win.isVisible() || win.isMinimized()) return;
       const [x, y] = win.getPosition();
       ctx.settings.set(key, { x, y });
     };
@@ -283,13 +284,15 @@ export function bootstrap() {
     pinOnTop(ctx.captureWin);
     rememberPosition(ctx.captureWin, 'captureBounds');
     ctx.captureWin.loadFile(path.join(ROOT, 'renderer', 'capture.html'));
+    // 숨기는 순서는 platform이 안다(D8) — Windows는 minimize를 거쳐야 직전 창에 포커스가 돌아온다.
+    // minimize가 blur를 다시 부르지만 deactivate는 이미 최소화된 창을 다시 최소화하지 않는다
     ctx.captureWin.on('blur', () => {
-      if (!ctx.suppressHide) ctx.captureWin.hide(); // 다른 데 클릭하면 캡처는 접는다
+      if (!ctx.suppressHide) platform.deactivate(ctx.captureWin); // 다른 데 클릭하면 캡처는 접는다
     });
     ctx.captureWin.on('close', (e) => {
       if (!ctx.quitting) {
         e.preventDefault();
-        ctx.captureWin.hide();
+        platform.deactivate(ctx.captureWin);
       }
     });
     return ctx.captureWin;
@@ -298,10 +301,9 @@ export function bootstrap() {
 
   function showCapture() {
     const win = getCaptureWin();
-    placeWindow(win, 'captureBounds', { centerY: false });
     win.webContents.send('capture:reset'); // 창이 이미 살아 있을 때만 뜻이 있다(갓 만든 창은 비어 있다)
-    win.show();
-    win.focus();
+    // 숨길 때 minimize를 거쳤으니(D8) restore→자리→show→focus 순서는 platform이 안다 — 최소화 중의 setPosition은 버려진다
+    platform.activate(win, () => placeWindow(win, 'captureBounds', { centerY: false }));
   }
   ctx.showCapture = showCapture;
 
@@ -327,12 +329,12 @@ export function bootstrap() {
       ctx.todayHiddenAt = Date.now();
     });
     ctx.todayWin.on('blur', () => {
-      if (!ctx.suppressHide) ctx.todayWin.hide();
+      if (!ctx.suppressHide) platform.deactivate(ctx.todayWin); // D8 — 직전 창으로 포커스가 돌아가게
     });
     ctx.todayWin.on('close', (e) => {
       if (!ctx.quitting) {
         e.preventDefault();
-        ctx.todayWin.hide();
+        platform.deactivate(ctx.todayWin);
       }
     });
     return ctx.todayWin;
@@ -345,7 +347,7 @@ export function bootstrap() {
 
   function toggleToday() {
     const win = getTodayWin();
-    if (win.isVisible()) return win.hide();
+    if (win.isVisible()) return platform.deactivate(win); // D8 — 직전 창으로 포커스가 돌아가게
     if (Date.now() - ctx.todayHiddenAt < TOGGLE_GRACE_MS) return;
     showToday();
   }
@@ -353,12 +355,11 @@ export function bootstrap() {
 
   function showToday() {
     const win = getTodayWin();
-    placeWindow(win, 'todayBounds'); // 옮겨둔 자리가 있으면 거기, 없으면 화면 중앙
     // 큐 반영은 앱 시작 시 1회뿐이다(D-01/D-02) — 여기서 다시 부르지 않는다.
     // 밀린 캡처가 있다면 다음 기동이 반영하고, 이번 실행의 실패 건수는 ctx.pending이 이미 보여준다.
     win.webContents.send('today:refresh');
-    win.show();
-    win.focus();
+    // 옮겨둔 자리가 있으면 거기, 없으면 화면 중앙 — 자리 잡기는 restore 뒤여야 한다(D8, 최소화 중의 setPosition은 버려진다)
+    platform.activate(win, () => placeWindow(win, 'todayBounds'));
   }
   ctx.showToday = showToday;
 
@@ -499,8 +500,8 @@ export function bootstrap() {
     ctx.tray.on('click', toggleToday);
     // 단축키는 토글 — 열린 창(오늘 뷰든 캡처든)이 있으면 닫고, 없으면 캡처를 연다
     const onHotkey = () => {
-      if (ctx.todayWin && !ctx.todayWin.isDestroyed() && ctx.todayWin.isVisible()) return ctx.todayWin.hide();
-      if (ctx.captureWin && !ctx.captureWin.isDestroyed() && ctx.captureWin.isVisible()) return ctx.captureWin.hide();
+      if (ctx.todayWin && !ctx.todayWin.isDestroyed() && ctx.todayWin.isVisible()) return platform.deactivate(ctx.todayWin);
+      if (ctx.captureWin && !ctx.captureWin.isDestroyed() && ctx.captureWin.isVisible()) return platform.deactivate(ctx.captureWin);
       showCapture();
     };
     // PLAT-02: 등록은 한 곳에서만 한다 — 설정에서 조합을 바꿔도 같은 함수를 부르므로

@@ -267,6 +267,20 @@ export function bootstrap() {
     win.on('resized', save);
   }
 
+  // 포커스를 잃으면 접는다 — 단, 바로 접지 않고 잠깐 뒤에 되묻는다(D8 보강, 2026-10-07).
+  // Windows에서 minimize를 거쳐 숨긴 창을 restore→show→focus로 되살리면 활성화가 두 번 일어나며 그 사이에 blur가
+  // 한 번 끼어든다. 0.2.3 설치본은 그 blur를 "다른 데를 눌렀다"로 읽어 **창이 잠깐 떴다가 바로 사라졌다**(사용자 보고).
+  // WHENCOMMAND가 멀쩡했던 것은 blur 핸들러가 보이기 중(opacity 0)을 거르기 때문이다. 여기는 페이드가 없으니
+  // 시간을 둔다 — BLUR_SETTLE_MS 뒤에도 포커스가 없을 때만 진짜 이탈이다. 사람이 다른 창을 누른 경우는 그때도 포커스가 없다
+  const BLUR_SETTLE_MS = 120;
+  function hideOnBlur(win) {
+    setTimeout(() => {
+      if (win.isDestroyed() || ctx.quitting || ctx.suppressHide) return;
+      if (!win.isVisible() || win.isFocused()) return;
+      platform.deactivate(win);
+    }, BLUR_SETTLE_MS);
+  }
+
   function getCaptureWin() {
     if (ctx.captureWin && !ctx.captureWin.isDestroyed()) return ctx.captureWin;
     ctx.captureWin = new BrowserWindow({
@@ -284,11 +298,8 @@ export function bootstrap() {
     pinOnTop(ctx.captureWin);
     rememberPosition(ctx.captureWin, 'captureBounds');
     ctx.captureWin.loadFile(path.join(ROOT, 'renderer', 'capture.html'));
-    // 숨기는 순서는 platform이 안다(D8) — Windows는 minimize를 거쳐야 직전 창에 포커스가 돌아온다.
-    // minimize가 blur를 다시 부르지만 deactivate는 이미 최소화된 창을 다시 최소화하지 않는다
-    ctx.captureWin.on('blur', () => {
-      if (!ctx.suppressHide) platform.deactivate(ctx.captureWin); // 다른 데 클릭하면 캡처는 접는다
-    });
+    // 다른 데 클릭하면 캡처는 접는다 — 되묻고 접는다(hideOnBlur). 숨기는 순서는 platform이 안다(D8)
+    ctx.captureWin.on('blur', () => hideOnBlur(ctx.captureWin));
     ctx.captureWin.on('close', (e) => {
       if (!ctx.quitting) {
         e.preventDefault();
@@ -328,9 +339,7 @@ export function bootstrap() {
     ctx.todayWin.on('hide', () => {
       ctx.todayHiddenAt = Date.now();
     });
-    ctx.todayWin.on('blur', () => {
-      if (!ctx.suppressHide) platform.deactivate(ctx.todayWin); // D8 — 직전 창으로 포커스가 돌아가게
-    });
+    ctx.todayWin.on('blur', () => hideOnBlur(ctx.todayWin)); // D8 — 되묻고 접는다, 직전 창으로 포커스가 돌아가게
     ctx.todayWin.on('close', (e) => {
       if (!ctx.quitting) {
         e.preventDefault();

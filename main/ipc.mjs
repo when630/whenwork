@@ -135,6 +135,15 @@ export function registerIpc(ctx) {
     }
   });
 
+  // 목록 밖(오래된 완료·지운 항목)까지 검색하려고 검색창을 열 때 한 번 받아 간다
+  ipcMain.handle('search:archive', async () => {
+    try {
+      return { ok: true, items: ctx.store.searchArchive() };
+    } catch {
+      return { ok: false, items: [] };
+    }
+  });
+
   const itemOps = {
     'item:complete': (id) => ctx.store.completeItem(id),
     'item:uncomplete': (id) => ctx.store.uncompleteItem(id),

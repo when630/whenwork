@@ -37,6 +37,7 @@ let dlgResolve = null; // 텍스트 입력 다이얼로그가 기다리는 resol
 let cfg = null; // 설정 탭이 받아둔 값 (DB와 무관하게 따로 읽는다)
 let filter = ''; // 검색어 — 탭을 옮겨도 유지된다 (어느 탭에 있는지 모를 때 찾으려고)
 let searchOn = false; // 검색 입력에 포커스가 가 있는 동안
+let archive = null; // 목록 밖 항목(오래된 완료·지운 것) — 검색창을 열 때 받아 둔다
 let dueOnly = false; // 오늘 탭: 마감 있는 것만 보기 (F)
 let history = null; // 완료 기록 화면 상태 (H)
 let view = 'list'; // 'list' | 'history' | 'trash'
@@ -184,8 +185,65 @@ function currentList() {
   if (tab === 'settings') return SETTING_FIELDS;
   if (!state?.online) return [];
   if (tab === 'projects') return filtered(state.projects ?? []);
-  if (tab === 'today') return todayView().flatMap((g) => g.items);
-  return filtered(state[tab] ?? []);
+  const live = tab === 'today' ? todayView().flatMap((g) => g.items) : filtered(state[tab] ?? []);
+  // 목록 밖 결과는 그 아래에 이어 그린다 — 선택 인덱스도 같은 순서로 이어진다
+  return [...live, ...archiveHits().slice(0, ARCHIVE_MAX)];
+}
+
+// ── 목록 밖 검색
+//
+// 목록은 완료를 12시간만 남기고 지운 것은 보이지 않는다. "어디 있는지 모르는 항목"을 찾는 게
+// 검색인데, 정작 찾을 일이 많은 지난 항목에는 닿지 않았다. 검색이 걸려 있으면 항목 탭 아래에
+// 그것들을 따로 묶어 보여주고, Space·Enter로 되살린다. 어느 탭에도 없는 항목이라 서 있는
+// 탭 아래에 똑같이 붙는다.
+const ARCHIVE_MAX = 30; // 그 이상은 검색어를 좁히라고 말한다 — 지난 항목은 수백 건이 될 수 있다
+const KIND_TAB = { todo: 'today', inbox: 'inbox', waiting: 'waiting' };
+
+function archiveHits() {
+  if (!filter || !archive || view !== 'list' || !NUM_TABS.includes(tab) || !state?.online) return [];
+  // 받아 둔 사이에 목록으로 돌아온 것(방금 되살린 것 등)은 위에 이미 있다 — 두 번 세우지 않는다
+  const live = new Set([...(state.today ?? []), ...(state.inbox ?? []), ...(state.waiting ?? [])].map((r) => r.id));
+  return archive.filter((r) => !live.has(r.id) && matches(r, filter));
+}
+
+async function loadArchive() {
+  const res = await window.whenwork.searchArchive();
+  archive = res?.ok ? res.items.map((r) => ({ ...r, archived: true })) : [];
+}
+
+// 지운 것은 복원하고 완료한 것은 완료를 푼다. 지웠는데 완료도 돼 있던 것은 둘 다 —
+// 찾아서 되살리는 길은 "다시 할 일로"라서, 하나만 풀면 또 목록 밖에 남는다.
+// 되살린 뒤에는 그 항목이 사는 탭으로 옮겨 그 행을 고른다. 검색은 그대로 둔다.
+async function reviveArchived(it) {
+  if (!it?.archived) return;
+  const steps = [];
+  if (it.deleted_at) steps.push(window.whenwork.restore(it.id));
+  if (it.done_at) steps.push(window.whenwork.uncomplete(it.id));
+  const res = await Promise.all(steps);
+  if (res.some((r) => !r?.ok)) return toast('되살리기 실패');
+  tab = KIND_TAB[it.kind] ?? 'inbox';
+  resetScroll = true;
+  await refresh();
+  sel = Math.max(0, currentList().findIndex((r) => r.id === it.id));
+  render();
+  toast(`되살림 — "${clip(it.title)}" · ${TABS.find((t) => t.key === tab)?.label ?? ''} 탭`);
+}
+
+function archiveRow(it, idx) {
+  const row = el('div', 'item archived' + (it.deleted_at ? ' gone' : ' done') + (idx === sel ? ' selected' : ''));
+  row.append(el('div', 'mark', it.deleted_at ? '×' : '✓'), el('div', 't', it.title));
+  // 언제 끝냈는지·지웠는지가 "이게 그건가"를 가르는 근거다
+  const meta = el('div', 'ctx');
+  meta.append(document.createTextNode(it.deleted_at ? `${fmtWhen(it.deleted_at)} 지움` : `${fmtWhen(it.done_at)} 완료`));
+  if (it.project_name) meta.append(projChip(it.project_id, it.project_name));
+  if (it.note) meta.append(document.createTextNode(` · ↳ ${it.note}`));
+  row.append(meta);
+  row.onclick = () => {
+    sel = idx;
+    render();
+  };
+  row.ondblclick = () => reviveArchived(it);
+  return row;
 }
 
 // ── 완료 기록 (H)
@@ -268,6 +326,8 @@ function closeHistory() {
   history = null;
   resetScroll = true;
   render();
+  // 검색어를 들고 돌아왔으면 목록 밖 결과도 함께 서야 한다 — 기록 화면에서는 받지 않았다
+  if (filter) loadArchive().then(render);
 }
 
 // ── 검색
@@ -277,11 +337,15 @@ function renderSearch() {
   bar.classList.toggle('show', on);
   bar.classList.toggle('idle', !searchOn && !!filter);
   if (!on) return;
-  const n =
-    view === 'history'
-      ? (history?.data?.items ?? []).filter((it) => matches(it, filter)).length
-      : currentList().length;
-  $('searchCnt').textContent = filter ? `${n}건` : '';
+  let text = '';
+  if (view === 'history') {
+    text = `${(history?.data?.items ?? []).filter((it) => matches(it, filter)).length}건`;
+  } else {
+    const extra = archiveHits().length;
+    const live = currentList().length - Math.min(extra, ARCHIVE_MAX);
+    text = `${live}건` + (extra ? ` · 목록 밖 ${extra}건` : '');
+  }
+  $('searchCnt').textContent = filter ? text : '';
 }
 
 // ── 전체 키맵 (?)
@@ -292,6 +356,7 @@ const KEYMAP = [
   ['이동', [['↑↓', 'jk 이동'], ['Home/End', '처음·끝'], ['PgUp/PgDn', '10줄'], ['Tab', '탭 전환'], ['/', '검색'], ['Esc', '닫기']]],
   ['항목', [['Space', '완료'], ['E', '제목'], ['D', '마감'], ['N', '메모'], ['W', '대기로'], ['X', '삭제'], ['U', '되돌리기'], ['1~9', '프로젝트']]],
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
+  ['검색', [['/', '열기'], ['ㅎㅇ', '초성으로'], ['Space', '목록 밖 항목 되살리기'], ['Esc', '해제']]],
   ['완료 기록', [['←→', '7일·30일·전체'], ['/', '검색'], ['Esc', '뒤로']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 프로젝트 보기']]],
@@ -350,6 +415,8 @@ function openSearch() {
   if (tab === 'settings' || view === 'trash') return; // 설정·지운 프로젝트 화면에는 검색할 목록이 없다
   searchOn = true;
   render();
+  // 열 때마다 새로 받는다 — 지난 것은 자주 바뀌지 않지만, 방금 지운 것도 찾을 수 있어야 한다
+  if (view === 'list') loadArchive().then(render);
   const input = $('searchIn');
   input.value = filter;
   input.focus();
@@ -359,7 +426,10 @@ function openSearch() {
 // keep=false면 필터까지 해제한다 (Esc)
 function closeSearch(keep) {
   searchOn = false;
-  if (!keep) filter = '';
+  if (!keep) {
+    filter = '';
+    archive = null;
+  }
   $('searchIn').blur();
   sel = 0;
   resetScroll = true;
@@ -676,6 +746,9 @@ function renderBody() {
     return;
   }
 
+  // 목록 밖 결과는 currentList 끝에 붙어 있다 — 그 앞까지가 이 탭의 항목이다
+  const extra = archiveHits();
+  const liveN = list.length - Math.min(extra.length, ARCHIVE_MAX);
   if (tab === 'today') {
     // 그룹 구성은 todayView가 정한다 — currentList의 flat 순서와 같은 순서라 선택 인덱스가 맞는다
     let idx = 0;
@@ -686,9 +759,17 @@ function renderBody() {
       for (const it of g.items) body.append(itemRow(it, idx++));
     }
   } else {
-    list.forEach((it, idx) => body.append(itemRow(it, idx)));
+    list.slice(0, liveN).forEach((it, idx) => body.append(itemRow(it, idx)));
   }
 
+  if (extra.length) {
+    if (!liveN) body.append(el('div', 'archive-note', `이 탭에는 "${filter}"에 맞는 항목 없음`));
+    body.append(el('div', 'group-h', `목록 밖 — 완료·지운 항목 ${extra.length}건`));
+    list.slice(liveN).forEach((it, i) => body.append(archiveRow(it, liveN + i)));
+    if (extra.length > ARCHIVE_MAX) {
+      body.append(el('div', 'archive-note', `… ${extra.length - ARCHIVE_MAX}건 더 — 검색어를 좁혀 보세요`));
+    }
+  }
 }
 
 function renderFooter() {
@@ -721,6 +802,8 @@ function renderFooter() {
     add('E', '내보내기');
     add('I', '가져오기');
     add('R', '업데이트');
+  } else if (selectedItem()?.archived) {
+    add('Space', '되살리기');
   } else if (tab === 'projects') {
     add('N', '추가');
     add('E', '이름');
@@ -758,6 +841,8 @@ async function toggleDone(it) {
 // ── 동작
 async function refresh() {
   state = await window.whenwork.getState();
+  // 검색이 걸린 채 항목을 옮겼으면 목록 밖도 달라졌다 — 방금 지운 것이 바로 아래에 보여야 한다
+  if (filter && view === 'list') await loadArchive();
   // PLAT-04: 알림이 막혀 대체된 말 — 알림 대신이므로 오래 세워 둔다
   if (state?.notice) toast(state.notice, { holdMs: 9000 });
   // 첫 로드에서만 탭을 고른다 — 인박스에 쌓인 게 있으면 그것부터 치우는 게 순서다.
@@ -1254,7 +1339,10 @@ document.addEventListener('keydown', async (e) => {
   }
 
   // 항목 탭 (오늘·인박스·대기)
-  const it = selectedItem();
+  // 목록 밖 결과(완료·지운 항목)는 되살리기만 받는다 — 제목·마감·프로젝트를 바꿔 봐야
+  // 보이지 않는 곳에서 바뀔 뿐이다. it을 비워 두면 아래 키들이 알아서 아무것도 안 한다.
+  const pick = selectedItem();
+  const it = pick?.archived ? null : pick;
   // 다이얼로그를 여는 키는 기본 동작을 먼저 끊는다 (그 글자가 입력창에 찍히지 않게)
   if (['e', 'w', 'd', 'n', 'm'].includes(e.key.toLowerCase())) e.preventDefault();
   switch (e.key) {
@@ -1287,7 +1375,12 @@ document.addEventListener('keydown', async (e) => {
     }
     case ' ':
       e.preventDefault();
+      if (pick?.archived) return reviveArchived(pick);
       return toggleDone(it);
+    case 'Enter':
+      if (!pick?.archived) return;
+      e.preventDefault();
+      return reviveArchived(pick);
     case 'w':
     case 'W': {
       if (!it || tab === 'waiting') return;

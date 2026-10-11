@@ -942,3 +942,63 @@ test('getHistory(null)은 전 기간을 돌려주고, 7은 7일만 돌려준다'
   assert.deepEqual(store.getHistory(null).items.map((i) => i.id).sort(), ['old', 'recent']);
   store.close();
 });
+
+// ── 목록 밖 검색 ──
+
+test('searchArchive는 12시간 지난 완료와 지운 항목만 돌려준다 — 목록에 있는 것과 겹치지 않는다', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  const now = new Date().toISOString();
+  store.insertCaptures([
+    { id: 'open', title: '열린 것', captured_at: now },
+    { id: 'fresh', title: '방금 끝낸 것', captured_at: now },
+    { id: 'old', title: '지난주 끝낸 것', captured_at: now },
+    { id: 'gone', title: '지운 것', captured_at: now },
+  ]);
+  store.completeItem('fresh');
+  store.completeItem('old');
+  store.removeItem('gone');
+  store.setNote('old', '회의록 첨부');
+  store.close();
+  const raw = new DatabaseSync(file);
+  raw.prepare('UPDATE item SET done_at = ? WHERE id = ?').run(new Date(Date.now() - 7 * 86400_000).toISOString(), 'old');
+  raw.close();
+  store.reopen();
+
+  const arch = store.searchArchive();
+  assert.deepEqual(arch.map((r) => r.id), ['gone', 'old'], '최근에 지운·끝낸 것부터');
+  assert.equal(arch.find((r) => r.id === 'old').note, '회의록 첨부', '메모로도 찾을 수 있게 내려준다');
+  assert.ok(arch.find((r) => r.id === 'gone').deleted_at);
+
+  const st = store.getViewState();
+  const live = [...st.today, ...st.inbox, ...st.waiting].map((r) => r.id);
+  for (const r of arch) assert.ok(!live.includes(r.id), `${r.id}가 목록과 목록 밖에 동시에 있다`);
+  assert.ok(live.includes('open') && live.includes('fresh'));
+  store.close();
+});
+
+test('목록 밖 항목은 restoreItem·uncompleteItem으로 목록에 돌아온다', () => {
+  const file = tmpFile();
+  const store = createStore(file);
+  store.insertCaptures([{ id: 'both', title: '끝내고 지운 것', captured_at: new Date().toISOString() }]);
+  store.completeItem('both');
+  store.removeItem('both');
+  assert.deepEqual(store.searchArchive().map((r) => r.id), ['both']);
+  store.restoreItem('both');
+  store.uncompleteItem('both');
+  assert.deepEqual(store.searchArchive(), []);
+  assert.deepEqual(store.getViewState().inbox.map((r) => r.id), ['both']);
+  store.close();
+});
+
+test('getHistory는 메모·대기 상대도 내려준다 — 완료 기록 검색이 그것으로도 찾는다', () => {
+  const store = createStore(tmpFile());
+  store.insertCaptures([{ id: 'w', title: '견적 회신', captured_at: new Date().toISOString() }]);
+  store.toWaiting('w', '김대리');
+  store.setNote('w', '금요일까지');
+  store.completeItem('w');
+  const [row] = store.getHistory(7).items;
+  assert.equal(row.note, '금요일까지');
+  assert.equal(row.waiting_for, '김대리');
+  store.close();
+});

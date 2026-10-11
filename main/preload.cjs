@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('whenwork', {
   nudge: (id) => ipcRenderer.invoke('item:nudge', id),
   nudgeUndo: (id, at, count) => ipcRenderer.invoke('item:nudgeUndo', id, at, count),
   historyGet: (days) => ipcRenderer.invoke('history:get', days),
+  // 검색이 목록 밖(오래된 완료·지운 항목)까지 닿게 — 거르기는 렌더러가 한다
+  searchArchive: () => ipcRenderer.invoke('search:archive'),
   remove: (id) => ipcRenderer.invoke('item:remove', id),
   restore: (id) => ipcRenderer.invoke('item:restore', id),
 

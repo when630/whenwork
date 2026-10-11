@@ -50,6 +50,21 @@ test('대소문자를 가리지 않고, 빈 검색어는 모두 통과', () => {
   assert.ok(VIEW.matches({ title: '아무거나' }, ''));
 });
 
+test('초성만 친 낱말은 첫소리로 비교한다 — ㅎㅇ으로 회의를 찾는다', () => {
+  const row = { title: '주간 회의 준비', project_name: '서식갤러리' };
+  assert.ok(VIEW.matches(row, 'ㅎㅇ'));
+  assert.ok(VIEW.matches(row, 'ㅈㄱ ㅎㅇ'), '낱말마다 AND');
+  assert.ok(VIEW.matches(row, 'ㅅㅅㄱㄹㄹ'), '프로젝트 이름도');
+  assert.ok(VIEW.matches(row, 'ㅎㅇ 준비'), '초성과 보통 낱말을 섞어도');
+  assert.ok(!VIEW.matches(row, 'ㄱㄴ'));
+});
+
+test('초성이 아닌 낱말은 첫소리로 풀지 않는다 — 조합 중간값이 엉뚱하게 걸리지 않게', () => {
+  // "회ㅇ"을 첫소리로 풀면 "ㅎㅇ"이 되어 "하양"에도 걸린다
+  assert.ok(!VIEW.matches({ title: '하양 페인트' }, '회ㅇ'));
+  assert.equal(VIEW.initials('회의 v2'), 'ㅎㅇ v2', '한글이 아닌 글자는 그대로');
+});
+
 // ── 오늘 탭 배치 (선택 인덱스와 그리는 순서가 어긋나면 엉뚱한 항목이 지워진다)
 test('프로젝트별로만 묶는다 — 급한 것은 배지가 알린다', () => {
   const list = [

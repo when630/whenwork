@@ -130,6 +130,14 @@
   .ctx, .wait-meta { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; }
   /* 대기 항목의 프로젝트 — 경과·재촉 뒤에 붙는다 */
   .wait-meta .chip { margin-left: 8px; vertical-align: 1px; }
+  /* 검색의 목록 밖 결과 — 체크박스 자리에 완료(✓)·지운(×) 표식. 눌러서 끝낼 것이 아니라
+     되살릴 것이라 체크박스 모양을 쓰지 않는다 */
+  .item.archived .mark { width: 15px; flex: none; text-align: center; font-size: 12px; margin-top: 2px; color: var(--success); }
+  .item.archived.gone .mark { color: var(--danger); }
+  .item.archived .t { color: var(--text-muted); }
+  .item.archived.done .t { text-decoration: line-through; }
+  .item.archived .ctx .chip { margin-left: 8px; vertical-align: 1px; }
+  .archive-note { padding: var(--sp-2) var(--sp-4); font-size: var(--fs-xs); color: var(--text-muted); }
   .toast {
     position: fixed; left: 50%; bottom: 46px; transform: translateX(-50%);
     background: var(--bg-raised); border: 1px solid var(--border);

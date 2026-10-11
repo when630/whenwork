@@ -407,11 +407,16 @@ export function createStore(file) {
     return { inserted };
   }
 
+  // 완료한 항목이 목록에 남는 시간. 이 경계를 넘은 것은 searchArchive가 맡는다 —
+  // 두 쿼리가 같은 값을 써야 검색에서 빠지거나 두 번 잡히는 항목이 없다.
+  const DONE_VISIBLE_MS = 12 * 3600_000;
+  const doneCutoff = () => new Date(Date.now() - DONE_VISIBLE_MS).toISOString();
+
   // 오늘 뷰 한 번에 — 탭 세 개 분량을 묶어 내려보낸다. 완료 12시간 창은 호출 시점 JS
   // 계산 + 문자열 비교로 처리한다(D-10). due는 SQLite 네이티브 NULLS LAST로 정렬한다.
   function getViewState() {
     if (!db || !state.ok) return { projects: [], today: [], inbox: [], waiting: [] };
-    const cutoff = new Date(new Date().getTime() - 12 * 3600_000).toISOString();
+    const cutoff = doneCutoff();
     const rows = db
       .prepare(
         `SELECT i.id, i.project_id, p.name AS project_name, i.kind, i.title, i.due,
@@ -665,13 +670,32 @@ export function createStore(file) {
     if (!db || !state.ok) return { items: [], commits: [] };
     const where = `i.deleted_at IS NULL AND i.done_at IS NOT NULL${days == null ? '' : ' AND i.done_at > ?'}`;
     const stmt = db.prepare(
-      `SELECT i.id, i.title, i.kind, i.done_at, i.project_id, p.name AS project_name
+      `SELECT i.id, i.title, i.kind, i.done_at, i.project_id, p.name AS project_name,
+              i.note, i.waiting_for
        FROM item i LEFT JOIN project p ON p.id = i.project_id
        WHERE ${where}
        ORDER BY i.done_at DESC`
     );
     const rows = days == null ? stmt.all() : stmt.all(new Date(Date.now() - days * 86400_000).toISOString());
     return { items: rows, commits: [] };
+  }
+
+  // 목록 밖의 항목 — 완료한 지 오래된 것과 지운 것. 검색(/)이 "어디 있는지 모르는 항목"을
+  // 찾는 기능인데, 목록은 완료를 12시간만 남기고 지운 것은 아예 안 보여서 정작 찾을 일이 많은
+  // 지난 항목에는 닿지 않았다. 거르기는 렌더러의 matches가 한다(초성까지 같은 규칙) — 개인 할 일
+  // 규모라 통째로 내려도 가볍고, 검색창을 열 때 한 번만 부른다.
+  function searchArchive() {
+    if (!db || !state.ok) return [];
+    return db
+      .prepare(
+        `SELECT i.id, i.project_id, p.name AS project_name, i.kind, i.title, i.due,
+                i.waiting_for, i.captured_at, i.done_at, i.deleted_at, i.note
+         FROM item i
+         LEFT JOIN project p ON p.id = i.project_id
+         WHERE i.deleted_at IS NOT NULL OR i.done_at <= ?
+         ORDER BY coalesce(i.deleted_at, i.done_at) DESC`
+      )
+      .all(doneCutoff());
   }
 
   // 아침 브리핑 재료 — 이번 페이즈에서 걷어낸 테이블·칼럼에 기대는 원본의 서브쿼리·조인은
@@ -839,6 +863,7 @@ export function createStore(file) {
     getInbox,
     purgeDeleted,
     getHistory,
+    searchArchive,
     briefing,
     schemaVersion: () => MIGRATIONS.length,
     exportAll,

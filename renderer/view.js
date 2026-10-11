@@ -47,6 +47,21 @@
     };
   }
 
+  // 초성 검색 — "ㅎㅇ"으로 "회의"를 찾는다. 한글 완성형(가~힣)은 첫소리로 바꾸고 나머지
+  // 글자는 그대로 둔다. 낱말이 첫소리 자모로만 되어 있을 때만 이쪽으로 비교한다 —
+  // "회ㅇ"처럼 섞인 것까지 풀면 IME 조합 중간값마다 엉뚱한 항목이 걸린다.
+  const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+  const CHO_ONLY = /^[ㄱ-ㅎ]+$/;
+
+  function initials(s) {
+    let out = '';
+    for (const ch of s) {
+      const c = ch.charCodeAt(0) - 0xac00;
+      out += c >= 0 && c < 11172 ? CHO[Math.floor(c / 588)] : ch;
+    }
+    return out;
+  }
+
   function matches(row, q) {
     if (!q) return true;
     // 이슈는 번호로 부른다 — "#210"도 "210"도 걸리게 넣는다
@@ -55,11 +70,12 @@
       .filter(Boolean)
       .join(' ')
       .toLowerCase();
+    let cho = null; // 초성 낱말이 있을 때만 만든다
     return q
       .toLowerCase()
       .split(/\s+/)
       .filter(Boolean)
-      .every((term) => hay.includes(term));
+      .every((term) => hay.includes(term) || (CHO_ONLY.test(term) && (cho ??= initials(hay)).includes(term)));
   }
 
   // 오늘 탭 배치 — [{ key, label, pid, items }]. 프로젝트별로만 묶는다.
@@ -144,6 +160,7 @@
     waitMeta,
     STALE_WAITING_DAYS,
     matches,
+    initials,
     todayGroups,
     dayOf,
     historyDays,

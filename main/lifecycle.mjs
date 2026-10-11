@@ -75,6 +75,23 @@ const SMOKE_PROBE = `(async () => {
     if (filter !== '없을만한검색어') throw new Error('Tab이 필터를 지웠다 — 탭을 넘어 유지돼야 한다');
     closeSearch(false);
   });
+  // 목록 밖 검색 — 완료·지운 항목이 검색 결과 아래에 따로 서고, 초성으로도 걸리고, 고를 수 있다.
+  // 임시 userData라 지난 항목이 없으므로 IPC가 이어졌는지만 보고 줄은 끼워 넣는다.
+  await step('search:archive', async () => {
+    await loadArchive();
+    if (!Array.isArray(archive)) throw new Error('목록 밖 항목을 받지 못했다 (search:archive)');
+    if (!state || !state.online) return;
+    switchTab('inbox');
+    archive = [{ id: 'smoke-arch', title: '스모크 지난 회의', kind: 'todo', done_at: new Date(0).toISOString(), archived: true }];
+    filter = 'ㅅㅁㅋ';
+    render();
+    if (!document.querySelector('.item.archived')) throw new Error('초성 검색에 목록 밖 항목이 보이지 않는다');
+    sel = currentList().findIndex(function (r) { return r.id === 'smoke-arch'; });
+    render();
+    if (!selectedItem() || !selectedItem().archived) throw new Error('목록 밖 행을 고를 수 없다');
+    closeSearch(false);
+    if (archive !== null) throw new Error('검색을 풀었는데 목록 밖 목록이 남았다');
+  });
   // 프로젝트 번호 띠 — 1~9를 쓰는 탭에서만 스크롤 밖 고정 자리에 서고, 이름 칩도 번호를 단다
   await step('legend', () => {
     if (!state || !state.online || !state.projects.length) return;

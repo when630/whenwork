@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('whenwork', {
   // ── 오늘 뷰
   getState: () => ipcRenderer.invoke('today:getState'),
   onRefresh: (cb) => ipcRenderer.on('today:refresh', () => cb()),
+  // 오늘 뷰를 보고 있을 때 인박스 단축키를 눌렀다 — 탭은 렌더러만 안다
+  onInboxKey: (cb) => ipcRenderer.on('today:inboxKey', () => cb()),
   complete: (id) => ipcRenderer.invoke('item:complete', id),
   uncomplete: (id) => ipcRenderer.invoke('item:uncomplete', id),
   // keepKind — 대기 항목에 프로젝트만 붙일 때(대기를 풀지 않는다)
@@ -40,7 +42,8 @@ contextBridge.exposeInMainWorld('whenwork', {
   settingsOpenFile: () => ipcRenderer.invoke('settings:openFile'),
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
-  hotkeySet: (accel) => ipcRenderer.invoke('hotkey:set', accel),
+  // key: 'hotkey'(퀵캡처) | 'inboxHotkey'. accel이 비면 기본 조합으로 돌린다
+  hotkeySet: (accel, key) => ipcRenderer.invoke('hotkey:set', accel, key),
   dataExport: () => ipcRenderer.invoke('data:export'),
   dataImport: () => ipcRenderer.invoke('data:import'),
 

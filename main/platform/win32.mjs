@@ -9,6 +9,10 @@ export default {
   // 설계 11절의 조합. macOS와 다른 값을 쓰지 않는 이유는 platform/darwin.mjs에 적었다.
   defaultHotkey: 'Control+Alt+Space',
 
+  // 인박스를 바로 여는 조합 — 퀵캡처 조합에 Shift만 더한다. 새 조합을 외우게 하지 않으려는
+  // 것이고, 맨 Space 계열이라 다른 앱의 단축키와 부딪힐 일이 적다. 설정에서 바꿀 수 있다.
+  defaultInboxHotkey: 'Control+Alt+Shift+Space',
+
   // Windows NSIS는 서명 없이도 electron-updater가 내려받아 설치한다.
   // (설치 시 SmartScreen이 한 번 더 물을 수 있지만 업데이트 경로 자체는 막히지 않는다)
   canAutoUpdate: true,

@@ -92,6 +92,23 @@ const SMOKE_PROBE = `(async () => {
     closeSearch(false);
     if (archive !== null) throw new Error('검색을 풀었는데 목록 밖 목록이 남았다');
   });
+  // 인박스 단축키 — 오늘 뷰를 보고 있을 때 main이 보내는 신호를 받아 어느 탭에서든 인박스로 옮긴다.
+  // 완료 기록 화면에 있었어도 목록으로 나와야 한다. (인박스에서 한 번 더 누르면 접히는 쪽은 창을
+  // 숨기므로 여기서 밟지 않는다)
+  await step('inboxKey', async () => {
+    if (typeof window.whenwork.onInboxKey !== 'function') throw new Error('preload에 onInboxKey가 없다');
+    switchTab('waiting');
+    inboxKey();
+    if (tab !== 'inbox' || view !== 'list') throw new Error('대기 탭에서 인박스로 옮기지 않았다: ' + view + '/' + tab);
+    await openHistory(7);
+    inboxKey();
+    if (tab !== 'inbox' || view !== 'list') throw new Error('완료 기록에서 인박스로 나오지 않았다: ' + view + '/' + tab);
+    switchTab('settings');
+    await loadSettings();
+    var rows = Array.prototype.filter.call(document.querySelectorAll('#body .item .t'), function (n) { return /단축키/.test(n.textContent); });
+    if (rows.length !== 2) throw new Error('설정에 단축키 줄이 둘이어야 한다: ' + rows.length);
+    switchTab('today');
+  });
   // 프로젝트 번호 띠 — 1~9를 쓰는 탭에서만 스크롤 밖 고정 자리에 서고, 이름 칩도 번호를 단다
   await step('legend', () => {
     if (!state || !state.online || !state.projects.length) return;
@@ -167,6 +184,9 @@ export function bootstrap() {
     suppressHide: false,
     // 현재 단축키와 그 등록 성공 여부(PLAT-02). applyHotkey가 둘 다 갱신한다.
     hotkey: null,
+    // 인박스를 바로 여는 단축키 — 같은 방식으로 applyInboxHotkey가 갱신한다
+    inboxHotkey: null,
+    inboxHotkeyOk: false,
     // 알림이 막혀 화면으로 대신 보여줄 말(PLAT-04). 오늘 뷰가 읽어 가면 비운다.
     pendingNotice: null,
     SMOKE,
@@ -389,16 +409,21 @@ export function bootstrap() {
   }
   ctx.showToday = showToday;
 
+  // 인박스 탭으로 연다 — 어느 탭으로 열지는 push하지 않고 상태에 실어 둔다(today:getState가
+  // 읽어 간다). 창을 지금 만드는 중이면 렌더러에 리스너가 아직 없어 push는 조용히 사라진다.
+  function openInbox() {
+    ctx.openTab = 'inbox';
+    showToday();
+  }
+
   // ── 형제 앱 연동(when-protocol) — WHENCOMMAND가 whenwork://<명령>?<인자> 로 부른다. 모르는 URL은 조용히 무시한다.
   function handleDeepLink(raw) {
     const link = parseDeepLink(raw);
     if (!link) return false;
     const { command, args } = link;
     if (command === 'today') showToday();
-    else if (command === 'inbox') {
-      ctx.openTab = 'inbox'; // today:getState가 읽어 간다 — 창이 로딩 중이어도 잃지 않는다
-      showToday();
-    } else if (command === 'add') {
+    else if (command === 'inbox') openInbox();
+    else if (command === 'add') {
       // 창 없이 인박스로 — 캡처와 같은 큐 경로라 잃지 않는다(D-01). 글이 없으면 캡처 창으로 대신한다
       if (!args.text) return handleDeepLink(`${SCHEME}://capture`);
       const res = saveCapture(ctx, args.text);
@@ -468,6 +493,10 @@ export function bootstrap() {
             : `퀵캡처 — 단축키 등록 실패! (설정에서 다른 조합으로)`,
           click: showCapture,
         },
+        {
+          label: ctx.inboxHotkeyOk ? `인박스 (${platform.hotkeyLabel(ctx.inboxHotkey)})` : '인박스',
+          click: openInbox,
+        },
         { type: 'separator' },
         {
           label: storeStatusLine(),
@@ -530,26 +559,47 @@ export function bootstrap() {
       if (ctx.captureWin && !ctx.captureWin.isDestroyed() && ctx.captureWin.isVisible()) return platform.deactivate(ctx.captureWin);
       showCapture();
     };
+    // 인박스 단축키 — 오늘 뷰를 이미 보고 있으면 탭은 렌더러만 안다. 거기 맡겨 인박스면 접고
+    // 아니면 인박스로 옮긴다(토글). 퀵캡처가 떠 있었으면 오늘 뷰가 앞으로 나오는 순간 blur돼
+    // hideOnBlur가 접는다 — 여기서 hide()를 따로 부르지 않는다(D8, 숨기는 길은 deactivate 하나).
+    const onInboxHotkey = () => {
+      const today = ctx.todayWin && !ctx.todayWin.isDestroyed() ? ctx.todayWin : null;
+      if (today?.isVisible() && today.isFocused()) return today.webContents.send('today:inboxKey');
+      openInbox();
+    };
     // PLAT-02: 등록은 한 곳에서만 한다 — 설정에서 조합을 바꿔도 같은 함수를 부르므로
     // "바꾼 조합이 실제로 잡혔는지"가 처음 등록과 같은 방식으로 확인된다.
-    ctx.applyHotkey = (accel) => {
-      globalShortcut.unregisterAll();
-      const next = accel || ctx.settings.get('hotkey') || platform.defaultHotkey;
+    // 단축키가 둘이라 unregisterAll을 쓰지 않는다 — 하나를 바꾸다 다른 하나가 풀린다.
+    const SHORTCUTS = {
+      hotkey: { handler: onHotkey, fallback: platform.defaultHotkey },
+      inboxHotkey: { handler: onInboxHotkey, fallback: platform.defaultInboxHotkey },
+    };
+    const applyShortcut = (key, accel) => {
+      const { handler, fallback } = SHORTCUTS[key];
+      // 잡혀 있던 것만 푼다 — 등록에 실패한 조합을 풀면 다른 쪽이 잡고 있던 것이 풀릴 수 있다
+      if (ctx[key] && ctx[`${key}Ok`]) globalShortcut.unregister(ctx[key]);
+      const next = accel || ctx.settings.get(key) || fallback;
+      // 다른 단축키가 이미 잡은 조합이면 등록하지 않는다 — register가 덮어써 그쪽이 조용히 죽는다
+      const taken = Object.keys(SHORTCUTS).some((k) => k !== key && ctx[`${k}Ok`] && ctx[k] === next);
       // register()는 이미 남이 쓰는 조합이면 조용히 false만 낸다. isRegistered()로 한 번 더
       // 확인하는 이유는 macOS에서 register()가 true를 내고도 실제로는 안 잡히는 보고가
       // 있어서다(Phase 4 리서치 플래그) — 두 값이 어긋나면 실패로 본다.
       let ok = false;
       try {
-        ok = globalShortcut.register(next, onHotkey) && globalShortcut.isRegistered(next);
+        ok = !taken && globalShortcut.register(next, handler) && globalShortcut.isRegistered(next);
       } catch {
         ok = false; // 조합 문자열 자체가 잘못된 경우 register가 던진다
       }
-      ctx.hotkey = next;
-      ctx.hotkeyOk = ok;
+      ctx[key] = next;
+      ctx[`${key}Ok`] = ok;
       refreshTrayMenu();
       return ok;
     };
+    ctx.applyHotkey = (accel) => applyShortcut('hotkey', accel);
+    ctx.applyInboxHotkey = (accel) => applyShortcut('inboxHotkey', accel);
     ctx.applyHotkey();
+    // 인박스 쪽 실패는 알림까지 띄우지 않는다 — 캡처가 앱의 제1목적이고, 실패는 설정·트레이에 드러난다
+    ctx.applyInboxHotkey();
     if (!ctx.hotkeyOk) {
       ctx.notify('단축키를 등록하지 못했습니다', `${platform.hotkeyLabel(ctx.hotkey)} 를 다른 앱이 쓰고 있습니다 — 설정에서 다른 조합으로 바꿔 주세요`);
     }
@@ -625,7 +675,7 @@ export function bootstrap() {
             probe?.errors?.length === 0 &&
             capture?.length === 0;
           console.log(
-            `SMOKE_${ok ? 'OK' : 'FAIL'} hotkey=${ctx.hotkeyOk} pending=${ctx.queue.count()} renderer=${JSON.stringify(probe)} capture=${JSON.stringify(capture)}`
+            `SMOKE_${ok ? 'OK' : 'FAIL'} hotkey=${ctx.hotkeyOk} inboxHotkey=${ctx.inboxHotkeyOk} pending=${ctx.queue.count()} renderer=${JSON.stringify(probe)} capture=${JSON.stringify(capture)}`
           );
           ctx.quitting = true;
           app.exit(ok ? 0 : 1);

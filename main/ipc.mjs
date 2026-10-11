@@ -52,7 +52,14 @@ export function registerIpc(ctx) {
   //
   // DB가 꺼져 있어도 봐야 하는 화면이라(접속 정보 확인) DB 경로를 타지 않는다.
   // 앱에서 만지는 건 아래 네 개뿐이고, DB 접속은 settings.json을 직접 고쳐 재시작한다.
-  const SETTING_KEYS = ['notifyEnabled', 'notifyAt', 'hotkey'];
+  const SETTING_KEYS = ['notifyEnabled', 'notifyAt', 'hotkey', 'inboxHotkey'];
+
+  // 전역 단축키 두 개. 값은 settings:set이 아니라 hotkey:set으로만 바꾼다 — 등록 성공까지
+  // 확인해야 저장할 수 있다. label은 서로 같은 조합을 고르려 할 때 어느 쪽과 겹치는지 말할 때 쓴다.
+  const HOTKEYS = {
+    hotkey: { apply: (a) => ctx.applyHotkey(a), fallback: platform.defaultHotkey, label: '퀵캡처' },
+    inboxHotkey: { apply: (a) => ctx.applyInboxHotkey(a), fallback: platform.defaultInboxHotkey, label: '인박스' },
+  };
 
   ipcMain.handle('settings:get', () => {
     // 01-05: PostgreSQL 접속 정보 대신 저장소(store.mjs) 파일 위치와 상태를 보여준다
@@ -62,11 +69,12 @@ export function registerIpc(ctx) {
     return {
       ok: true,
       values: Object.fromEntries(
-        SETTING_KEYS.map((k) => [k, k === 'hotkey' ? (ctx.hotkey ?? platform.defaultHotkey) : ctx.settings.get(k)])
+        SETTING_KEYS.map((k) => [k, k in HOTKEYS ? (ctx[k] ?? HOTKEYS[k].fallback) : ctx.settings.get(k)])
       ),
-      defaults: { notifyAt: NOTIFY_AT_DEFAULT, hotkey: platform.defaultHotkey },
+      defaults: { notifyAt: NOTIFY_AT_DEFAULT, hotkey: platform.defaultHotkey, inboxHotkey: platform.defaultInboxHotkey },
       // PLAT-02: 지금 조합이 실제로 잡혀 있는지. 화면이 이 값으로 실패를 드러낸다.
       hotkeyOk: ctx.hotkeyOk,
+      inboxHotkeyOk: ctx.inboxHotkeyOk,
       platform: platform.name,
       // PLAT-04: 알림이 막혀 화면으로 대신 보여줄 말. 한 번 읽어 가면 비운다.
       notice: (() => {
@@ -86,7 +94,7 @@ export function registerIpc(ctx) {
   });
 
   ipcMain.handle('settings:set', (_e, key, value) => {
-    if (key === 'hotkey') return { ok: false, reason: 'use hotkey:set' };
+    if (key in HOTKEYS) return { ok: false, reason: 'use hotkey:set' };
     if (!SETTING_KEYS.includes(key)) return { ok: false };
     if (value === null || value === '') ctx.settings.remove(key);
     else ctx.settings.set(key, value);
@@ -109,11 +117,13 @@ export function registerIpc(ctx) {
     ctx.pendingNotice = null;
     // 화면이 조합을 말할 때 쓰는 사람 표기 — 설정을 바꾼 사람에게 기본값을 보여주면 거짓말이다
     const hotkeyLabel = platform.hotkeyLabel(ctx.hotkey ?? platform.defaultHotkey);
+    // 인박스 단축키는 실제로 잡혔을 때만 — 안 잡힌 조합을 키맵에 적으면 눌러도 아무 일이 없다
+    const inboxHotkeyLabel = ctx.inboxHotkeyOk ? platform.hotkeyLabel(ctx.inboxHotkey) : null;
     // 퀵캡처 Tab이 남긴 "이 탭으로 열어라". 한 번 실어 보내면 비운다 — 다음 새로고침마다
     // 인박스로 튀면 그게 더 성가시다.
     const openTab = ctx.openTab ?? null;
     ctx.openTab = null;
-    const base = { pending: ctx.pending, notice, hotkeyLabel, openTab };
+    const base = { pending: ctx.pending, notice, hotkeyLabel, inboxHotkeyLabel, openTab };
     const st = ctx.store.status();
     if (!st.ok) return { ...base, online: false, notice: st.notice };
     // WR-03: st.ok가 true인 뒤에도 getViewState() 실행 중 SQLite 오류(디스크 I/O 등)가 날 수
@@ -221,16 +231,25 @@ export function registerIpc(ctx) {
   // PLAT-02: 조합을 바꾸면 **그 조합의 등록 성공 여부까지** 확인해서 돌려준다.
   // 실패하면 설정에 저장하지 않고 이전 조합으로 되돌린다 — 저장해 두면 다음 실행에서도
   // 안 잡히는 조합으로 조용히 시작한다.
-  ipcMain.handle('hotkey:set', (_e, accel) => {
-    const next = String(accel ?? '').trim();
-    if (!next) return { ok: false, error: '조합이 비어 있습니다' };
-    const prev = ctx.hotkey;
-    if (ctx.applyHotkey(next)) {
-      ctx.settings.set('hotkey', next);
+  //
+  // 비워서 부르면 기본 조합으로 돌린다 — 설정 탭의 X가 이 길을 탄다. 예전에는 X가 settings:set을
+  // 불러 거절당하고도 "기본값으로"라고 말했다.
+  ipcMain.handle('hotkey:set', (_e, accel, key = 'hotkey') => {
+    const slot = HOTKEYS[key];
+    if (!slot) return { ok: false, error: '알 수 없는 단축키입니다' };
+    const reset = String(accel ?? '').trim() === '';
+    const next = reset ? slot.fallback : String(accel).trim();
+    // 두 단축키가 같은 조합이면 나중에 등록한 쪽이 먼저 것을 조용히 빼앗는다
+    const other = Object.keys(HOTKEYS).find((k) => k !== key && ctx[k] === next);
+    if (other) return { ok: false, error: `${HOTKEYS[other].label} 단축키와 같은 조합입니다` };
+    const prev = ctx[key];
+    if (slot.apply(next)) {
+      if (reset) ctx.settings.remove(key);
+      else ctx.settings.set(key, next);
       ctx.settings.flush();
       return { ok: true, hotkey: next, label: platform.hotkeyLabel(next) };
     }
-    ctx.applyHotkey(prev); // 되돌린다 — 새 조합이 안 잡히는데 옛 조합까지 풀려 있으면 안 된다
+    slot.apply(prev); // 되돌린다 — 새 조합이 안 잡히는데 옛 조합까지 풀려 있으면 안 된다
     return { ok: false, error: '그 조합은 다른 앱이 쓰고 있거나 잘못된 형식입니다' };
   });
 
@@ -312,7 +331,8 @@ export function registerIpc(ctx) {
   // 열렸다. 렌더러는 어차피 첫 로드에서 getState를 부르므로 거기서 읽어 가면 시점과 무관하다.
   ipcMain.on('app:open', (e) => {
     BrowserWindow.fromWebContents(e.sender)?.hide();
-    ctx.openTab = 'inbox';
+    // 'triage' — 인박스가 비었으면 오늘 탭으로(렌더러 refresh). 인박스 단축키·딥링크의 'inbox'는 비어도 인박스다
+    ctx.openTab = 'triage';
     ctx.showToday(); // 이미 열려 있으면 today:refresh를 보내고, 그 refresh가 openTab을 읽는다
   });
 }

@@ -180,6 +180,18 @@ test('설정한 값이 있으면 그대로 보여준다', () => {
   assert.equal(VIEW.settingDisplay({ key: 'notifyEnabled', kind: 'bool' }, {}), '켜짐'); // 기본은 켜짐
 });
 
+test('단축키는 필드마다 자기 기본값과 등록 결과를 본다 — 퀵캡처 실패가 인박스 줄에 번지지 않는다', () => {
+  const defaults = { hotkey: 'Control+Alt+Space', inboxHotkey: 'Control+Alt+Shift+Space' };
+  const cap = { key: 'hotkey', kind: 'hotkey' };
+  const inbox = { key: 'inboxHotkey', kind: 'hotkey' };
+  assert.equal(VIEW.settingDisplay(inbox, {}, defaults), 'Control+Alt+Shift+Space');
+  assert.equal(VIEW.settingDisplay(inbox, { inboxHotkey: 'Control+Alt+I' }, defaults), 'Control+Alt+I');
+  const extra = { hotkeyOk: false, inboxHotkeyOk: true };
+  assert.match(VIEW.settingDisplay(cap, {}, defaults, extra), /등록 실패/);
+  assert.equal(VIEW.settingDisplay(inbox, {}, defaults, extra), 'Control+Alt+Shift+Space');
+  assert.match(VIEW.settingDisplay(inbox, {}, defaults, { inboxHotkeyOk: false }), /등록 실패/);
+});
+
 // ── 대기 재촉 (재촉하면 경과 시계가 그때부터 다시 돈다)
 test('재촉 전에는 부탁한 날부터, 재촉 후에는 재촉한 날부터 센다', () => {
   const now = new Date(2026, 7, 10).getTime();

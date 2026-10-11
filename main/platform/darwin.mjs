@@ -19,6 +19,10 @@ export default {
   // 바꿀 수 있고, 등록 실패는 화면에 드러난다.
   defaultHotkey: 'Control+Alt+Space',
 
+  // 인박스를 바로 여는 조합 — 퀵캡처 조합에 Shift만 더한다. 새 조합을 외우게 하지 않으려는
+  // 것이고, 맨 Space 계열이라 다른 앱의 단축키와 부딪힐 일이 적다. 설정에서 바꿀 수 있다.
+  defaultInboxHotkey: 'Control+Alt+Shift+Space',
+
   // macOS 자동 업데이트는 **코드 서명이 필수**다(electron-builder 공식 문서 명시).
   // Squirrel.Mac이 서명을 확인하고 거부하므로, 미서명 배포에서는 내려받아 설치하는
   // 경로 자체가 없다. 새 버전을 알려 주고 받는 곳으로 보내는 것까지가 할 수 있는 전부다.

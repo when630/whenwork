@@ -18,6 +18,12 @@ const SETTING_FIELDS = [
     hint: 'Enter를 누르고 원하는 조합을 그대로 누르세요 — 등록되는지 그 자리에서 확인합니다',
   },
   {
+    key: 'inboxHotkey',
+    label: '인박스 단축키',
+    kind: 'hotkey',
+    hint: '어디서든 인박스를 바로 엽니다 — 인박스를 보고 있을 때 누르면 닫힙니다',
+  },
+  {
     key: 'notifyEnabled',
     label: '아침 브리핑 알림',
     kind: 'bool',
@@ -363,6 +369,7 @@ const KEYMAP = [
   ['지운 프로젝트', [['↑↓', '고르기'], ['Enter', '되살리기'], ['Esc', '뒤로']]],
   ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json']]],
   ['퀵캡처', [['{hotkey}', '열기·닫기'], ['Enter', '저장'], ['Tab', '오늘 뷰']]],
+  ['인박스 단축키', [['{inboxHotkey}', '어디서든 인박스 열기·닫기']]],
 ];
 
 let keysOpen = false;
@@ -371,12 +378,14 @@ function openKeys() {
   const body = $('keysBody');
   body.replaceChildren();
   for (const [group, keys] of KEYMAP) {
+    // 인박스 단축키가 안 잡혔으면 그 줄은 빼고 보여준다 — 눌러도 아무 일이 없는 조합을 적지 않는다
+    if (keys.some(([k]) => k === '{inboxHotkey}') && !state?.inboxHotkeyLabel) continue;
     body.append(el('div', 'g', group));
     const ks = el('div', 'ks');
     for (const [key, label] of keys) {
       const s = el('span');
       // {hotkey}는 사용자가 설정한 조합으로 — 기본값을 박아 두면 바꾼 사람에게 거짓말이 된다
-      s.append(el('kbd', null, key === '{hotkey}' ? hotkeyLabel() : key), document.createTextNode(' ' + label));
+      s.append(el('kbd', null, key === '{hotkey}' ? hotkeyLabel() : key === '{inboxHotkey}' ? state.inboxHotkeyLabel : key), document.createTextNode(' ' + label));
       ks.append(s);
     }
     body.append(ks);
@@ -534,7 +543,7 @@ function renderSettings() {
     row.append(el('div', 't', f.label));
     const v = cfg.values[f.key];
     const isDefault = f.kind === 'bool' ? false : !v;
-    row.append(el('span', 'set-val' + (isDefault ? ' dim' : ''), settingDisplay(f, cfg.values, cfg.defaults, { hotkeyOk: cfg.hotkeyOk })));
+    row.append(el('span', 'set-val' + (isDefault ? ' dim' : ''), settingDisplay(f, cfg.values, cfg.defaults, { hotkeyOk: cfg.hotkeyOk, inboxHotkeyOk: cfg.inboxHotkeyOk })));
     row.append(el('div', 'ctx', f.hint));
     row.onclick = () => {
       sel = idx;
@@ -636,11 +645,11 @@ async function editSetting(f) {
     return loadSettings();
   }
   if (f.kind === 'hotkey') {
-    const accel = await captureHotkey(cfg.values.hotkey ?? '');
+    const accel = await captureHotkey(cfg.values[f.key] ?? '', f.label);
     if (!accel) return;
-    const res = await window.whenwork.hotkeySet(accel);
+    const res = await window.whenwork.hotkeySet(accel, f.key);
     if (!res.ok) return toast(res.error ?? '단축키를 등록하지 못했습니다', { holdMs: 5000 });
-    toast(`단축키 ${res.label} 로 바뀌었습니다`);
+    toast(`${f.label} ${res.label} 로 바뀌었습니다`);
     return loadSettings();
   }
   const raw = await promptText(`${f.label} (${f.hint})`, cfg.values[f.key] ?? cfg.defaults?.notifyAt ?? '');
@@ -662,6 +671,13 @@ async function clearSetting(f) {
   if (f.kind === 'secret' && cfg?.values?.[f.key]) {
     const yes = await promptText(`${f.label} 해제? 지우려면 y 입력`, '');
     if (yes?.toLowerCase() !== 'y') return;
+  }
+  // 단축키는 settings:set이 받지 않는다 — 기본 조합이 실제로 잡히는지까지 hotkey:set이 확인한다
+  if (f.kind === 'hotkey') {
+    const res = await window.whenwork.hotkeySet(null, f.key);
+    if (!res.ok) return toast(res.error ?? '기본 조합을 등록하지 못했습니다', { holdMs: 5000 });
+    toast(`${f.label} — 기본값 ${res.label}`);
+    return loadSettings();
   }
   await window.whenwork.settingsSet(f.key, null);
   toast(`${f.label} — ${f.kind === 'secret' ? '해제' : '기본값으로'}`);
@@ -852,14 +868,37 @@ async function refresh() {
     firstLoad = false;
     if (state.inbox?.length) tab = 'inbox';
   }
-  // 퀵캡처에서 Tab으로 건너왔다 — 방금 던진 것을 정리하러 온 길이다. 인박스에 쌓인 게 있으면
-  // 거기로, 비어 있으면(저장이 실패했거나 던진 게 없으면) 정리할 것이 없으니 오늘 탭으로.
-  if (state?.openTab === 'inbox' && view === 'list') {
+  // main이 "이 탭으로 열어라"를 실어 보냈다.
+  // - triage: 퀵캡처에서 Tab으로 건너왔다 — 방금 던진 것을 정리하러 온 길이다. 인박스에 쌓인 게
+  //   있으면 거기로, 비어 있으면(저장이 실패했거나 던진 게 없으면) 정리할 것이 없으니 오늘 탭으로.
+  // - inbox: 인박스 단축키·딥링크 — 인박스를 보겠다고 부른 것이라 비어 있어도 인박스다.
+  //   완료 기록·지운 프로젝트 화면에 있었어도 목록으로 나온다.
+  if (state?.openTab === 'inbox') {
+    if (view === 'history') history = null;
+    view = 'list';
+    tab = 'inbox';
+    sel = 0;
+    resetScroll = true;
+  } else if (state?.openTab === 'triage' && view === 'list') {
     tab = state.online && state.inbox?.length ? 'inbox' : 'today';
     sel = 0;
     resetScroll = true;
   }
   render();
+}
+
+// 오늘 뷰를 보고 있는데 인박스 단축키가 왔다(main이 보낸다 — 창이 닫혀 있으면 main이 인박스로
+// 연다). 인박스 목록을 보고 있었으면 접고, 아니면 인박스로 옮긴다. 검색어는 그대로 둔다 —
+// 탭을 옮겨도 검색이 유지되는 규칙과 같다. 입력 다이얼로그가 떠 있으면 무시한다: 대답을
+// 기다리는 동안 대상 목록이 바뀌면 엉뚱한 항목에 적용된다.
+function inboxKey() {
+  if (dlgResolve || hotkeyCapture) return;
+  if (keysOpen) closeKeys();
+  if (view === 'list' && tab === 'inbox' && !searchOn) return window.whenwork.hide();
+  if (searchOn) closeSearch(true);
+  if (view === 'history') history = null;
+  view = 'list';
+  switchTab('inbox');
 }
 
 function switchTab(key) {
@@ -1047,12 +1086,12 @@ function accelLabel(parts, isMac) {
   return parts.map((x) => (x === 'Control' ? 'Ctrl' : x === 'Super' ? 'Win' : x)).join('+');
 }
 
-function captureHotkey(current = '') {
+function captureHotkey(current = '', label = '퀵캡처 단축키') {
   return new Promise((resolve) => {
     const isMac = cfg?.platform === 'darwin';
     hotkeyCapture = { resolve, isMac };
     setModal(true);
-    $('dlgLabel').textContent = `퀵캡처 단축키 — 원하는 조합을 지금 누르세요 (Esc 취소)`;
+    $('dlgLabel').textContent = `${label} — 원하는 조합을 지금 누르세요 (Esc 취소)`;
     const input = $('dlgIn');
     input.readOnly = true;
     input.value = current ? `지금: ${accelLabel(current.split('+'), isMac)}` : '';
@@ -1461,5 +1500,6 @@ setInterval(() => {
 // 백그라운드로 만들던 카드가 완성됐다 — 그 카드를 열어둔 채 스켈레톤을 보고 있었으면 채워준다.
 // 열람 수(KPI)는 늘리지 않는다(log=false).
 window.whenwork.onRefresh(refresh);
+window.whenwork.onInboxKey(inboxKey);
 // 트레이에서 리뷰를 만들면 그 탭을 바로 열어준다
 refresh();

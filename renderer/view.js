@@ -144,10 +144,11 @@
   function settingDisplay(field, values = {}, defaults = {}, extra = {}) {
     const v = values[field.key];
     if (field.kind === 'bool') return v === false ? '꺼짐' : '켜짐';
-    // PLAT-02: 조합만 보여주면 "적혀 있으니 되겠지"가 된다 — 실제로 안 잡혔으면 그 자리에서 말한다
+    // PLAT-02: 조합만 보여주면 "적혀 있으니 되겠지"가 된다 — 실제로 안 잡혔으면 그 자리에서 말한다.
+    // 단축키가 둘(hotkey·inboxHotkey)이라 기본값과 성공 여부를 필드 이름으로 찾는다.
     if (field.kind === 'hotkey') {
-      const shown = v || defaults.hotkey || '';
-      return extra.hotkeyOk === false ? `${shown} — 등록 실패! 다른 조합으로 바꾸세요` : shown;
+      const shown = v || defaults[field.key] || '';
+      return extra[`${field.key}Ok`] === false ? `${shown} — 등록 실패! 다른 조합으로 바꾸세요` : shown;
     }
     if (field.kind === 'time') return v || `${defaults.notifyAt ?? '09:00'} (기본)`;
     if (v) return v;

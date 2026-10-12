@@ -30,6 +30,12 @@ const SETTING_FIELDS = [
     hint: '오늘 마감·지연·오래 기다린 항목을 하루 한 번 알린다',
   },
   { key: 'notifyAt', label: '알림 시각', kind: 'time', hint: 'HH:MM' },
+  {
+    key: 'keepOpen',
+    label: '창 고정 모드',
+    kind: 'bool',
+    hint: '켜면 다른 곳을 눌러도 오늘 뷰가 닫히지 않는다 — Esc·단축키·트레이로 닫는다',
+  },
 ];
 
 let state = null; // 마지막으로 받은 서버 상태

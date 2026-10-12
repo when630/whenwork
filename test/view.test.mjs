@@ -192,6 +192,12 @@ test('단축키는 필드마다 자기 기본값과 등록 결과를 본다 — 
   assert.match(VIEW.settingDisplay(inbox, {}, defaults, { inboxHotkeyOk: false }), /등록 실패/);
 });
 
+test('창 고정 모드는 꺼진 값을 꺼짐으로 보여준다', () => {
+  const f = { key: 'keepOpen', kind: 'bool' };
+  assert.equal(VIEW.settingDisplay(f, { keepOpen: false }), '꺼짐');
+  assert.equal(VIEW.settingDisplay(f, { keepOpen: true }), '켜짐');
+});
+
 // ── 대기 재촉 (재촉하면 경과 시계가 그때부터 다시 돈다)
 test('재촉 전에는 부탁한 날부터, 재촉 후에는 재촉한 날부터 센다', () => {
   const now = new Date(2026, 7, 10).getTime();

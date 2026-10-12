@@ -39,6 +39,9 @@ export function saveCapture(ctx, title, context = null) {
     }
   }
   ctx.refreshTrayMenu();
+  // 창 고정 모드면 오늘 뷰를 띄워 둔 채로 캡처한다 — 방금 던진 것이 그 화면에 바로 보여야 한다
+  const tw = ctx.todayWin;
+  if (tw && !tw.isDestroyed() && tw.isVisible()) tw.webContents.send('today:refresh');
   // id는 01-07의 --inject-capture 주입 분기가 CAPTURE_INJECTED 뒤에 찍는 값이다 —
   // 기존 호출부(capture:save/capture:followUp)는 이 필드를 그냥 무시한다.
   return { ok: true, pending: ctx.pending, id: entry.id };
@@ -52,7 +55,7 @@ export function registerIpc(ctx) {
   //
   // DB가 꺼져 있어도 봐야 하는 화면이라(접속 정보 확인) DB 경로를 타지 않는다.
   // 앱에서 만지는 건 아래 네 개뿐이고, DB 접속은 settings.json을 직접 고쳐 재시작한다.
-  const SETTING_KEYS = ['notifyEnabled', 'notifyAt', 'hotkey', 'inboxHotkey'];
+  const SETTING_KEYS = ['notifyEnabled', 'notifyAt', 'keepOpen', 'hotkey', 'inboxHotkey'];
 
   // 전역 단축키 두 개. 값은 settings:set이 아니라 hotkey:set으로만 바꾼다 — 등록 성공까지
   // 확인해야 저장할 수 있다. label은 서로 같은 조합을 고르려 할 때 어느 쪽과 겹치는지 말할 때 쓴다.
@@ -68,9 +71,13 @@ export function registerIpc(ctx) {
     const st = ctx.store.status();
     return {
       ok: true,
-      values: Object.fromEntries(
-        SETTING_KEYS.map((k) => [k, k in HOTKEYS ? (ctx[k] ?? HOTKEYS[k].fallback) : ctx.settings.get(k)])
-      ),
+      values: {
+        ...Object.fromEntries(
+          SETTING_KEYS.map((k) => [k, k in HOTKEYS ? (ctx[k] ?? HOTKEYS[k].fallback) : ctx.settings.get(k)])
+        ),
+        // 창 고정 모드는 기본이 꺼짐 — 화면의 토글(값 === false면 켠다)이 그대로 맞도록 불리언으로 준다
+        keepOpen: ctx.settings.get('keepOpen') === true,
+      },
       defaults: { notifyAt: NOTIFY_AT_DEFAULT, hotkey: platform.defaultHotkey, inboxHotkey: platform.defaultInboxHotkey },
       // PLAT-02: 지금 조합이 실제로 잡혀 있는지. 화면이 이 값으로 실패를 드러낸다.
       hotkeyOk: ctx.hotkeyOk,

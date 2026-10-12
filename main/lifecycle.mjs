@@ -95,6 +95,19 @@ const SMOKE_PROBE = `(async () => {
   // 인박스 단축키 — 오늘 뷰를 보고 있을 때 main이 보내는 신호를 받아 어느 탭에서든 인박스로 옮긴다.
   // 완료 기록 화면에 있었어도 목록으로 나와야 한다. (인박스에서 한 번 더 누르면 접히는 쪽은 창을
   // 숨기므로 여기서 밟지 않는다)
+  // 창 고정 모드 — 설정 줄이 있고, 켜고 끈 값이 main까지 갔다 돌아온다(SETTING_KEYS에 없으면 조용히 거절된다)
+  await step('keepOpen', async () => {
+    switchTab('settings');
+    await loadSettings();
+    var row = Array.prototype.some.call(document.querySelectorAll('#body .item .t'), function (n) { return n.textContent === '창 고정 모드'; });
+    if (!row) throw new Error('설정에 창 고정 모드 줄이 없다');
+    if (cfg.values.keepOpen !== false) throw new Error('창 고정 모드 기본값이 꺼짐이 아니다: ' + cfg.values.keepOpen);
+    var on = await window.whenwork.settingsSet('keepOpen', true);
+    if (!on.ok) throw new Error('창 고정 모드를 켜지 못했다');
+    if ((await window.whenwork.settingsGet()).values.keepOpen !== true) throw new Error('켠 값이 돌아오지 않았다');
+    await window.whenwork.settingsSet('keepOpen', null);
+    switchTab('today');
+  });
   await step('inboxKey', async () => {
     if (typeof window.whenwork.onInboxKey !== 'function') throw new Error('preload에 onInboxKey가 없다');
     switchTab('waiting');
@@ -376,7 +389,12 @@ export function bootstrap() {
     ctx.todayWin.on('hide', () => {
       ctx.todayHiddenAt = Date.now();
     });
-    ctx.todayWin.on('blur', () => hideOnBlur(ctx.todayWin)); // D8 — 되묻고 접는다, 직전 창으로 포커스가 돌아가게
+    // D8 — 되묻고 접는다, 직전 창으로 포커스가 돌아가게. 창 고정 모드(keepOpen)면 다른 데를 눌러도 두고
+    // Esc·×·단축키·트레이로만 닫는다. 값은 blur 때마다 읽는다 — 설정을 바꾸면 재시작 없이 바로 먹는다.
+    // 항상-위(pinOnTop)는 그대로 둔다 — 고정한 창이 다른 창 뒤로 가면 작업 표시줄 버튼이 없어 닫힌 것과 같다
+    ctx.todayWin.on('blur', () => {
+      if (!keepOpen()) hideOnBlur(ctx.todayWin);
+    });
     ctx.todayWin.on('close', (e) => {
       if (!ctx.quitting) {
         e.preventDefault();
@@ -386,6 +404,8 @@ export function bootstrap() {
     return ctx.todayWin;
   }
   ctx.getTodayWin = getTodayWin;
+
+  const keepOpen = () => ctx.settings.get('keepOpen') === true;
 
   // 트레이를 누르면 창이 blur돼 먼저 접히고, 그 뒤에 click이 와서 다시 열린다 —
   // 그래서 트레이로는 창을 닫을 수 없었다. 방금 접힌 직후의 클릭은 "닫으려는 클릭"으로 본다.
@@ -554,8 +574,9 @@ export function bootstrap() {
     ctx.tray = new Tray(trayImage());
     ctx.tray.on('click', toggleToday);
     // 단축키는 토글 — 열린 창(오늘 뷰든 캡처든)이 있으면 닫고, 없으면 캡처를 연다
+    // 창 고정 모드에서는 오늘 뷰를 건드리지 않는다 — 띄워 둔 채로 그 위에서 캡처하려는 것이다
     const onHotkey = () => {
-      if (ctx.todayWin && !ctx.todayWin.isDestroyed() && ctx.todayWin.isVisible()) return platform.deactivate(ctx.todayWin);
+      if (!keepOpen() && ctx.todayWin && !ctx.todayWin.isDestroyed() && ctx.todayWin.isVisible()) return platform.deactivate(ctx.todayWin);
       if (ctx.captureWin && !ctx.captureWin.isDestroyed() && ctx.captureWin.isVisible()) return platform.deactivate(ctx.captureWin);
       showCapture();
     };

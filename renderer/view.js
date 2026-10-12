@@ -13,14 +13,19 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
-  // 마감 배지. 오늘을 기준으로 지연(over)·오늘(today)·남음을 가른다.
-  function dueBadge(due, now = new Date()) {
-    if (!due) return null;
+  // 오늘에서 마감까지 지난 날수 — 양수면 지연, 0이면 오늘, 음수면 남음. 배지와 검색 필터가 같은 기준을 쓴다
+  function dueDiff(due, now = new Date()) {
     const today = new Date(now);
     today.setHours(0, 0, 0, 0);
     const d = new Date(due);
     d.setHours(0, 0, 0, 0);
-    const diff = Math.round((today - d) / DAY_MS);
+    return Math.round((today - d) / DAY_MS);
+  }
+
+  // 마감 배지. 오늘을 기준으로 지연(over)·오늘(today)·남음을 가른다.
+  function dueBadge(due, now = new Date()) {
+    if (!due) return null;
+    const diff = dueDiff(due, now);
     if (diff > 0) return { text: `D+${diff}`, cls: 'over' };
     if (diff === 0) return { text: '오늘', cls: 'today' };
     return { text: `D-${-diff}`, cls: '' };
@@ -76,6 +81,61 @@
       .split(/\s+/)
       .filter(Boolean)
       .every((term) => hay.includes(term) || (CHO_ONLY.test(term) && (cho ??= initials(hay)).includes(term)));
+  }
+
+  // ── 검색어 안의 정렬·필터 (/ 검색창)
+  //
+  // 따로 문법 창을 두지 않고 검색창 한 줄에 섞어 쓴다 — "회의 마감순 #고워크". 아래 낱말과 **통째로**
+  // 같은 것만 명령으로 읽고, 나머지는 지금까지처럼 글자 검색이다. 낱말은 제목에 흔히 나오지 않을
+  // 붙여 쓴 꼴로 골랐다("마감"이 아니라 "마감있음") — 제목의 "마감"을 찾으려는 사람을 막지 않으려고.
+  const SORTS = { 마감순: 'due', 최신순: 'new', 오래된순: 'old', 이름순: 'title' };
+  const FILTERS = {
+    마감있음: (r) => !!r.due,
+    마감없음: (r) => !r.due,
+    마감지남: (r, now) => !!r.due && dueDiff(r.due, now) > 0,
+    오늘까지: (r, now) => !!r.due && dueDiff(r.due, now) >= 0,
+    // 이번 주 일요일까지(지난 것 포함) — 이번 주 안에 해치울 것
+    이번주: (r, now) => !!r.due && dueDiff(r.due, now) >= -((7 - new Date(now).getDay()) % 7),
+    메모있음: (r) => !!(r.note && String(r.note).trim()),
+  };
+  const QUERY_WORDS = [...Object.keys(SORTS), ...Object.keys(FILTERS)];
+
+  // → { text, sort, filters, project }. 정렬어가 둘이면 뒤엣것. #이름은 프로젝트 이름에 그 글자가 든 것
+  // (#미지정은 프로젝트 없는 것). 빈 #은 아직 치는 중이라 무시한다.
+  function parseQuery(q) {
+    const out = { text: '', sort: null, filters: [], project: null };
+    const rest = [];
+    for (const term of String(q ?? '').split(/\s+/).filter(Boolean)) {
+      if (SORTS[term]) out.sort = term;
+      else if (FILTERS[term]) out.filters.includes(term) || out.filters.push(term);
+      else if (term.startsWith('#')) {
+        if (term.length > 1) out.project = term.slice(1).toLowerCase();
+      } else rest.push(term);
+    }
+    out.text = rest.join(' ');
+    return out;
+  }
+
+  function matchQuery(row, pq, now = new Date()) {
+    if (!matches(row, pq.text)) return false;
+    if (pq.project) {
+      const name = row.project_name;
+      if (pq.project === '미지정' ? name : !String(name ?? '').toLowerCase().includes(pq.project)) return false;
+    }
+    return pq.filters.every((f) => FILTERS[f](row, now));
+  }
+
+  // 정렬어대로 새 배열을 돌려준다(원본은 건드리지 않는다). 같은 값이면 들어온 순서를 지킨다
+  function sortItems(list, sort) {
+    const key = SORTS[sort] ?? sort;
+    const t = (v) => (v ? new Date(v).getTime() : 0);
+    const cmp = {
+      due: (a, b) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || String(a.due ?? '').localeCompare(String(b.due ?? '')) || t(a.captured_at) - t(b.captured_at),
+      new: (a, b) => t(b.captured_at) - t(a.captured_at),
+      old: (a, b) => t(a.captured_at) - t(b.captured_at),
+      title: (a, b) => String(a.title ?? '').localeCompare(String(b.title ?? ''), 'ko'),
+    }[key];
+    return cmp ? [...list].sort(cmp) : [...list];
   }
 
   // 오늘 탭 배치 — [{ key, label, pid, items }]. 프로젝트별로만 묶는다.
@@ -162,6 +222,11 @@
     STALE_WAITING_DAYS,
     matches,
     initials,
+    dueDiff,
+    parseQuery,
+    matchQuery,
+    sortItems,
+    QUERY_WORDS,
     todayGroups,
     dayOf,
     historyDays,

@@ -221,3 +221,70 @@ test('재촉 경계는 브리핑과 같은 5일이다', () => {
 });
 
 // ── 이슈에서 세운 할 일
+
+// ── 검색창의 정렬·필터 (/ 마감순 #고워크 …)
+test('검색어에서 정렬·필터·프로젝트를 떼고 나머지는 글자 검색으로 둔다', () => {
+  assert.deepEqual(VIEW.parseQuery('회의 마감순 #고워크 마감지남 자료'), {
+    text: '회의 자료',
+    sort: '마감순',
+    filters: ['마감지남'],
+    project: '고워크',
+  });
+  // 정렬어가 둘이면 뒤엣것, 치는 중인 빈 #은 무시, 붙여 쓰지 않은 "마감"은 글자 검색이다
+  const pq = VIEW.parseQuery('최신순 이름순 # 마감');
+  assert.equal(pq.sort, '이름순');
+  assert.equal(pq.project, null);
+  assert.equal(pq.text, '마감');
+});
+
+test('날짜 필터는 오늘(수) 기준 — 지남·오늘까지·이번 주 일요일까지', () => {
+  const ids = (q) =>
+    [
+      todo({ id: 'over', due: '2026-08-03' }),
+      todo({ id: 'today', due: '2026-08-05' }),
+      todo({ id: 'sun', due: '2026-08-09' }),
+      todo({ id: 'nextMon', due: '2026-08-10' }),
+      todo({ id: 'none', due: null }),
+    ]
+      .filter((r) => VIEW.matchQuery(r, VIEW.parseQuery(q), NOW))
+      .map((r) => r.id);
+  assert.deepEqual(ids('마감지남'), ['over']);
+  assert.deepEqual(ids('오늘까지'), ['over', 'today']);
+  assert.deepEqual(ids('이번주'), ['over', 'today', 'sun']);
+  assert.deepEqual(ids('마감없음'), ['none']);
+  assert.deepEqual(ids('마감있음'), ['over', 'today', 'sun', 'nextMon']);
+});
+
+test('일요일의 이번주는 그날까지다', () => {
+  const sunday = new Date(2026, 7, 9, 10, 0);
+  const pq = VIEW.parseQuery('이번주');
+  assert.equal(VIEW.matchQuery(todo({ due: '2026-08-09' }), pq, sunday), true);
+  assert.equal(VIEW.matchQuery(todo({ due: '2026-08-10' }), pq, sunday), false);
+});
+
+test('#프로젝트는 이름 일부로, #미지정은 프로젝트 없는 것만, 메모있음은 빈 메모를 뺀다', () => {
+  const rows = [
+    todo({ id: 'a', project_name: '고워크 앱', note: '  ' }),
+    todo({ id: 'b', project_name: '집안일', note: '세제' }),
+    todo({ id: 'c', project_name: null }),
+  ];
+  const ids = (q) => rows.filter((r) => VIEW.matchQuery(r, VIEW.parseQuery(q), NOW)).map((r) => r.id);
+  assert.deepEqual(ids('#고워크'), ['a']);
+  assert.deepEqual(ids('#미지정'), ['c']);
+  assert.deepEqual(ids('메모있음'), ['b']);
+  assert.deepEqual(ids('메모있음 #고워크'), []); // 조건은 모두 맞아야 한다
+});
+
+test('정렬 — 마감순은 마감 없는 것을 뒤로, 최신·오래된·이름순, 원본은 그대로', () => {
+  const list = [
+    todo({ id: 'n', title: '나', due: null, captured_at: '2026-08-04T09:00:00Z' }),
+    todo({ id: 'g', title: '가', due: '2026-08-07', captured_at: '2026-08-01T09:00:00Z' }),
+    todo({ id: 'd', title: '다', due: '2026-08-06', captured_at: '2026-08-03T09:00:00Z' }),
+  ];
+  const ids = (sort) => VIEW.sortItems(list, sort).map((r) => r.id);
+  assert.deepEqual(ids('마감순'), ['d', 'g', 'n']);
+  assert.deepEqual(ids('최신순'), ['n', 'd', 'g']);
+  assert.deepEqual(ids('오래된순'), ['g', 'd', 'n']);
+  assert.deepEqual(ids('이름순'), ['g', 'n', 'd']);
+  assert.deepEqual(list.map((r) => r.id), ['n', 'g', 'd']);
+});

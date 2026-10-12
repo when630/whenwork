@@ -68,6 +68,9 @@ const {
   dueBadge,
   waitMeta,
   matches,
+  parseQuery,
+  matchQuery,
+  sortItems,
   todayGroups,
   elapsedDays,
   historyDays,
@@ -175,8 +178,21 @@ function el(tag, cls, text) {
   return n;
 }
 
-function filtered(list) {
-  return filter ? list.filter((r) => matches(r, filter)) : list;
+// 검색어를 정렬·필터·글자로 푼 것(view.js parseQuery). 검색창이 바뀔 때만 다시 푼다
+let pqCache = { q: null, pq: null };
+function query() {
+  if (pqCache.q !== filter) pqCache = { q: filter, pq: parseQuery(filter) };
+  return pqCache.pq;
+}
+
+// 항목 목록을 검색어대로 거르고, 정렬어가 있으면 그 순서로 세운다.
+// 프로젝트 탭(행이 프로젝트)에는 글자 검색만 쓴다 — 마감·메모 필터는 항목에만 뜻이 있다
+function filtered(list, { items = true } = {}) {
+  if (!filter) return list;
+  const pq = query();
+  if (!items) return list.filter((r) => matches(r, pq.text));
+  const hit = list.filter((r) => matchQuery(r, pq));
+  return pq.sort ? sortItems(hit, pq.sort) : hit;
 }
 
 function todayView() {
@@ -184,6 +200,9 @@ function todayView() {
   let list = filtered(state.today ?? []);
   // 마감 필터: 방금 완료한 것은 남겨둔다 (Space를 잘못 눌렀는지 확인할 창)
   if (dueOnly) list = list.filter((it) => it.due || it.done_at);
+  // 정렬어를 쳤으면 프로젝트로 묶지 않고 한 줄로 세운다 — 묶으면 그룹마다 순서가 끊겨 정렬한 뜻이 없다.
+  // 프로젝트는 각 행의 칩이 대신 말한다(itemRow)
+  if (filter && query().sort) return [{ key: 'sorted', pid: null, label: null, flat: true, items: list }];
   // 그룹 순서는 프로젝트 탭 순서를 따른다 — 마감 순서를 따르면 자리가 매일 바뀐다
   return todayGroups(list, state.projects ?? []);
 }
@@ -196,7 +215,7 @@ function currentList() {
   // 설정은 DB와 무관하게 항상 보여준다 — DB가 꺼져 있을 때 오히려 봐야 하는 화면이다
   if (tab === 'settings') return SETTING_FIELDS;
   if (!state?.online) return [];
-  if (tab === 'projects') return filtered(state.projects ?? []);
+  if (tab === 'projects') return filtered(state.projects ?? [], { items: false });
   const live = tab === 'today' ? todayView().flatMap((g) => g.items) : filtered(state[tab] ?? []);
   // 목록 밖 결과는 그 아래에 이어 그린다 — 선택 인덱스도 같은 순서로 이어진다
   return [...live, ...archiveHits().slice(0, ARCHIVE_MAX)];
@@ -211,11 +230,12 @@ function currentList() {
 const ARCHIVE_MAX = 30; // 그 이상은 검색어를 좁히라고 말한다 — 지난 항목은 수백 건이 될 수 있다
 const KIND_TAB = { todo: 'today', inbox: 'inbox', waiting: 'waiting' };
 
+// 글자 검색이 있을 때만 — 정렬어·필터만 친 것으로 지난 항목 수백 건을 쏟지 않는다
 function archiveHits() {
-  if (!filter || !archive || view !== 'list' || !NUM_TABS.includes(tab) || !state?.online) return [];
+  if (!filter || !query().text || !archive || view !== 'list' || !NUM_TABS.includes(tab) || !state?.online) return [];
   // 받아 둔 사이에 목록으로 돌아온 것(방금 되살린 것 등)은 위에 이미 있다 — 두 번 세우지 않는다
   const live = new Set([...(state.today ?? []), ...(state.inbox ?? []), ...(state.waiting ?? [])].map((r) => r.id));
-  return archive.filter((r) => !live.has(r.id) && matches(r, filter));
+  return archive.filter((r) => !live.has(r.id) && matchQuery(r, query()));
 }
 
 async function loadArchive() {
@@ -280,7 +300,7 @@ function renderHistory() {
   }
   // / 검색은 여기서도 통한다 — 목록 화면과 같은 matches로 제목·프로젝트·메모를 훑는다
   const data = filter
-    ? { ...history.data, items: (history.data?.items ?? []).filter((it) => matches(it, filter)) }
+    ? { ...history.data, items: (history.data?.items ?? []).filter((it) => matchQuery(it, query())) }
     : history.data;
   const days = historyDays(data);
   if (!days.length) {
@@ -351,12 +371,17 @@ function renderSearch() {
   if (!on) return;
   let text = '';
   if (view === 'history') {
-    text = `${(history?.data?.items ?? []).filter((it) => matches(it, filter)).length}건`;
+    text = `${(history?.data?.items ?? []).filter((it) => matchQuery(it, query())).length}건`;
   } else {
     const extra = archiveHits().length;
     const live = currentList().length - Math.min(extra, ARCHIVE_MAX);
     text = `${live}건` + (extra ? ` · 목록 밖 ${extra}건` : '');
   }
+  // 지금 먹은 정렬·필터를 밝힌다 — 낱말을 잘못 치면(마감 순) 글자 검색으로 넘어가 0건이 되는데,
+  // 여기 안 뜨는 것으로 알아챈다
+  const pq = query();
+  const applied = [pq.sort, ...pq.filters, pq.project ? '#' + pq.project : null].filter(Boolean);
+  if (applied.length) text += ' · ' + applied.join(' ');
   $('searchCnt').textContent = filter ? text : '';
 }
 
@@ -369,6 +394,7 @@ const KEYMAP = [
   ['항목', [['Space', '완료'], ['E', '제목'], ['D', '마감'], ['N', '메모'], ['W', '대기로'], ['X', '삭제'], ['U', '되돌리기'], ['1~9', '프로젝트']]],
   ['오늘', [['F', '마감만'], ['H', '완료 기록']]],
   ['검색', [['/', '열기'], ['ㅎㅇ', '초성으로'], ['Space', '목록 밖 항목 되살리기'], ['Esc', '해제']]],
+  ['정렬·필터 (검색창에 섞어 쓰기)', [['마감순', ''], ['최신순', ''], ['오래된순', ''], ['이름순', ''], ['마감지남', ''], ['오늘까지', ''], ['이번주', ''], ['마감있음·없음', ''], ['메모있음', ''], ['#프로젝트', ''], ['#미지정', '']]],
   ['완료 기록', [['←→', '7일·30일·전체'], ['/', '검색'], ['Esc', '뒤로']]],
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 프로젝트 보기']]],
@@ -491,7 +517,7 @@ function renderTabs() {
     // 검색 중에는 탭 숫자도 매칭 건수 — 어느 탭에 있는지 배지만 보고 알 수 있다
     const n = t.key === 'settings' ? null
       : !state?.online ? 0
-      : t.key === 'projects' ? filtered(state.projects ?? []).length
+      : t.key === 'projects' ? filtered(state.projects ?? [], { items: false }).length
       : filtered(state[t.key] ?? []).filter((i) => !i.done_at).length;
     const node = el('div', 'tab' + (tab === t.key ? ' on' : ''));
     node.append(el('span', null, t.label));
@@ -502,7 +528,8 @@ function renderTabs() {
 }
 
 // 이슈 탭에서만 서는 두 번째 띠. 프로젝트가 몇 개뿐이라 목록보다 탭이 읽기 빠르다.
-function itemRow(it, idx) {
+// chip — 오늘 탭을 정렬해 프로젝트 그룹 머리가 사라졌을 때 행에 프로젝트를 붙인다
+function itemRow(it, idx, { chip = false } = {}) {
   const row = el('div', 'item' + (idx === sel ? ' selected' : '') + (it.done_at ? ' done' : ''));
   // 체크박스는 눌러도 되게 생겼으니 실제로 눌리게 한다 (키보드는 Space)
   const cb = el('div', 'cb');
@@ -513,9 +540,11 @@ function itemRow(it, idx) {
   };
   row.append(cb, el('div', 't', it.title));
   const badge = dueBadge(it.due);
-  if (badge) {
+  const showChip = chip && it.project_name;
+  if (badge || showChip) {
     const meta = el('div', 'meta');
-    meta.append(el('span', 'due ' + badge.cls, badge.text));
+    if (badge) meta.append(el('span', 'due ' + badge.cls, badge.text));
+    if (showChip) meta.append(projChip(it.project_id, it.project_name));
     row.append(meta);
   }
   if (it.note) row.append(el('div', 'ctx', `↳ ${it.note}`));
@@ -775,10 +804,12 @@ function renderBody() {
     // 그룹 구성은 todayView가 정한다 — currentList의 flat 순서와 같은 순서라 선택 인덱스가 맞는다
     let idx = 0;
     for (const g of todayView()) {
-      const h = el('div', 'group-h');
-      h.append(projChip(g.pid, g.label));
-      body.append(h);
-      for (const it of g.items) body.append(itemRow(it, idx++));
+      if (!g.flat) {
+        const h = el('div', 'group-h');
+        h.append(projChip(g.pid, g.label));
+        body.append(h);
+      }
+      for (const it of g.items) body.append(itemRow(it, idx++, { chip: g.flat }));
     }
   } else {
     list.slice(0, liveN).forEach((it, idx) => body.append(itemRow(it, idx)));

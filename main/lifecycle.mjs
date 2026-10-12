@@ -95,6 +95,20 @@ const SMOKE_PROBE = `(async () => {
   // 인박스 단축키 — 오늘 뷰를 보고 있을 때 main이 보내는 신호를 받아 어느 탭에서든 인박스로 옮긴다.
   // 완료 기록 화면에 있었어도 목록으로 나와야 한다. (인박스에서 한 번 더 누르면 접히는 쪽은 창을
   // 숨기므로 여기서 밟지 않는다)
+  // 검색창의 정렬어 — 오늘 탭을 프로젝트로 묶지 않고 한 줄로 세우고, 건수 옆에 먹은 정렬을 밝힌다
+  await step('sortQuery', async () => {
+    switchTab('today');
+    openSearch();
+    filter = '최신순 마감있음';
+    document.getElementById('searchIn').value = filter;
+    render();
+    var g = todayView();
+    if (g.length !== 1 || !g[0].flat) throw new Error('정렬어를 쳤는데 오늘 탭이 한 줄로 서지 않았다');
+    if (document.querySelectorAll('#body .group-h').length) throw new Error('정렬 중인데 프로젝트 그룹 머리가 남았다');
+    var cnt = document.getElementById('searchCnt').textContent;
+    if (cnt.indexOf('최신순') < 0 || cnt.indexOf('마감있음') < 0) throw new Error('건수 옆에 정렬·필터가 안 보인다: ' + cnt);
+    closeSearch(false);
+  });
   // 창 고정 모드 — 설정 줄이 있고, 켜고 끈 값이 main까지 갔다 돌아온다(SETTING_KEYS에 없으면 조용히 거절된다)
   await step('keepOpen', async () => {
     switchTab('settings');

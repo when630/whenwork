@@ -36,6 +36,13 @@ const SETTING_FIELDS = [
     kind: 'bool',
     hint: '켜면 다른 곳을 눌러도 오늘 뷰가 닫히지 않는다 — Esc·단축키·트레이로 닫는다',
   },
+  {
+    key: 'keepOnTop',
+    label: '고정한 창을 맨 앞에',
+    kind: 'bool',
+    onlyIf: 'keepOpen',
+    hint: '끄면 일반 창처럼 다른 창 뒤로 가고 작업 표시줄에 버튼이 생긴다 — 트레이를 누르면 다시 앞으로 온다',
+  },
 ];
 
 let state = null; // 마지막으로 받은 서버 상태
@@ -76,6 +83,7 @@ const {
   historyDays,
   dayLabel,
   settingDisplay,
+  visibleSettings,
 } = window.VIEW;
 
 // ── 스크롤
@@ -213,7 +221,7 @@ function todayView() {
 // 안 그러면 선택 강조(그리는 순서)와 실제 대상(원본 순서)이 어긋나 엉뚱한 항목이 지워진다.
 function currentList() {
   // 설정은 DB와 무관하게 항상 보여준다 — DB가 꺼져 있을 때 오히려 봐야 하는 화면이다
-  if (tab === 'settings') return SETTING_FIELDS;
+  if (tab === 'settings') return settingFields();
   if (!state?.online) return [];
   if (tab === 'projects') return filtered(state.projects ?? [], { items: false });
   const live = tab === 'today' ? todayView().flatMap((g) => g.items) : filtered(state[tab] ?? []);
@@ -573,7 +581,7 @@ function renderSettings() {
     return;
   }
 
-  SETTING_FIELDS.forEach((f, idx) => {
+  settingFields().forEach((f, idx) => {
     const row = el('div', 'item' + (idx === sel ? ' selected' : ''));
     row.append(el('div', 't', f.label));
     const v = cfg.values[f.key];
@@ -666,6 +674,11 @@ async function runImport() {
   toast(`가져옴 — 프로젝트 ${res.project}건 · 항목 ${res.item}건`, { holdMs: 4000 });
   await loadSettings();
   return refresh();
+}
+
+// 지금 화면에 보이는 설정 줄 — 선택 인덱스도 이 순서를 따른다
+function settingFields() {
+  return visibleSettings(SETTING_FIELDS, cfg?.values);
 }
 
 async function loadSettings() {
@@ -1333,7 +1346,7 @@ document.addEventListener('keydown', async (e) => {
 
   // 설정 탭
   if (tab === 'settings') {
-    const f = SETTING_FIELDS[sel] ?? null;
+    const f = settingFields()[sel] ?? null;
     if (['x', 'o', 'b', 'c'].includes(e.key.toLowerCase())) e.preventDefault();
     switch (e.key) {
       case 'Enter':

@@ -215,6 +215,12 @@
     return '미설정';
   }
 
+  // 다른 설정이 켜져 있을 때만 뜻이 있는 줄(onlyIf)은 그때만 보인다 — 창 고정 모드를 끈 사람에게
+  // 「맨 앞에 두기」를 보여 주면 눌러도 아무 일이 없다
+  function visibleSettings(fields, values = {}) {
+    return fields.filter((f) => !f.onlyIf || values[f.onlyIf] === true);
+  }
+
   root.VIEW = {
     dueBadge,
     elapsedDays,
@@ -232,5 +238,6 @@
     historyDays,
     dayLabel,
     settingDisplay,
+    visibleSettings,
   };
 })(globalThis);

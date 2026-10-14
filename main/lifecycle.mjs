@@ -119,6 +119,15 @@ const SMOKE_PROBE = `(async () => {
     var on = await window.whenwork.settingsSet('keepOpen', true);
     if (!on.ok) throw new Error('창 고정 모드를 켜지 못했다');
     if ((await window.whenwork.settingsGet()).values.keepOpen !== true) throw new Error('켠 값이 돌아오지 않았다');
+    // 맨 앞에 두기 — 고정 모드를 켜야 줄이 보이고, 기본은 켜짐이며, 끈 값이 main까지 갔다 돌아온다
+    var hasTop = function () { return Array.prototype.some.call(document.querySelectorAll('#body .item .t'), function (n) { return n.textContent === '고정한 창을 맨 앞에'; }); };
+    if (hasTop()) throw new Error('고정 모드가 꺼져 있는데 맨 앞에 두기 줄이 보인다');
+    await loadSettings();
+    if (!hasTop()) throw new Error('고정 모드를 켰는데 맨 앞에 두기 줄이 없다');
+    if (cfg.values.keepOnTop !== true) throw new Error('맨 앞에 두기 기본값이 켜짐이 아니다: ' + cfg.values.keepOnTop);
+    if (!(await window.whenwork.settingsSet('keepOnTop', false)).ok) throw new Error('맨 앞에 두기를 끄지 못했다');
+    if ((await window.whenwork.settingsGet()).values.keepOnTop !== false) throw new Error('끈 값이 돌아오지 않았다');
+    await window.whenwork.settingsSet('keepOnTop', null);
     await window.whenwork.settingsSet('keepOpen', null);
     switchTab('today');
   });
@@ -393,7 +402,7 @@ export function bootstrap() {
       backgroundColor: '#16171c',
     });
     ctx.todayWin.setMenu?.(null); // 위 captureWin과 같은 이유
-    pinOnTop(ctx.todayWin);
+    applyTodayLayer(ctx.todayWin);
     rememberPosition(ctx.todayWin, 'todayBounds');
     ctx.todayWin.on('resized', () => {
       const [width, height] = ctx.todayWin.getSize();
@@ -405,8 +414,9 @@ export function bootstrap() {
     });
     // D8 — 되묻고 접는다, 직전 창으로 포커스가 돌아가게. 창 고정 모드(keepOpen)면 다른 데를 눌러도 두고
     // Esc·×·단축키·트레이로만 닫는다. 값은 blur 때마다 읽는다 — 설정을 바꾸면 재시작 없이 바로 먹는다.
-    // 항상-위(pinOnTop)는 그대로 둔다 — 고정한 창이 다른 창 뒤로 가면 작업 표시줄 버튼이 없어 닫힌 것과 같다
+    // 고정한 창이 맨 앞에 있을지 일반 창처럼 뒤로 갈지는 applyTodayLayer가 정한다
     ctx.todayWin.on('blur', () => {
+      ctx.todayBlurAt = Date.now();
       if (!keepOpen()) hideOnBlur(ctx.todayWin);
     });
     ctx.todayWin.on('close', (e) => {
@@ -420,6 +430,20 @@ export function bootstrap() {
   ctx.getTodayWin = getTodayWin;
 
   const keepOpen = () => ctx.settings.get('keepOpen') === true;
+  // 고정 창을 맨 앞에 둘지(keepOnTop, 기본 켜짐). 고정 모드가 아니면 늘 맨 앞이다 — 접히는 창이 뒤로 갈 일이 없다
+  const todayOnTop = () => !keepOpen() || ctx.settings.get('keepOnTop') !== false;
+
+  // 맨 앞에 두지 않는 고정 창은 일반 창처럼 다른 창 뒤로 간다. 그때는 작업 표시줄 버튼을 살려 둔다 —
+  // 버튼 없는 창이 뒤로 가면 닫힌 것과 같다(macOS는 Dock을 숨긴 앱이라 트레이·단축키로 다시 앞으로 부른다).
+  // 설정을 바꾸면 settings:set이 다시 불러 재시작 없이 먹는다
+  function applyTodayLayer(win = ctx.todayWin) {
+    if (!win || win.isDestroyed()) return;
+    const onTop = todayOnTop();
+    if (onTop) pinOnTop(win);
+    else win.setAlwaysOnTop(false);
+    win.setSkipTaskbar(onTop);
+  }
+  ctx.applyTodayLayer = applyTodayLayer;
 
   // 트레이를 누르면 창이 blur돼 먼저 접히고, 그 뒤에 click이 와서 다시 열린다 —
   // 그래서 트레이로는 창을 닫을 수 없었다. 방금 접힌 직후의 클릭은 "닫으려는 클릭"으로 본다.
@@ -427,7 +451,12 @@ export function bootstrap() {
 
   function toggleToday() {
     const win = getTodayWin();
-    if (win.isVisible()) return platform.deactivate(win); // D8 — 직전 창으로 포커스가 돌아가게
+    if (win.isVisible()) {
+      // 일반 창처럼 쓰는 고정 창이 다른 창 뒤에 깔려 있으면 트레이는 닫지 않고 앞으로 부른다.
+      // 앞에 있던 창은 트레이를 누르는 순간 blur되므로, 방금 blur된 창만 "보고 있던 창"으로 본다
+      const behind = !todayOnTop() && !win.isFocused() && Date.now() - (ctx.todayBlurAt ?? 0) >= TOGGLE_GRACE_MS;
+      return behind ? platform.activate(win) : platform.deactivate(win); // D8 — 직전 창으로 포커스가 돌아가게
+    }
     if (Date.now() - ctx.todayHiddenAt < TOGGLE_GRACE_MS) return;
     showToday();
   }

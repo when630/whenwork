@@ -198,6 +198,13 @@ test('창 고정 모드는 꺼진 값을 꺼짐으로 보여준다', () => {
   assert.equal(VIEW.settingDisplay(f, { keepOpen: true }), '켜짐');
 });
 
+test('맨 앞에 두기 줄은 창 고정 모드를 켰을 때만 보인다', () => {
+  const fields = [{ key: 'keepOpen', kind: 'bool' }, { key: 'keepOnTop', kind: 'bool', onlyIf: 'keepOpen' }];
+  assert.deepEqual(VIEW.visibleSettings(fields, { keepOpen: false }).map((f) => f.key), ['keepOpen']);
+  assert.deepEqual(VIEW.visibleSettings(fields, {}).map((f) => f.key), ['keepOpen']);
+  assert.deepEqual(VIEW.visibleSettings(fields, { keepOpen: true }).map((f) => f.key), ['keepOpen', 'keepOnTop']);
+});
+
 // ── 대기 재촉 (재촉하면 경과 시계가 그때부터 다시 돈다)
 test('재촉 전에는 부탁한 날부터, 재촉 후에는 재촉한 날부터 센다', () => {
   const now = new Date(2026, 7, 10).getTime();

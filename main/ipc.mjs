@@ -55,7 +55,7 @@ export function registerIpc(ctx) {
   //
   // DB가 꺼져 있어도 봐야 하는 화면이라(접속 정보 확인) DB 경로를 타지 않는다.
   // 앱에서 만지는 건 아래 네 개뿐이고, DB 접속은 settings.json을 직접 고쳐 재시작한다.
-  const SETTING_KEYS = ['notifyEnabled', 'notifyAt', 'keepOpen', 'hotkey', 'inboxHotkey'];
+  const SETTING_KEYS = ['notifyEnabled', 'notifyAt', 'keepOpen', 'keepOnTop', 'hotkey', 'inboxHotkey'];
 
   // 전역 단축키 두 개. 값은 settings:set이 아니라 hotkey:set으로만 바꾼다 — 등록 성공까지
   // 확인해야 저장할 수 있다. label은 서로 같은 조합을 고르려 할 때 어느 쪽과 겹치는지 말할 때 쓴다.
@@ -77,6 +77,8 @@ export function registerIpc(ctx) {
         ),
         // 창 고정 모드는 기본이 꺼짐 — 화면의 토글(값 === false면 켠다)이 그대로 맞도록 불리언으로 준다
         keepOpen: ctx.settings.get('keepOpen') === true,
+        // 고정 창을 맨 앞에 두기는 기본이 켜짐 — 고정 모드를 처음 켠 사람은 지금까지와 같은 창을 본다
+        keepOnTop: ctx.settings.get('keepOnTop') !== false,
       },
       defaults: { notifyAt: NOTIFY_AT_DEFAULT, hotkey: platform.defaultHotkey, inboxHotkey: platform.defaultInboxHotkey },
       // PLAT-02: 지금 조합이 실제로 잡혀 있는지. 화면이 이 값으로 실패를 드러낸다.
@@ -106,6 +108,8 @@ export function registerIpc(ctx) {
     if (value === null || value === '') ctx.settings.remove(key);
     else ctx.settings.set(key, value);
     ctx.settings.flush(); // 설정은 미루지 않고 바로 쓴다
+    // 창이 앞에 머무는 방식은 띄워 둔 오늘 뷰에 바로 먹인다 — 재시작을 기다리지 않는다
+    if (key === 'keepOpen' || key === 'keepOnTop') ctx.applyTodayLayer?.();
     return { ok: true };
   });
 

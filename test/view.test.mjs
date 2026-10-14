@@ -262,6 +262,26 @@ test('날짜 필터는 오늘(수) 기준 — 지남·오늘까지·이번 주 �
   assert.deepEqual(ids('마감있음'), ['over', 'today', 'sun', 'nextMon']);
 });
 
+test('미완료는 오늘 완료해 남아 있는 것을 뺀다', () => {
+  const rows = [todo({ id: 'a' }), todo({ id: 'b', done_at: '2026-08-05T09:00:00' }), todo({ id: 'c' })];
+  const pq = VIEW.parseQuery('미완료');
+  assert.deepEqual(pq.filters, ['미완료']);
+  assert.deepEqual(rows.filter((r) => VIEW.matchQuery(r, pq, NOW)).map((r) => r.id), ['a', 'c']);
+});
+
+test('완료한 것은 프로젝트 묶음 안에서 아래로 가고, 나머지 순서는 그대로다', () => {
+  const list = [
+    todo({ id: 'a', due: '2026-08-03', done_at: '2026-08-05T09:00:00' }),
+    todo({ id: 'b', due: '2026-08-04' }),
+    todo({ id: 'c', due: '2026-08-06', done_at: '2026-08-05T10:00:00' }),
+    todo({ id: 'd', due: null }),
+    todo({ id: 'e', project_id: 2, project_name: '나', done_at: '2026-08-05T09:00:00' }),
+    todo({ id: 'f', project_id: 2, project_name: '나' }),
+  ];
+  assert.deepEqual(VIEW.todayGroups(list).map((g) => g.items.map((i) => i.id)), [['b', 'd', 'a', 'c'], ['f', 'e']]);
+  assert.deepEqual(VIEW.doneLast(list).map((i) => i.id), ['b', 'd', 'f', 'a', 'c', 'e']);
+});
+
 test('일요일의 이번주는 그날까지다', () => {
   const sunday = new Date(2026, 7, 9, 10, 0);
   const pq = VIEW.parseQuery('이번주');

@@ -97,6 +97,8 @@
     // 이번 주 일요일까지(지난 것 포함) — 이번 주 안에 해치울 것
     이번주: (r, now) => !!r.due && dueDiff(r.due, now) >= -((7 - new Date(now).getDay()) % 7),
     메모있음: (r) => !!(r.note && String(r.note).trim()),
+    // 오늘 완료한 것은 하루 동안 목록에 남는다(되돌릴 창) — 그것까지 빼고 남은 일만 본다
+    미완료: (r) => !r.done_at,
   };
   const QUERY_WORDS = [...Object.keys(SORTS), ...Object.keys(FILTERS)];
 
@@ -138,6 +140,11 @@
     return cmp ? [...list].sort(cmp) : [...list];
   }
 
+  // 완료한 것은 아래로 — 남은 일이 위에 모여 있어야 한다. 안정 분할이라 각 쪽의 순서(마감순·정렬어)는 그대로다
+  function doneLast(list) {
+    return [...list.filter((r) => !r.done_at), ...list.filter((r) => r.done_at)];
+  }
+
   // 오늘 탭 배치 — [{ key, label, pid, items }]. 프로젝트별로만 묶는다.
   //
   // 급한 것(지연·오늘 마감)을 맨 위 별도 그룹으로 뽑아봤지만, 같은 화면에 그룹 기준이
@@ -165,7 +172,7 @@
         key: `p${pid}`,
         pid,
         label: items[0].project_name ?? '미지정',
-        items,
+        items: doneLast(items),
       }));
   }
 
@@ -234,6 +241,7 @@
     sortItems,
     QUERY_WORDS,
     todayGroups,
+    doneLast,
     dayOf,
     historyDays,
     dayLabel,

@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { createStore, MIGRATIONS, schemaTables, validateExport } from '../main/store.mjs';
-import { briefingLines } from '../main/brief.mjs';
+import { briefingLines, dayKey } from '../main/brief.mjs';
 import { createQueue } from '../main/queue.mjs';
 
 function tmpFile() {
@@ -556,8 +556,9 @@ test('마감이 어제인 항목은 overdue에, 오늘인 항목은 due_today에
     { id: 'id-od', title: '인박스 지연', abbr: null, captured_at: new Date().toISOString(), context: null },
     { id: 'id-dt', title: '인박스 오늘마감', abbr: null, captured_at: new Date().toISOString(), context: null },
   ]);
-  store.setDue('id-od', new Date(Date.now() - 86400_000).toISOString().slice(0, 10));
-  store.setDue('id-dt', new Date().toISOString().slice(0, 10));
+  // 마감은 로컬 날짜다(briefing도 dayKey로 본다) — toISOString은 UTC라 한국 시각 0~9시에 하루 어긋난다
+  store.setDue('id-od', dayKey(new Date(Date.now() - 86400_000)));
+  store.setDue('id-dt', dayKey());
   const b = store.briefing();
   assert.equal(b.overdue, 1, '인박스 항목의 마감도 지연으로 잡혀야 한다');
   assert.equal(b.due_today, 1);
@@ -609,7 +610,7 @@ test('완료됐거나 소프트 삭제된 항목은 어느 숫자에도 잡히�
   ]);
   store.assignProject('id-done-b', pid);
   store.assignProject('id-del-b', pid);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dayKey(); // 위와 같은 이유로 로컬 날짜
   store.setDue('id-done-b', today);
   store.setDue('id-del-b', today);
   store.completeItem('id-done-b');

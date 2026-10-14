@@ -111,6 +111,9 @@ const SMOKE_PROBE = `(async () => {
   });
   // 창 고정 모드 — 설정 줄이 있고, 켜고 끈 값이 main까지 갔다 돌아온다(SETTING_KEYS에 없으면 조용히 거절된다)
   await step('keepOpen', async () => {
+    // 앞선 스모크가 이 단계 중간에 멈췄으면 임시 userData에 켠 값이 남는다 — 기본값부터 다시 본다
+    await window.whenwork.settingsSet('keepOnTop', null);
+    await window.whenwork.settingsSet('keepOpen', null);
     switchTab('settings');
     await loadSettings();
     var row = Array.prototype.some.call(document.querySelectorAll('#body .item .t'), function (n) { return n.textContent === '창 고정 모드'; });

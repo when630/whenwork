@@ -640,6 +640,8 @@ function renderSettings() {
   dataSec.append(exp, imp);
   body.append(dataSec);
   body.append(dbSec);
+
+  window.whenAppearanceUI.mount(body);
 }
 
 // 확인과 설치를 한 키(R)에 둔다 — 상태에 따라 할 일이 하나뿐이라 고르게 할 이유가 없다.

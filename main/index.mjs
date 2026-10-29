@@ -1,5 +1,3 @@
-import { registerAppearance } from './appearance.mjs'
-registerAppearance()
 // WHENWORK — 트레이 상주. 퀵캡처(전역 단축키) → 로컬 큐 → 내장 SQLite 저장소(store.mjs) 반영(D1).
 //
 // 엔트리포인트는 bootstrap() 호출 하나뿐이다(D-08). 앱 수명·창·트레이·단축키는

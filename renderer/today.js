@@ -456,9 +456,7 @@ function renderLegend() {
   if (!on) return;
   state.projects.slice(0, 9).forEach((p, i) => {
     const s = el('span');
-    const dot = el('span', 'dot');
-    dot.style.background = projColor(p.id);
-    s.append(dot, el('b', null, String(i + 1)), document.createTextNode(p.name));
+    s.append(el('b', null, String(i + 1)), document.createTextNode(p.name));
     band.append(s);
   });
 }
@@ -642,8 +640,6 @@ function renderSettings() {
   dataSec.append(exp, imp);
   body.append(dataSec);
   body.append(dbSec);
-
-  window.whenAppearanceUI.mount(body);
 }
 
 // 확인과 설치를 한 키(R)에 둔다 — 상태에 따라 할 일이 하나뿐이라 고르게 할 이유가 없다.

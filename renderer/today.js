@@ -456,7 +456,9 @@ function renderLegend() {
   if (!on) return;
   state.projects.slice(0, 9).forEach((p, i) => {
     const s = el('span');
-    s.append(el('b', null, String(i + 1)), document.createTextNode(p.name));
+    const dot = el('span', 'dot');
+    dot.style.background = projColor(p.id);
+    s.append(dot, el('b', null, String(i + 1)), document.createTextNode(p.name));
     band.append(s);
   });
 }

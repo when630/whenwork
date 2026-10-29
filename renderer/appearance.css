@@ -181,3 +181,13 @@ html[data-skin=glass] .when-appearance-fields select{background:var(--glass-soli
 html[data-skin=poster] .when-appearance-fields select{border-width:2px;border-radius:0}
 
 html[data-when-page=command-settings] .when-appearance{margin-left:20px;margin-right:20px}
+
+/* Keep WHENWORK's original reading density across skins. */
+html[data-when-page=work][data-skin] .item{padding:9px var(--sp-3);margin:1px var(--sp-2)}
+html[data-when-page=work][data-skin] .item .t{font-size:var(--fs-md);letter-spacing:normal;line-height:1.5}
+html[data-when-page=work][data-skin] header .title{font-size:var(--fs-md);letter-spacing:.04em;gap:8px}
+html[data-when-page=work][data-skin] .tab{padding:5px 12px;gap:7px}
+html[data-when-page=work][data-skin] .group-h{padding:var(--sp-3) var(--sp-4) var(--sp-1);gap:var(--sp-2)}
+html[data-when-page=work][data-skin] .search input{font-size:var(--fs-md);letter-spacing:normal}
+html[data-when-page=work] .numlegend>span{display:inline-flex;align-items:center}
+html[data-when-page=work] .numlegend .dot{display:inline-block;width:7px;height:7px;flex:none;border-radius:99px;margin-right:5px}

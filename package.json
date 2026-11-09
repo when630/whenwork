@@ -13,6 +13,7 @@
     "smoke:crash": "node --test test/capture-crash-smoke.test.mjs",
     "icons": "node tools/make-icon.mjs",
     "build": "electron-builder --win --publish never",
+    "build:store": "electron-builder --win appx --x64 --publish never",
     "postinstall": "node tools/make-icon.mjs",
     "build:mac": "electron-builder --mac --publish never",
     "build:all": "electron-builder --win --mac --publish never"
@@ -56,6 +57,25 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "shortcutName": "WHENWORK"
+    },
+    "appx": {
+      "identityName": "when630.WHENWORK",
+      "publisher": "CN=WHENWORK-Dev",
+      "publisherDisplayName": "when630",
+      "applicationId": "WHENWORK",
+      "displayName": "WHENWORK",
+      "languages": [
+        "ko-KR"
+      ],
+      "backgroundColor": "transparent",
+      "showNameOnTiles": false,
+      "minVersion": "10.0.17763.0",
+      "maxVersionTested": "10.0.26100.0",
+      "capabilities": [
+        "runFullTrust",
+        "unvirtualizedResources"
+      ],
+      "customManifestPath": "assets/appx/AppxManifest.xml"
     },
     "mac": {
       "target": [

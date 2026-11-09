@@ -3,8 +3,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { nativeImage } from 'electron';
 
+// Microsoft Store(MSIX) 패키지로 실행 중인가. Electron이 패키지 안에서 실행될 때만 true로 채운다.
+// 스토어판은 같은 코드에서 두 가지가 다르다(docs/07_Pro_설계.md D-P16):
+//   - 업데이트는 스토어가 한다 — electron-updater가 GitHub에서 NSIS 설치 파일을 받아 오면 안 된다
+//   - 로그인 시 자동 시작은 매니페스트의 StartupTask가 맡는다 — setLoginItemSettings는 패키지 안에서
+//     효과가 없고(실측 2026-11-10), Electron에는 StartupTask를 켜고 끄는 API가 없다
+const STORE = !!process.windowsStore;
+
 export default {
   name: 'win32',
+
+  // 배포 형태가 스토어인가 — 업데이트·자동 시작·프로토콜 등록이 이 값으로 갈린다
+  store: STORE,
 
   // 설계 11절의 조합. macOS와 다른 값을 쓰지 않는 이유는 platform/darwin.mjs에 적었다.
   defaultHotkey: 'Control+Alt+Space',
@@ -15,7 +25,8 @@ export default {
 
   // Windows NSIS는 서명 없이도 electron-updater가 내려받아 설치한다.
   // (설치 시 SmartScreen이 한 번 더 물을 수 있지만 업데이트 경로 자체는 막히지 않는다)
-  canAutoUpdate: true,
+  // 스토어판은 앱이 스스로 업데이트하지 않는다 — update.mjs가 store를 보고 확인 자체를 끈다.
+  canAutoUpdate: !STORE,
 
   // 사람에게 보여줄 조합 표기 — Electron 표기(Control+Alt+Space)를 그대로 읽히게 둔다
   hotkeyLabel: (accel) => String(accel).replace(/\bControl\b/g, 'Ctrl'),
@@ -57,12 +68,22 @@ export default {
   },
 
   // 로그인 시 자동 실행. Windows는 실행 파일 경로가 그대로 등록된다.
+  // 스토어판은 매니페스트의 StartupTask(Enabled="true")가 첫 실행 뒤 켜 두고, 끄고 켜는 건
+  // Windows 설정 → 앱 → 시작 프로그램이 한다. 여기서 레지스트리에 쓰면 패키지 가상화에 갇혀
+  // 아무 효과 없이 "켜졌다"고 거짓말하게 된다 — false를 돌려 아무것도 하지 않는다.
+  loginItemBySystem: STORE,
+
   setLoginItem(app, openAtLogin) {
+    if (STORE) return false;
     app.setLoginItemSettings({ openAtLogin, args: [] });
     return app.getLoginItemSettings().openAtLogin === openAtLogin;
   },
 
   getLoginItem(app) {
+    if (STORE) return false;
     return app.getLoginItemSettings().openAtLogin;
   },
+
+  // loginItemBySystem일 때 트레이 메뉴가 여는 곳
+  loginItemSettingsUrl: 'ms-settings:startupapps',
 };

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Microsoft Store(MSIX) 매니페스트 — electron-builder appx.customManifestPath가 이 파일을 쓴다.
+  달러-중괄호 매크로는 electron-builder가 package.json의 build.appx 값으로 채운다.
+  (이 주석 안에는 매크로 문법을 그대로 적지 않는다 — 정의되지 않은 매크로는 빌드를 멈춘다)
+
+  기본 템플릿과 다른 점과 이유 (docs/07_Pro_설계.md D-P16, 실측 2026-11-10):
+
+  1) FileSystemWriteVirtualization = disabled  (+ rescap:unvirtualizedResources)
+     기본값이면 새로 설치한 사람의 store.sqlite가 패키지 전용 폴더(LocalCache)에 쓰이고,
+     앱을 지우면 할 일 데이터가 함께 지워진다. NSIS판과 같은 %APPDATA%\whenwork에 쓰게 한다.
+     제한 capability라 Partner Center 제출 시 사유가 필요하다.
+
+  2) windows.startupTask  (Enabled="true")
+     setLoginItemSettings는 패키지 안에서 효과가 없다. 첫 실행 뒤 켜지고,
+     사용자는 Windows 설정 → 앱 → 시작 프로그램에서 끈다(트레이 메뉴가 그곳을 연다).
+
+  3) windows.protocol  whenwork
+     package.json build.protocols와 같아야 한다 — test/appx.test.mjs가 대조한다.
+-->
+<Package
+   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+   IgnorableNamespaces="desktop6">
+  <Identity Name="${identityName}"
+    ProcessorArchitecture="${arch}"
+    Publisher='${publisher}'
+    Version="${version}" />
+  <Properties>
+    <DisplayName>${displayName}</DisplayName>
+    <PublisherDisplayName>${publisherDisplayName}</PublisherDisplayName>
+    <Description>${description}</Description>
+    <Logo>${logo}</Logo>
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+  </Properties>
+  <Resources>
+    ${resourceLanguages}
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="${minVersion}" MaxVersionTested="${maxVersionTested}" />
+  </Dependencies>
+  ${capabilities}
+  <Applications>
+    <Application Id="${applicationId}" Executable="${executable}" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+       BackgroundColor="${backgroundColor}"
+       DisplayName="${displayName}"
+       Square150x150Logo="${square150x150Logo}"
+       Square44x44Logo="${square44x44Logo}"
+       Description="${description}">
+        ${lockScreen}
+        ${defaultTile}
+        ${splashScreen}
+      </uap:VisualElements>
+      <Extensions>
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="whenwork">
+            <uap:DisplayName>WHENWORK</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+        <desktop:Extension Category="windows.startupTask" Executable="${executable}" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="WhenworkStartup" Enabled="true" DisplayName="${displayName}" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

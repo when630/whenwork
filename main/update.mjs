@@ -29,7 +29,7 @@ const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // "받는 중 40%"가 서로 다른 말을 해야 하기 때문이다.
 export function createUpdateState() {
   return {
-    status: 'idle', // idle | checking | available | downloading | ready | error | unsupported
+    status: 'idle', // idle | checking | available | downloading | ready | error | unsupported | store
     version: null, // 새 버전 문자열
     percent: 0,
     error: null, // 사람이 읽을 수 있는 한 줄 (내부 경로·스택 없음)
@@ -55,6 +55,8 @@ export function updateLine(state, { canAutoUpdate = true, current = '' } = {}) {
       return `업데이트 확인 실패 — ${state.error}`;
     case 'unsupported':
       return '업데이트 확인은 설치본에서만 동작합니다';
+    case 'store':
+      return current ? `스토어가 업데이트합니다 (${current})` : '스토어가 업데이트합니다';
     default:
       return current ? `최신 버전 (${current})` : '최신 버전';
   }
@@ -72,6 +74,15 @@ export function setupUpdater(ctx) {
   // electron-updater가 dev-app-update.yml을 찾다가 매번 오류를 뱉는다.
   if (!app.isPackaged) {
     ctx.update.status = 'unsupported';
+    ctx.checkForUpdate = async () => ctx.update;
+    ctx.installUpdate = () => false;
+    return ctx.update;
+  }
+
+  // 스토어판은 스토어가 업데이트한다. 여기서 GitHub를 보면 NSIS 설치 파일을 받아 오거나
+  // "새 버전 있음 — 눌러서 받기"로 스토어 밖 설치를 권하게 된다 — 둘 다 설치본을 둘로 쪼갠다.
+  if (platform.store) {
+    ctx.update.status = 'store';
     ctx.checkForUpdate = async () => ctx.update;
     ctx.installUpdate = () => false;
     return ctx.update;

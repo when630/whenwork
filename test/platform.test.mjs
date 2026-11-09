@@ -25,6 +25,9 @@ const CONTRACT = [
   'getLoginItem',
   'activate',
   'deactivate',
+  'store',
+  'loginItemBySystem',
+  'loginItemSettingsUrl',
 ];
 
 for (const impl of ['win32.mjs', 'darwin.mjs']) {
@@ -59,6 +62,31 @@ test('macOS는 Dock 아이콘을 감춘다 (메뉴바 상주, PLAT-06)', () => {
 
 test('macOS 메뉴바 아이콘은 Template로 넘긴다 — 다크 모드에서 뭉개지지 않게', () => {
   assert.match(read('darwin.mjs'), /setTemplateImage\(true\)/);
+});
+
+test('스토어판은 스스로 업데이트하지 않고, 자동 시작을 레지스트리에 쓰지 않는다 (D-P16)', () => {
+  const src = read('win32.mjs');
+  // 스토어판 판정은 Electron이 패키지 안에서만 채우는 값으로 한다
+  assert.match(src, /const STORE = !!process\.windowsStore/);
+  assert.match(src, /canAutoUpdate: !STORE/, '스토어판에서 electron-updater가 NSIS 설치 파일을 받아 온다');
+  assert.match(src, /loginItemBySystem: STORE/);
+  // setLoginItem이 스토어판에서 아무것도 쓰기 전에 돌아서야 한다 — 가상화된 레지스트리에 써 놓고 켜졌다고 하면 거짓이다
+  // setLoginItem 본문만 떼어 본다(getLoginItem에도 같은 가드가 있어 섞이면 하나가 빠져도 통과한다)
+  const start = src.indexOf('setLoginItem(app, openAtLogin)');
+  const body = src.slice(start, src.indexOf('getLoginItem(app)', start));
+  const guard = body.indexOf('if (STORE) return false');
+  assert.ok(guard >= 0, '스토어판 setLoginItem에 가드가 없다');
+  assert.ok(guard < body.indexOf('setLoginItemSettings'), '스토어판 setLoginItem이 setLoginItemSettings를 부른다');
+});
+
+test('스토어판은 업데이트 확인과 프로토콜 등록을 건너뛴다 (D-P16)', () => {
+  const update = fs.readFileSync(path.join(ROOT, 'main', 'update.mjs'), 'utf8');
+  const storeAt = update.indexOf('if (platform.store)');
+  assert.ok(storeAt > 0, 'update.mjs에 스토어 분기가 없다');
+  assert.ok(storeAt < update.indexOf('autoUpdater.autoDownload'), '스토어 분기가 autoUpdater 설정보다 뒤에 있다');
+  const life = fs.readFileSync(path.join(ROOT, 'main', 'lifecycle.mjs'), 'utf8');
+  assert.match(life, /if \(!SMOKE && !platform\.store\) \{\s*try \{\s*if \(app\.isPackaged\) app\.setAsDefaultProtocolClient/);
+  assert.match(life, /platform\.loginItemBySystem\s*\?/, '트레이 메뉴가 스토어판에서도 체크박스를 띄운다');
 });
 
 test('Windows는 알림 귀속을 위해 AppUserModelId를 세운다', () => {

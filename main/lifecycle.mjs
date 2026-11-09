@@ -7,6 +7,7 @@ import {
   globalShortcut,
   screen,
   Notification,
+  shell,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -260,7 +261,9 @@ export function bootstrap() {
   // 중복 생성한다. 여기서 멈춰 트레이·저장소·IPC를 만들지 않는다.
   // 딥링크 스킴(when-protocol). 패키징본은 build.protocols가 OS에 등록해 두지만, 개발 실행은 electron.exe와 앱 경로를
   // 함께 넘겨야 OS가 이 프로젝트로 연다. 스모크는 시스템 설정을 건드리지 않는다.
-  if (!SMOKE) {
+  // 스토어판은 매니페스트의 windows.protocol이 등록한다 — 패키지 안에서 레지스트리에 쓰면 가상화된
+  // 사본에만 들어가 효과가 없고, NSIS판이 등록해 둔 진짜 키를 건드릴 이유도 없다.
+  if (!SMOKE && !platform.store) {
     try {
       if (app.isPackaged) app.setAsDefaultProtocolClient(SCHEME);
       else app.setAsDefaultProtocolClient(SCHEME, process.execPath, [path.resolve(process.argv[1])]);
@@ -569,19 +572,26 @@ export function bootstrap() {
           enabled: false,
         },
         { type: 'separator' },
-        {
-          label: '로그인 시 자동 시작',
-          type: 'checkbox',
-          checked: platform.getLoginItem(app),
-          click: (menuItem) => {
-            // PLAT-03: 미서명 macOS에서는 켜지지 않을 수 있다 — 돌려받은 값으로 확인하고
-            // 실패하면 설정에 저장하지 않는다(다음에 켜졌다고 거짓으로 보이지 않게).
-            const ok = platform.setLoginItem(app, menuItem.checked);
-            if (ok) ctx.settings.set('openAtLogin', menuItem.checked);
-            else ctx.notify('자동 시작을 켜지 못했습니다', '시스템 설정의 로그인 항목에서 직접 추가해 주세요');
-            refreshTrayMenu();
-          },
-        },
+        // 스토어판은 앱이 자동 시작을 켜고 끌 수 없다(StartupTask) — 체크박스를 두면 누를 때마다
+        // "켜지 못했습니다"가 뜬다. 켜고 끄는 곳(Windows 설정)을 바로 연다.
+        platform.loginItemBySystem
+          ? {
+              label: '로그인 시 자동 시작 설정…',
+              click: () => shell.openExternal(platform.loginItemSettingsUrl),
+            }
+          : {
+              label: '로그인 시 자동 시작',
+              type: 'checkbox',
+              checked: platform.getLoginItem(app),
+              click: (menuItem) => {
+                // PLAT-03: 미서명 macOS에서는 켜지지 않을 수 있다 — 돌려받은 값으로 확인하고
+                // 실패하면 설정에 저장하지 않는다(다음에 켜졌다고 거짓으로 보이지 않게).
+                const ok = platform.setLoginItem(app, menuItem.checked);
+                if (ok) ctx.settings.set('openAtLogin', menuItem.checked);
+                else ctx.notify('자동 시작을 켜지 못했습니다', '시스템 설정의 로그인 항목에서 직접 추가해 주세요');
+                refreshTrayMenu();
+              },
+            },
         {
           label: '창 위치 초기화',
           click: () => {

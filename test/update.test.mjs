@@ -49,6 +49,13 @@ test('개발 실행에서는 확인 자체가 안 된다고 말한다', () => {
   assert.match(updateLine({ status: 'unsupported' }), /설치본에서만/);
 });
 
+test('스토어판은 스토어가 업데이트한다고 말한다 — 눌러서 받으라고 하지 않는다', () => {
+  const line = updateLine({ status: 'store' }, { current: '0.3.0' });
+  assert.match(line, /스토어가 업데이트/);
+  assert.match(line, /0\.3\.0/);
+  assert.ok(!/받기|내려받/.test(line), '스토어 밖 설치를 권하면 설치본이 둘로 쪼개진다');
+});
+
 test('실패는 이유를 말하되 원인 문자열을 그대로 쏟지 않는다', () => {
   const line = updateLine({ status: 'error', error: '네트워크에 연결할 수 없습니다' });
   assert.match(line, /확인 실패/);
@@ -90,9 +97,10 @@ test('macOS는 자동 업데이트를 할 수 없다고 선언한다 — 서명�
   assert.match(darwin, /코드 서명이 필수/);
 });
 
-test('Windows는 미서명이어도 자동 업데이트가 된다', () => {
+test('Windows는 미서명이어도 자동 업데이트가 된다 — 스토어판만 빼고', () => {
   const win = fs.readFileSync(path.join(ROOT, 'main', 'platform', 'win32.mjs'), 'utf8');
-  assert.match(win, /canAutoUpdate: true/);
+  // NSIS판(STORE=false)은 true, 스토어판은 스토어가 업데이트한다(D-P16)
+  assert.match(win, /canAutoUpdate: !STORE/);
 });
 
 test('업데이트를 스스로 설치하며 재시작하지 않는다', () => {

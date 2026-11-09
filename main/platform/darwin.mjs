@@ -28,6 +28,9 @@ export default {
   // 경로 자체가 없다. 새 버전을 알려 주고 받는 곳으로 보내는 것까지가 할 수 있는 전부다.
   canAutoUpdate: false,
 
+  // Mac App Store 배포는 아직 없다(Apple Developer 보류 — docs/07_Pro_설계.md)
+  store: false,
+
   hotkeyLabel: (accel) =>
     String(accel)
       .replace(/\bControl\b/g, '⌃')
@@ -74,6 +77,9 @@ export default {
   // 미서명 앱에서도 로그인 항목이 실제로 켜졌는지 **돌려받은 값으로 확인한다** —
   // setLoginItemSettings는 실패해도 던지지 않는다. 호출부는 이 false를 보고
   // 사용자에게 알린다(조용히 안 켜진 채로 두지 않는다).
+  loginItemBySystem: false,
+  loginItemSettingsUrl: null,
+
   setLoginItem(app, openAtLogin) {
     app.setLoginItemSettings({ openAtLogin, args: [] });
     return app.getLoginItemSettings().openAtLogin === openAtLogin;

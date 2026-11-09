@@ -20,6 +20,9 @@
 //                           셋이 서로 뭉개져 무엇인지 알 수 없었다. 알파를 곱해 평균하는
 //                           박스 축소가 얇은 획을 반투명 픽셀로 남겨 형태를 지켜 준다.
 //
+//   build/appx/*.png      — Microsoft Store(MSIX) 타일·로고. 원본 그대로 크기별로 줄인다.
+//                           없으면 electron-builder가 Electron 로고를 넣는다.
+//
 //   build/tray-Template*.png — macOS 메뉴바용. 알파만 남긴 검정 — OS가 다크/라이트에
 //                           맞춰 칠한다(main/platform/darwin.mjs가 이 파일을 먼저 찾는다).
 //
@@ -273,6 +276,34 @@ export function accentColor(rgba, mask, w, h) {
   return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
 }
 
+// 스토어 패키지가 쓰는 정사각 이미지들. targetsize-N은 작업 표시줄·시작 메뉴·탐색기가 크기별로
+// 골라 쓰는 것이라, 없으면 44px 하나를 늘리고 줄여 흐려진다. altform-unplated는 타일 배경
+// 판 없이 그릴 때(작업 표시줄) 쓰인다 — 아이콘에 자체 배경이 있어 같은 그림을 쓴다.
+export function appxSquares() {
+  const list = [
+    ['StoreLogo.png', 50],
+    ['Square44x44Logo.png', 44],
+    ['Square150x150Logo.png', 150],
+  ];
+  for (const t of [16, 24, 32, 48, 256]) {
+    list.push([`Square44x44Logo.targetsize-${t}.png`, t]);
+    list.push([`Square44x44Logo.targetsize-${t}_altform-unplated.png`, t]);
+  }
+  return list;
+}
+
+// 넓은 타일 310x150 — 아이콘을 120px로 가운데 둔다(위아래 15px 여백)
+const APPX_WIDE = [310, 150, 120];
+
+// size×size 그림을 w×h 투명 캔버스 한가운데 놓는다
+export function place(px, size, w, h) {
+  const out = Buffer.alloc(w * h * 4);
+  const ox = (w - size) >> 1;
+  const oy = (h - size) >> 1;
+  for (let y = 0; y < size; y++) px.copy(out, ((oy + y) * w + ox) * 4, y * size * 4, (y + 1) * size * 4);
+  return out;
+}
+
 export function buildIcons() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const src = decodePng(fs.readFileSync(SRC));
@@ -292,6 +323,19 @@ export function buildIcons() {
     fs.writeFileSync(path.join(OUT_DIR, `tray${suffix}.png`), encodePng(size, size, tint(px, accent)));
     fs.writeFileSync(path.join(OUT_DIR, `tray-Template${suffix}.png`), encodePng(size, size, toTemplate(px)));
   }
+
+  // 스토어(MSIX) 타일·로고 — electron-builder가 build/appx/를 패키지의 assets\로 싣는다.
+  // 이게 없으면 Electron 기본 로고가 스토어·시작 메뉴에 들어간다(실측 2026-11-10).
+  const appxDir = path.join(OUT_DIR, 'appx');
+  fs.mkdirSync(appxDir, { recursive: true });
+  for (const [name, size] of appxSquares()) {
+    fs.writeFileSync(path.join(appxDir, name), encodePng(size, size, resize(src.rgba, src.w, src.h, size)));
+  }
+  const [ww, wh, wi] = APPX_WIDE;
+  fs.writeFileSync(
+    path.join(appxDir, 'Wide310x150Logo.png'),
+    encodePng(ww, wh, place(resize(src.rgba, src.w, src.h, wi), wi, ww, wh))
+  );
   return {
     src: `${src.w}x${src.h}`,
     crop: bb.x1 - bb.x0 + 1,

@@ -8,11 +8,13 @@ import {
   screen,
   Notification,
   shell,
+  nativeTheme,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { platform } from './platform/index.mjs';
+import { winBackground } from './theme.mjs';
 import { createQueue } from './queue.mjs';
 import { createStore } from './store.mjs';
 import { createSettings } from './settings.mjs';
@@ -369,7 +371,7 @@ export function bootstrap() {
       maxWidth: 560,
       minHeight: CAPTURE_H,
       maxHeight: CAPTURE_H,
-      backgroundColor: '#1e2027',
+      backgroundColor: winBackground('capture', nativeTheme.shouldUseDarkColors),
     });
     // Electron 기본 메뉴를 뗀다 — 메뉴가 있으면 Windows에서 Alt 한 번에 메뉴바가 떠 단축키 잡기 중 Alt 조합을 가로챈다(2026-09-28).
     // setMenu는 Windows·Linux 전용이라 옵셔널 호출 — macOS는 앱 메뉴를 쓰므로 건드리지 않는다
@@ -405,7 +407,7 @@ export function bootstrap() {
       ...baseWinOpts(size.width ?? TODAY_W, size.height ?? TODAY_H),
       minWidth: 560,
       minHeight: 420,
-      backgroundColor: '#16171c',
+      backgroundColor: winBackground('today', nativeTheme.shouldUseDarkColors),
     });
     ctx.todayWin.setMenu?.(null); // 위 captureWin과 같은 이유
     applyTodayLayer(ctx.todayWin);
@@ -627,6 +629,13 @@ export function bootstrap() {
   app.setName('whenwork');
 
   app.whenReady().then(async () => {
+    // OS 테마가 바뀌면 렌더러 CSS는 알아서 바뀐다 — 창 바탕색(그리기 전 한 프레임)만 따라 맞춘다
+    nativeTheme.on('updated', () => {
+      const dark = nativeTheme.shouldUseDarkColors;
+      for (const [win, kind] of [[ctx.captureWin, 'capture'], [ctx.todayWin, 'today']]) {
+        if (win && !win.isDestroyed()) win.setBackgroundColor(winBackground(kind, dark));
+      }
+    });
     ctx.tray = new Tray(trayImage());
     ctx.tray.on('click', toggleToday);
     // 단축키는 토글 — 열린 창(오늘 뷰든 캡처든)이 있으면 닫고, 없으면 캡처를 연다

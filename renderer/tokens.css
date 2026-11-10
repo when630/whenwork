@@ -1,4 +1,9 @@
-/* WHENWORK 디자인 토큰 — docs/mockups/tokens.css와 동일 팔레트 (단일 원본은 목업 쪽 문서) */
+/* WHENWORK 디자인 토큰 — WHENDESK 브랜드 "안개 + 라임"(docs/08_브랜드.md).
+   화면 전체는 푸른 회색 안개 톤, 포인트는 라임 하나 — 고른 것·지금 볼 것에만 쓴다.
+   라임은 밝아서 라이트 화면에서는 면(--accent-fill, 옅은 배경)으로만 쓰고, 글자·테두리는
+   짙은 올리브(--accent)로 쓴다. 다크 화면에서는 라임이 글자로도 충분히 읽힌다.
+   OS 테마를 따라 라이트·다크로 바뀐다. 이 파일이 앱 색의 단일 원본이다
+   (docs/mockups/tokens.css는 v0.1 다크 단일 테마 시절의 목업 기록). */
 
 /* 본문 글꼴은 번들한 Pretendard(가변). CSP가 외부 로딩을 막으므로 파일을 함께 담는다.
    "Pretendard KR"이라는 별도 패밀리는 공식 배포에 없다 — 기본 Pretendard가 한글판이고
@@ -14,25 +19,73 @@
   font-display: swap;
 }
 
+/* 글자색은 모두 bg-app·bg-raised·bg-inset·bg-hover·accent-dim 위에서 WCAG AA(4.5:1) 이상
+   (라이트 최저: 성공 4.92 / 다크 최저: 보조 글자 5.03). 바꾸면 다시 잰다. */
 :root {
-  --bg-app: #16171c;
-  --bg-raised: #1e2027;
-  --bg-inset: #131419;
-  --bg-hover: #262933;
-  --border: #2e323d;
-  --border-focus: #7aa2f7;
+  color-scheme: light;
+  --bg-app: #e8ecf0;        /* 안개 — 앱 바탕 */
+  --bg-raised: #f7f9fa;     /* 카드·팝업·캡처 창 */
+  --bg-inset: #dde3e9;      /* 입력창·키캡·알약 */
+  --bg-hover: #dce2e8;
+  --border: #d0d8e0;
+  --border-strong: #b4beca;
+  --border-focus: #5e7d00;
 
-  --text-primary: #e6e8ee;
-  --text-secondary: #a8afbd;
-  --text-muted: #7b8294;
+  --text-primary: #151a21;
+  --text-secondary: #3f4752;
+  --text-muted: #4f5865;
 
-  --accent: #7aa2f7;
-  --accent-dim: rgba(122,162,247,.14);
-  --success: #9ece6a;
-  --warning: #e0af68;
-  --danger:  #f7768e;
-  --ai: #bb9af7;
-  --ai-dim: rgba(187,154,247,.13);
+  --accent: #476000;        /* 포인트를 글자·선으로 쓸 때 — 라이트에서는 짙은 올리브 */
+  --accent-fill: #c6ee3a;   /* 라임 — 포인트를 면으로 쓸 때 */
+  --on-accent: #1a2200;     /* 라임 면 위 글자 */
+  --accent-dim: color-mix(in srgb, var(--accent-fill) 32%, transparent);
+  --success: #1d6b4f;
+  --on-success: #ffffff;
+  --warning: #7c4a00;
+  --danger:  #a02a22;
+  --ai: #6a35b0;
+
+  /* 프로젝트 색점 — 바탕 위에서 3:1 이상(그래픽 기준) */
+  --proj-1: #c2413a; --proj-2: #1d7a55; --proj-3: #2f5bd8; --proj-4: #a86a00;
+  --proj-5: #7c3fc0; --proj-6: #0b7a8a; --proj-7: #c25a1c;
+
+  --shadow-pop: 0 12px 32px rgba(20,30,45,.16), 0 2px 6px rgba(20,30,45,.1);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg-app: #12161c;
+    --bg-raised: #1a1f27;
+    --bg-inset: #0e1116;
+    --bg-hover: #232a34;
+    --border: #29303a;
+    --border-strong: #3e4753;
+    --border-focus: #c6ee3a;
+
+    --text-primary: #e4e9ef;
+    --text-secondary: #b8c1cc;
+    --text-muted: #98a2af;
+
+    --accent: #c6ee3a;
+    --accent-dim: color-mix(in srgb, var(--accent-fill) 14%, transparent);
+    --success: #5fd3a0;
+    --on-success: #06241a;
+    --warning: #e8b04a;
+    --danger:  #ff8a7a;
+    --ai: #c4a3ff;
+
+    --proj-1: #ff8a7a; --proj-2: #5fd3a0; --proj-3: #8aa8ff; --proj-4: #e8b04a;
+    --proj-5: #c4a3ff; --proj-6: #5ecfd9; --proj-7: #ffa45c;
+
+    --shadow-pop: 0 12px 40px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35);
+  }
+}
+:root {
+  /* 의미색의 옅은 배경은 원색에서 파생한다 — 테마가 바뀌어도 따로 맞출 값이 없다 */
+  --ai-dim: color-mix(in srgb, var(--ai) 13%, transparent);
+  --warning-dim: color-mix(in srgb, var(--warning) 12%, transparent);
+  --danger-dim: color-mix(in srgb, var(--danger) 12%, transparent);
+  --success-dim: color-mix(in srgb, var(--success) 16%, transparent);
 
   --font-sans: "Pretendard Variable", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
   --font-mono: "Cascadia Code", "D2Coding", Consolas, monospace;
@@ -43,7 +96,6 @@
 
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
   --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 16px;
-  --shadow-pop: 0 12px 40px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35);
 }
 
 ::-webkit-scrollbar { width: 10px; }

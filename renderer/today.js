@@ -1,6 +1,7 @@
 // 오늘 뷰 — 탭 4개(오늘/인박스/대기/프로젝트), 마우스 없이 전 조작 가능 (설계 11절).
 // Tab 탭 전환 · ↑↓/jk 이동 · Space 완료 · 1~9 프로젝트 지정 · W 대기 · X 삭제 · Esc 닫기
-const PROJ_COLORS = ['#f7768e', '#9ece6a', '#7aa2f7', '#e0af68', '#bb9af7', '#7dcfff', '#ff9e64'];
+// 프로젝트 색점은 tokens.css의 --proj-1..7 — 테마(라이트·다크)마다 값이 달라 CSS 변수로 넘긴다
+const PROJ_COLORS = [1, 2, 3, 4, 5, 6, 7].map((n) => `var(--proj-${n})`);
 const TABS = [
   { key: 'today', label: '오늘' },
   { key: 'inbox', label: '인박스' },

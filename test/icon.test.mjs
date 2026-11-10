@@ -3,78 +3,84 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { glyphMask, bbox, accentColor, toTemplate } from '../tools/make-icon.mjs';
+import { ICON, COLORS, render, appIcon, templateGlyph, glyphBox, iconSvg, buildIcons, encodePng } from '../tools/make-icon.mjs';
 
-// 아이콘 파이프라인이 조용히 망가지는 자리를 지킨다. 새 아이콘(배경 있는 앱 아이콘)으로
-// 바꿨을 때 트레이는 파란 덩어리가, macOS Template은 까만 사각형이 됐다 —
-// 둘 다 앱은 멀쩡히 돌아서 눈으로 보기 전까지 아무도 몰랐다.
+// 아이콘 파이프라인이 조용히 망가지는 자리를 지킨다. 예전에 아이콘을 바꿨을 때 트레이는
+// 파란 덩어리가, macOS Template은 까만 사각형이 됐다 — 앱은 멀쩡히 돌아서 눈으로 보기 전까지
+// 아무도 몰랐다. 지금 아이콘은 도형 정의(ICON)에서 바로 그리므로, 그 정의와 결과를 함께 본다.
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const at = (px, size, gx, gy) => {
+  const x = Math.floor((gx / ICON.grid) * size), y = Math.floor((gy / ICON.grid) * size);
+  return [...px.slice((y * size + x) * 4, (y * size + x) * 4 + 4)];
+};
 
-// 배경 위에 흰 도형이 얹힌 아이콘을 흉내 낸다 (실제 아이콘과 같은 구조)
-function fakeIcon(w = 40) {
-  const rgba = Buffer.alloc(w * w * 4);
-  for (let y = 0; y < w; y++) {
-    for (let x = 0; x < w; x++) {
-      const d = (y * w + x) * 4;
-      // 배경: 왼쪽 위 하늘색 → 오른쪽 아래 진파랑 (원본과 같은 그라디언트 방향)
-      const t = (x + y) / (2 * w);
-      rgba[d] = Math.round(125 * (1 - t) + 30 * t);
-      rgba[d + 1] = Math.round(211 * (1 - t) + 64 * t);
-      rgba[d + 2] = Math.round(252 * (1 - t) + 175 * t);
-      rgba[d + 3] = 255;
-      // 가운데 흰 도형
-      if (x > w * 0.35 && x < w * 0.65 && y > w * 0.35 && y < w * 0.65) {
-        rgba[d] = 255; rgba[d + 1] = 255; rgba[d + 2] = 255;
-      }
-    }
-  }
-  return { w, rgba };
-}
-
-test('마스크는 밝은 배경이 아니라 흰 도형만 잡는다', () => {
-  const { w, rgba } = fakeIcon();
-  const mask = glyphMask(rgba, w, w);
-  const at = (x, y) => mask[(y * w + x) * 4 + 3];
-  assert.ok(at(w >> 1, w >> 1) > 200, '흰 도형이 불투명해야 한다');
-  assert.equal(at(1, 1), 0, '하늘색 배경이 글리프로 잡혔다 — 밝기로 가르면 이렇게 된다');
-  assert.equal(at(w - 2, w - 2), 0, '진파랑 배경이 글리프로 잡혔다');
+test('아이콘 색은 브랜드 팔레트(tokens.css)에서 온다', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'renderer', 'tokens.css'), 'utf8').toLowerCase();
+  assert.ok(css.includes(COLORS.lime.toLowerCase()), '라임이 tokens.css에 없다');
+  assert.ok(css.includes(COLORS.fog.toLowerCase()), '안개색이 tokens.css에 없다');
+  assert.ok(css.includes(COLORS.ink.toLowerCase()), '먹색(본문 글자)이 tokens.css에 없다');
 });
 
-test('글리프 경계는 아이콘 전체가 아니라 도형만큼이다', () => {
-  const { w, rgba } = fakeIcon();
-  const gb = bbox(glyphMask(rgba, w, w), w, w);
-  const side = gb.x1 - gb.x0 + 1;
-  assert.ok(side < w * 0.6, `글리프 경계가 ${side}/${w} — 배경까지 잡혔다`);
+test('앱 아이콘은 먹색 틀 위에 글 한 줄(안개)과 커서(라임)가 있다', () => {
+  const s = 256, px = appIcon(s);
+  assert.deepEqual(at(px, s, 8, 8).slice(0, 3), hex(COLORS.ink), '틀 안쪽');
+  assert.deepEqual(at(px, s, 25, 32).slice(0, 3), hex(COLORS.fog), '글 한 줄');
+  assert.deepEqual(at(px, s, 46.5, 32).slice(0, 3), hex(COLORS.lime), '커서');
+  assert.equal(at(px, s, 0.5, 0.5)[3], 0, '틀 바깥 모서리는 투명');
+  assert.equal(at(px, s, 32, 32)[3], 255);
 });
 
-test('macOS Template이 까만 사각형이 되지 않는다', () => {
-  const { w, rgba } = fakeIcon();
-  const tpl = toTemplate(glyphMask(rgba, w, w));
+test('가장자리는 반투명으로 이어진다 — 이진화하면 16px에서 획이 끊긴다', () => {
+  const px = render([{ x: 0, y: 0, w: 32, h: 64, r: 0, color: '#000000' }], 7);
+  // 경계(32)는 7px 격자에서 3.5번 픽셀 한가운데를 지난다 — 그 픽셀은 반쯤 덮인다
+  const a = px[(3 * 7 + 3) * 4 + 3];
+  assert.ok(a > 100 && a < 160, `경계 픽셀 알파 ${a}`);
+  assert.equal(px[(3 * 7 + 1) * 4 + 3], 255);
+  assert.equal(px[(3 * 7 + 5) * 4 + 3], 0);
+});
+
+test('16px에서도 두 요소가 서로 떨어져 보인다', () => {
+  const s = 16, px = appIcon(s);
+  // 글 한 줄과 커서 사이(격자 38~43)의 한 열은 틀 색이어야 한다 — 붙으면 한 덩어리로 읽힌다
+  const gap = at(px, s, 40.5, 32);
+  const [ir, ig, ib] = hex(COLORS.ink);
+  assert.ok(Math.abs(gap[0] - ir) + Math.abs(gap[1] - ig) + Math.abs(gap[2] - ib) < 60, `틈이 메워졌다: ${gap}`);
+});
+
+test('macOS Template은 틀 없는 기호뿐이다 — 까만 사각형이 되지 않는다', () => {
+  const s = 32, px = templateGlyph(s);
   let opaque = 0;
-  for (let i = 0; i < w * w; i++) if (tpl[i * 4 + 3] > 128) opaque++;
-  const ratio = opaque / (w * w);
-  assert.ok(ratio > 0.02, 'Template이 비었다');
-  assert.ok(ratio < 0.5, `Template의 ${Math.round(ratio * 100)}%가 불투명 — 배경까지 칠해진 것이다`);
+  for (let i = 0; i < s * s; i++) {
+    assert.deepEqual([px[i * 4], px[i * 4 + 1], px[i * 4 + 2]].filter((v, k) => px[i * 4 + 3] && v !== 0), []);
+    if (px[i * 4 + 3] > 128) opaque++;
+  }
+  const ratio = opaque / (s * s);
+  assert.ok(ratio > 0.1, 'Template이 비었다');
+  assert.ok(ratio < 0.5, `Template의 ${Math.round(ratio * 100)}%가 불투명 — 틀까지 칠해진 것이다`);
+  const b = glyphBox();
+  assert.ok(b.side < ICON.frame.w, '기호 영역이 틀만큼 크다');
 });
 
-test('악센트는 배경 평균이지 그라디언트 끝의 극단값이 아니다', () => {
-  const { w, rgba } = fakeIcon();
-  const mask = glyphMask(rgba, w, w);
-  const [r, g, b] = accentColor(rgba, mask, w, w);
-  // 양 끝(125,211,252)와 (30,64,175) 사이에 있어야 한다
-  assert.ok(r > 30 && r < 125, `R=${r}`);
-  assert.ok(b > 175 && b < 252, `B=${b}`);
+test('SVG 미리보기는 같은 도형을 담는다', () => {
+  const svg = iconSvg();
+  assert.equal((svg.match(/<rect /g) ?? []).length, 1 + ICON.glyph.length);
+  assert.ok(svg.includes(COLORS.lime));
 });
 
 test('실제로 구운 아이콘이 기대한 크기와 형태다', () => {
+  buildIcons();
   const read = (f) => {
-    const b = fs.readFileSync(path.join(ROOT, 'build', f));
+    const b = fs.readFileSync(path.join(ROOT, f));
     return { w: b.readUInt32BE(16), h: b.readUInt32BE(20), size: b.length };
   };
-  assert.deepEqual([read('icon.png').w, read('icon.png').h], [512, 512]);
-  assert.deepEqual([read('tray.png').w, read('tray.png').h], [16, 16]);
-  assert.deepEqual([read('tray@2x.png').w, read('tray@2x.png').h], [32, 32]);
-  // Template이 까만 사각형이면 압축이 잘 돼 파일이 아주 작아진다 — 형태가 있으면 그렇지 않다
-  assert.ok(read('tray-Template.png').size > 200, 'Template이 단색 덩어리로 보인다');
+  assert.deepEqual([read('build/icon.png').w, read('build/icon.png').h], [512, 512]);
+  assert.deepEqual([read('build/tray.png').w, read('build/tray.png').h], [16, 16]);
+  assert.deepEqual([read('build/tray@2x.png').w, read('build/tray@2x.png').h], [32, 32]);
+  assert.deepEqual([read('build/appx/Wide310x150Logo.png').w, read('build/appx/Wide310x150Logo.png').h], [310, 150]);
+  assert.deepEqual([read('assets/icon/whenwork.png').w], [1024]);
+  // 구운 파일이 정의에서 그린 그림 그대로다(모양 자체는 위 Template 테스트가 본다)
+  assert.ok(fs.readFileSync(path.join(ROOT, 'build', 'tray-Template.png')).equals(encodePng(16, 16, templateGlyph(16))));
+  assert.ok(fs.readFileSync(path.join(ROOT, 'build', 'tray.png')).equals(encodePng(16, 16, appIcon(16))));
 });

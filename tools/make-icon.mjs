@@ -1,32 +1,21 @@
-// tools/make-icon.mjs — 배포용 아이콘을 굽는다 (NAME-03 / REL 5-3).
+// tools/make-icon.mjs — 배포용 아이콘을 굽는다 (NAME-03 / REL 5-3, 브랜드 D-B02).
 //
-// 원본은 assets/icon/whenwork.png 하나뿐이다. 여기서 두 가지를 만든다:
+// 원본은 그림 파일이 아니라 아래 ICON — 64 단위 격자 위의 둥근 사각형 세 개다(docs/08_브랜드.md
+// "한 줄"). 도형을 크기마다 직접 그리므로(가장자리 안티에일리어싱은 거리로 계산한다) 큰 그림을
+// 줄일 때처럼 16px에서 획이 흐려지지 않는다. 여기서 굽는 것:
 //
-//   build/icon.png        — 설치 파일·실행 파일·창·macOS Dock/dmg가 쓰는 앱 아이콘.
-//                           원본 비율 그대로 512px로 줄인다(여백도 함께 남긴다 —
-//                           설치 관리자와 Dock은 자기 여백을 따로 두지 않는다).
+//   build/icon.png          — 설치 파일·실행 파일·창·macOS Dock/dmg가 쓰는 앱 아이콘(512).
+//   build/tray*.png         — Windows 트레이. 앱 아이콘 그대로(틀 포함) 16/32px로 그린다.
+//                             예전 아이콘은 시계·바늘·체크가 16px에서 뭉개져 흰 도형만 떼어
+//                             파랗게 칠해 썼지만, 지금 기호는 막대 두 개라 틀째로 읽힌다 —
+//                             먹색 틀이 밝은·어두운 작업 표시줄 양쪽에서 기호를 받쳐 준다.
+//   build/tray-Template*.png — macOS 메뉴바. 틀을 빼고 기호만 검정으로 — OS가 다크/라이트에
+//                             맞춰 칠한다(main/platform/darwin.mjs가 이 파일을 먼저 찾는다).
+//                             틀째로 넣으면 까만 사각형이 된다(실제로 그랬다).
+//   build/appx/*.png        — Microsoft Store(MSIX) 타일·로고. 없으면 Electron 로고가 들어간다.
+//   assets/icon/whenwork.png / .svg — README·랜딩용 미리보기(1024). 손으로 고치지 않는다.
 //
-//   build/tray*.png       — 트레이/메뉴바 글리프. 원본에서 **흰 도형만 떼어내** 그
-//                           도형의 경계로 잘라 줄인 것이다. 아이콘은 배경 위에 도형이
-//                           얹힌 앱 아이콘이라, 알파를 그대로 쓰면 둥근 사각형 전체가
-//                           글리프가 되어 16px 트레이에서는 파란 덩어리가 되고 macOS
-//                           Template에서는 까만 사각형이 된다(둘 다 실제로 그랬다).
-//                           떼어내는 기준은 밝기가 아니라 가장 어두운 채널이다 —
-//                           배경 그라디언트의 하늘색은 밝기가 높아 밝기로 자르면
-//                           배경까지 글리프가 된다(이것도 실제로 그랬다). 자세한 이유는
-//                           glyphMask에 적었다.
-//
-//                           16px 격자에 손으로 다시 그려 본 적도 있는데, 원·바늘·체크
-//                           셋이 서로 뭉개져 무엇인지 알 수 없었다. 알파를 곱해 평균하는
-//                           박스 축소가 얇은 획을 반투명 픽셀로 남겨 형태를 지켜 준다.
-//
-//   build/appx/*.png      — Microsoft Store(MSIX) 타일·로고. 원본 그대로 크기별로 줄인다.
-//                           없으면 electron-builder가 Electron 로고를 넣는다.
-//
-//   build/tray-Template*.png — macOS 메뉴바용. 알파만 남긴 검정 — OS가 다크/라이트에
-//                           맞춰 칠한다(main/platform/darwin.mjs가 이 파일을 먼저 찾는다).
-//
-// 외부 의존성을 두지 않으려고 PNG 디코더·인코더를 직접 넣었다(zlib만 쓴다).
+// 외부 의존성을 두지 않으려고 PNG 인코더를 직접 넣었다(zlib만 쓴다).
 import zlib from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,7 +24,19 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const OUT_DIR = path.join(ROOT, 'build');
-const SRC = path.join(ROOT, 'assets', 'icon', 'whenwork.png');
+const PREVIEW_DIR = path.join(ROOT, 'assets', 'icon');
+
+// ── 아이콘 정의 — 안개 + 라임 팔레트(renderer/tokens.css)
+//   틀: 먹색 둥근 사각형 / 기호: 적어 둔 글 한 줄(안개색) + 깜박이는 커서(라임)
+export const COLORS = { ink: '#151A21', fog: '#E8ECF0', lime: '#C6EE3A' };
+export const ICON = {
+  grid: 64,
+  frame: { x: 3, y: 3, w: 58, h: 58, r: 14, color: COLORS.ink },
+  glyph: [
+    { x: 13, y: 29, w: 25, h: 6, r: 3, color: COLORS.fog }, // 글 한 줄
+    { x: 43, y: 18, w: 7, h: 28, r: 3.5, color: COLORS.lime }, // 커서
+  ],
+};
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -62,7 +63,7 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
-function encodePng(width, height, rgba) {
+export function encodePng(width, height, rgba) {
   const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
@@ -82,198 +83,91 @@ function encodePng(width, height, rgba) {
   ]);
 }
 
-// ── PNG 디코더 (8비트 RGBA/RGB, 비인터레이스만 — 원본이 그 형식이다)
-function decodePng(buf) {
-  let o = 8;
-  let ihdr = null;
-  const idat = [];
-  while (o < buf.length) {
-    const len = buf.readUInt32BE(o);
-    const type = buf.toString('ascii', o + 4, o + 8);
-    const data = buf.slice(o + 8, o + 8 + len);
-    if (type === 'IHDR') {
-      ihdr = { w: data.readUInt32BE(0), h: data.readUInt32BE(4), depth: data[8], color: data[9], interlace: data[12] };
-    } else if (type === 'IDAT') idat.push(data);
-    else if (type === 'IEND') break;
-    o += 12 + len;
-  }
-  if (!ihdr) throw new Error('IHDR 없음');
-  if (ihdr.depth !== 8 || ihdr.interlace !== 0 || (ihdr.color !== 6 && ihdr.color !== 2)) {
-    throw new Error(`지원하지 않는 PNG 형식: depth=${ihdr.depth} color=${ihdr.color} interlace=${ihdr.interlace}`);
-  }
-  const ch = ihdr.color === 6 ? 4 : 3;
-  const raw = zlib.inflateSync(Buffer.concat(idat));
-  const stride = ihdr.w * ch;
-  const out = Buffer.alloc(ihdr.w * ihdr.h * 4);
-  let prev = Buffer.alloc(stride);
-  for (let y = 0; y < ihdr.h; y++) {
-    const filter = raw[y * (stride + 1)];
-    const line = Buffer.from(raw.slice(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
-    // PNG 필터 되돌리기 — 여기를 틀리면 그림이 사선으로 흐른다
-    for (let i = 0; i < stride; i++) {
-      const a = i >= ch ? line[i - ch] : 0;
-      const b = prev[i];
-      const c = i >= ch ? prev[i - ch] : 0;
-      let add = 0;
-      if (filter === 1) add = a;
-      else if (filter === 2) add = b;
-      else if (filter === 3) add = (a + b) >> 1;
-      else if (filter === 4) {
-        const p = a + b - c;
-        const pa = Math.abs(p - a);
-        const pb = Math.abs(p - b);
-        const pc = Math.abs(p - c);
-        add = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-      }
-      line[i] = (line[i] + add) & 0xff;
-    }
-    prev = line;
-    for (let x = 0; x < ihdr.w; x++) {
-      const s = x * ch;
-      const d = (y * ihdr.w + x) * 4;
-      out[d] = line[s];
-      out[d + 1] = line[s + 1];
-      out[d + 2] = line[s + 2];
-      out[d + 3] = ch === 4 ? line[s + 3] : 0xff;
-    }
-  }
-  return { w: ihdr.w, h: ihdr.h, rgba: out };
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+
+// 점(px,py)에서 둥근 사각형 가장자리까지의 거리(안쪽은 음수). 단위는 격자 단위.
+function rrectDistance(px, py, { x, y, w, h, r }) {
+  const qx = Math.abs(px - (x + w / 2)) - (w / 2 - r);
+  const qy = Math.abs(py - (y + h / 2)) - (h / 2 - r);
+  const ox = Math.max(qx, 0);
+  const oy = Math.max(qy, 0);
+  return Math.hypot(ox, oy) + Math.min(Math.max(qx, qy), 0) - r;
 }
 
-// 보이는 부분의 경계 상자. 정사각으로 맞춘다 — 가로세로 비가 틀어지면 원이 타원이 된다.
-export function bbox(rgba, w, h) {
-  let x0 = w;
-  let y0 = h;
-  let x1 = -1;
-  let y1 = -1;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (rgba[(y * w + x) * 4 + 3] > 8) {
-        if (x < x0) x0 = x;
-        if (x > x1) x1 = x;
-        if (y < y0) y0 = y;
-        if (y > y1) y1 = y;
-      }
-    }
-  }
-  if (x1 < 0) return { x0: 0, y0: 0, x1: w - 1, y1: h - 1 };
-  const side = Math.max(x1 - x0, y1 - y0) + 1;
-  const cx = (x0 + x1) / 2;
-  const cy = (y0 + y1) / 2;
-  return {
-    x0: Math.max(0, Math.round(cx - side / 2)),
-    y0: Math.max(0, Math.round(cy - side / 2)),
-    x1: Math.min(w - 1, Math.round(cx + side / 2)),
-    y1: Math.min(h - 1, Math.round(cy + side / 2)),
-  };
-}
-
-// 박스 평균 축소. **알파를 곱해 평균한 뒤 되나눈다** — 안 그러면 투명한 가장자리의
-// 색(보통 0,0,0)이 섞여 들어와 테두리가 거뭇해진다. 16px에서는 그 반투명 가장자리가
-// 곧 형태라, 여기를 대충 하면 글리프가 뭉개진다.
-export function resize(src, w, h, size, bb = null) {
-  const box = bb ?? { x0: 0, y0: 0, x1: w - 1, y1: h - 1 };
-  const bw = box.x1 - box.x0 + 1;
-  const bh = box.y1 - box.y0 + 1;
+// 도형들을 size×size로 그린다. box는 격자에서 그릴 영역(정사각). 가장자리 덮임은 픽셀 중심에서
+// 가장자리까지의 거리로 정한다 — 거리 0이면 반쯤 덮인 픽셀. 색 지정(color)이 있으면 모든 도형을
+// 그 한 색으로 칠한다(트레이 Template).
+export function render(shapes, size, { box = { x: 0, y: 0, side: ICON.grid }, color = null } = {}) {
   const out = Buffer.alloc(size * size * 4);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const X0 = box.x0 + Math.floor((x * bw) / size);
-      const X1 = box.x0 + Math.max(Math.floor(((x + 1) * bw) / size), Math.floor((x * bw) / size) + 1);
-      const Y0 = box.y0 + Math.floor((y * bh) / size);
-      const Y1 = box.y0 + Math.max(Math.floor(((y + 1) * bh) / size), Math.floor((y * bh) / size) + 1);
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      let a = 0;
-      let n = 0;
-      for (let yy = Y0; yy < Y1 && yy < h; yy++) {
-        for (let xx = X0; xx < X1 && xx < w; xx++) {
-          const i = (yy * w + xx) * 4;
-          const al = src[i + 3] / 255;
-          r += src[i] * al;
-          g += src[i + 1] * al;
-          b += src[i + 2] * al;
-          a += src[i + 3];
-          n++;
-        }
-      }
-      const d = (y * size + x) * 4;
-      const am = n ? a / n : 0;
-      const aw = am / 255;
-      out[d] = aw > 0 ? Math.min(255, Math.round(r / n / aw)) : 0;
-      out[d + 1] = aw > 0 ? Math.min(255, Math.round(g / n / aw)) : 0;
-      out[d + 2] = aw > 0 ? Math.min(255, Math.round(b / n / aw)) : 0;
-      out[d + 3] = Math.round(am);
+  const scale = box.side / size; // 격자 단위 / 픽셀
+  const fills = shapes.map((s) => hex(color ?? s.color));
+  for (let py = 0; py < size; py++) {
+    for (let px = 0; px < size; px++) {
+      const gx = box.x + (px + 0.5) * scale;
+      const gy = box.y + (py + 0.5) * scale;
+      let r = 0, g = 0, b = 0, a = 0; // 미리 곱한 알파로 겹친다
+      shapes.forEach((s, i) => {
+        const cov = Math.min(1, Math.max(0, 0.5 - rrectDistance(gx, gy, s) / scale));
+        if (!cov) return;
+        const [cr, cg, cb] = fills[i];
+        r = cr * cov + r * (1 - cov);
+        g = cg * cov + g * (1 - cov);
+        b = cb * cov + b * (1 - cov);
+        a = cov + a * (1 - cov);
+      });
+      const d = (py * size + px) * 4;
+      out[d] = a ? Math.round(r / a) : 0;
+      out[d + 1] = a ? Math.round(g / a) : 0;
+      out[d + 2] = a ? Math.round(b / a) : 0;
+      out[d + 3] = Math.round(a * 255);
     }
   }
   return out;
 }
 
-// 앱 아이콘에서 **흰 도형만** 떼어낸다.
-//
-// 새 아이콘은 둥근 사각형 배경 위에 흰 시계·체크가 얹힌 앱 아이콘이다. 알파를 그대로
-// 쓰면 사각형 전체가 글리프가 되어, 16px 트레이에서는 파란 덩어리로 뭉개지고 macOS
-// Template에서는 **까만 사각형**이 된다(둘 다 실제로 그렇게 나왔다). 트레이·메뉴바가
-// 원하는 것은 배경이 아니라 그 위의 도형이다.
-//
-// 가르는 기준은 밝기가 아니라 **가장 어두운 채널**이다. 배경은 그라디언트라 왼쪽 위
-// 하늘색은 밝기가 0.7을 넘어 밝기로 자르면 배경까지 글리프가 된다(실제로 그랬다 —
-// 글리프 경계가 아이콘 전체 크기로 잡혔다). 흰색만 세 채널이 모두 높다:
-//   흰색 (255,255,255) → 1.00   하늘색 (125,211,252) → 0.49   진파랑 (30,64,175) → 0.12
-// 경계의 반투명 픽셀이 남아야 16px에서 획이 이어지므로 이진화하지 않는다.
-export function glyphMask(rgba, w, h) {
-  const out = Buffer.alloc(w * h * 4);
-  const FLOOR = 0.62;
-  for (let i = 0; i < w * h; i++) {
-    const d = i * 4;
-    const a = rgba[d + 3] / 255;
-    const minCh = Math.min(rgba[d], rgba[d + 1], rgba[d + 2]) / 255;
-    const v = Math.max(0, (minCh - FLOOR) / (1 - FLOOR));
-    out[d] = rgba[d];
-    out[d + 1] = rgba[d + 1];
-    out[d + 2] = rgba[d + 2];
-    out[d + 3] = Math.round(255 * v * a);
-  }
-  return out;
+// 작은 크기에서는 도형 가장자리를 픽셀 격자에 맞춘다. 16px에서 격자 1칸은 0.25px라, 맞추지 않으면
+// 글 한 줄과 커서 사이 틈(5칸 = 1.25px)이 두 픽셀에 걸쳐 반투명으로 번져 두 막대가 한 덩어리로
+// 붙어 보인다(테스트가 잡았다). 큰 크기는 그대로 둔다 — 반 픽셀 차이가 보이지 않는다.
+export function snapToPixels(shapes, size, box = { x: 0, y: 0, side: ICON.grid }) {
+  const k = size / box.side;
+  const snapX = (v) => box.x + Math.round((v - box.x) * k) / k;
+  const snapY = (v) => box.y + Math.round((v - box.y) * k) / k;
+  return shapes.map((s) => {
+    const x = snapX(s.x), y = snapY(s.y);
+    const w = Math.max(1 / k, snapX(s.x + s.w) - x), h = Math.max(1 / k, snapY(s.y + s.h) - y);
+    return { ...s, x, y, w, h, r: Math.min(s.r, w / 2, h / 2) };
+  });
 }
 
-// 마스크를 한 가지 색으로 칠한다. Windows 트레이는 밝은·어두운 작업 표시줄 양쪽에
-// 서므로 아이콘의 파랑을 그대로 쓴다 — 흰 글리프는 밝은 작업 표시줄에서 사라진다.
-export function tint(rgba, [r, g, b]) {
-  const out = Buffer.from(rgba);
-  for (let i = 0; i < out.length; i += 4) {
-    out[i] = r;
-    out[i + 1] = g;
-    out[i + 2] = b;
-  }
-  return out;
+const SNAP_MAX = 48;
+
+// 앱 아이콘 전체(틀 + 기호)
+export function appIcon(size) {
+  const shapes = [ICON.frame, ...ICON.glyph];
+  return render(size <= SNAP_MAX ? snapToPixels(shapes, size) : shapes, size);
 }
 
-// macOS Template: 색은 버리고 알파만 남긴다(검정) — OS가 다크/라이트에 맞춰 칠한다.
-export function toTemplate(rgba) {
-  return tint(rgba, [0, 0, 0]);
+// 기호만 감싸는 정사각 영역 — 메뉴바 Template은 틀 없이 기호가 칸을 채워야 한다
+export function glyphBox(pad = 1) {
+  const x0 = Math.min(...ICON.glyph.map((s) => s.x));
+  const y0 = Math.min(...ICON.glyph.map((s) => s.y));
+  const x1 = Math.max(...ICON.glyph.map((s) => s.x + s.w));
+  const y1 = Math.max(...ICON.glyph.map((s) => s.y + s.h));
+  const side = Math.max(x1 - x0, y1 - y0) + pad * 2;
+  return { x: (x0 + x1) / 2 - side / 2, y: (y0 + y1) / 2 - side / 2, side };
 }
 
-// 아이콘의 대표 색 — **배경 픽셀의 평균**이다. 가장 진한 한 픽셀을 고르면 그라디언트
-// 끝의 극단값(#000ada 같은)이 잡혀 아이콘과 다른 색이 된다. 글리프(흰 도형)는 마스크로
-// 빼고, 남은 배경만 평균 낸다.
-export function accentColor(rgba, mask, w, h) {
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  let n = 0;
-  for (let i = 0; i < w * h; i++) {
-    const d = i * 4;
-    if (rgba[d + 3] < 200) continue; // 투명한 바깥
-    if (mask[d + 3] > 40) continue; // 흰 도형
-    r += rgba[d];
-    g += rgba[d + 1];
-    b += rgba[d + 2];
-    n++;
-  }
-  if (!n) return [0x2f, 0x5c, 0xf5];
-  return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+// macOS Template: 기호만, 검정 — OS가 다크/라이트에 맞춰 칠한다
+export function templateGlyph(size) {
+  const box = glyphBox();
+  const shapes = size <= SNAP_MAX ? snapToPixels(ICON.glyph, size, box) : ICON.glyph;
+  return render(shapes, size, { box, color: '#000000' });
+}
+
+export function iconSvg() {
+  const rect = (s) => `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="${s.r}" fill="${s.color}"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${ICON.grid} ${ICON.grid}">` +
+    `${[ICON.frame, ...ICON.glyph].map(rect).join('')}</svg>\n`;
 }
 
 // 스토어 패키지가 쓰는 정사각 이미지들. targetsize-N은 작업 표시줄·시작 메뉴·탐색기가 크기별로
@@ -306,45 +200,30 @@ export function place(px, size, w, h) {
 
 export function buildIcons() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
-  const src = decodePng(fs.readFileSync(SRC));
-  const bb = bbox(src.rgba, src.w, src.h);
+  const write = (dir, name, size, px, h = size) => fs.writeFileSync(path.join(dir, name), encodePng(size, h, px));
 
-  // 앱 아이콘 — 원본 그대로. 둥근 사각형 배경이 곧 앱 아이콘의 모양이다.
-  fs.writeFileSync(path.join(OUT_DIR, 'icon.png'), encodePng(512, 512, resize(src.rgba, src.w, src.h, 512)));
-
-  // 트레이/메뉴바 — 배경을 버리고 흰 도형만 떼어내 **그 도형의 경계로** 다시 자른다.
-  // 앱 아이콘의 경계 상자(사각형 전체)로 자르면 도형이 프레임 안에서 작아진다.
-  const mask = glyphMask(src.rgba, src.w, src.h);
-  const gb = bbox(mask, src.w, src.h);
-  const accent = accentColor(src.rgba, mask, src.w, src.h);
+  write(OUT_DIR, 'icon.png', 512, appIcon(512));
   for (const size of [16, 32]) {
-    const px = resize(mask, src.w, src.h, size, gb);
     const suffix = size === 16 ? '' : '@2x';
-    fs.writeFileSync(path.join(OUT_DIR, `tray${suffix}.png`), encodePng(size, size, tint(px, accent)));
-    fs.writeFileSync(path.join(OUT_DIR, `tray-Template${suffix}.png`), encodePng(size, size, toTemplate(px)));
+    write(OUT_DIR, `tray${suffix}.png`, size, appIcon(size));
+    write(OUT_DIR, `tray-Template${suffix}.png`, size, templateGlyph(size));
   }
 
   // 스토어(MSIX) 타일·로고 — electron-builder가 build/appx/를 패키지의 assets\로 싣는다.
-  // 이게 없으면 Electron 기본 로고가 스토어·시작 메뉴에 들어간다(실측 2026-11-10).
   const appxDir = path.join(OUT_DIR, 'appx');
   fs.mkdirSync(appxDir, { recursive: true });
-  for (const [name, size] of appxSquares()) {
-    fs.writeFileSync(path.join(appxDir, name), encodePng(size, size, resize(src.rgba, src.w, src.h, size)));
-  }
+  for (const [name, size] of appxSquares()) write(appxDir, name, size, appIcon(size));
   const [ww, wh, wi] = APPX_WIDE;
-  fs.writeFileSync(
-    path.join(appxDir, 'Wide310x150Logo.png'),
-    encodePng(ww, wh, place(resize(src.rgba, src.w, src.h, wi), wi, ww, wh))
-  );
-  return {
-    src: `${src.w}x${src.h}`,
-    crop: bb.x1 - bb.x0 + 1,
-    glyph: gb.x1 - gb.x0 + 1,
-    accent: accent.map((v) => v.toString(16).padStart(2, '0')).join(''),
-  };
+  write(appxDir, 'Wide310x150Logo.png', ww, place(appIcon(wi), wi, ww, wh), wh);
+
+  // README·랜딩 미리보기
+  fs.mkdirSync(PREVIEW_DIR, { recursive: true });
+  write(PREVIEW_DIR, 'whenwork.png', 1024, appIcon(1024));
+  fs.writeFileSync(path.join(PREVIEW_DIR, 'whenwork.svg'), iconSvg());
+  return { sizes: [512, 32, 16, ...appxSquares().map(([, s]) => s)].length };
 }
 
 if (process.argv[1] && process.argv[1].endsWith('make-icon.mjs')) {
   const info = buildIcons();
-  console.log(`icons written to build/ (source ${info.src} → icon.png 512, glyph ${info.glyph}px crop, accent #${info.accent})`);
+  console.log(`icons written to build/ and assets/icon/ (${info.sizes} images)`);
 }

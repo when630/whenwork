@@ -116,7 +116,7 @@
   /* 눌러도 되게 생긴 것은 실제로 눌린다 (키보드는 Space) */
   .cb:hover { border-color: var(--success); }
   .item.done .cb { background: var(--success); border-color: var(--success); }
-  .item.done .cb::after { content: "✓"; position: absolute; inset: -3px 0 0 2px; font-size: 11px; color: #16171c; }
+  .item.done .cb::after { content: "✓"; position: absolute; inset: -3px 0 0 2px; font-size: 11px; color: var(--on-success); }
   .item.done .t { color: var(--text-muted); text-decoration: line-through; }
   .item .t { flex: 1; font-size: var(--fs-md); }
   .item .meta { display: flex; gap: 6px; align-items: center; flex: none; margin-top: 2px; }
@@ -124,8 +124,8 @@
     font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);
     background: var(--bg-inset); border-radius: 99px; padding: 1px 8px;
   }
-  .due.today { color: var(--warning); background: rgba(224,175,104,.1); }
-  .due.over { color: var(--danger); background: rgba(247,118,142,.1); }
+  .due.today { color: var(--warning); background: var(--warning-dim); }
+  .due.over { color: var(--danger); background: var(--danger-dim); }
   /* 이슈에서 세운 할 일 — 원본이 닫히면 색이 바뀌어 "이제 체크해도 된다"를 알린다 */
   .ctx, .wait-meta { width: 100%; font-size: var(--fs-xs); color: var(--text-muted); margin-left: 23px; }
   /* 대기 항목의 프로젝트 — 경과·재촉 뒤에 붙는다 */
@@ -220,8 +220,8 @@
     font-size: var(--fs-xs); color: var(--text-muted); flex: none;
   }
   .sync { display: flex; align-items: center; gap: 6px; }
-  .sync .led { width: 7px; height: 7px; border-radius: 99px; background: var(--success); box-shadow: 0 0 6px rgba(158,206,106,.6); }
-  .sync.off .led { background: var(--warning); box-shadow: 0 0 6px rgba(224,175,104,.6); }
+  .sync .led { width: 7px; height: 7px; border-radius: 99px; background: var(--success); box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent); }
+  .sync.off .led { background: var(--warning); box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 60%, transparent); }
   /* 힌트가 늘어 폭을 넘기면 레이아웃이 밀리는 대신 뒤쪽(관습적인 Esc 등)부터 잘린다 */
   .foot-hints { display: flex; gap: var(--sp-3); flex-wrap: nowrap; overflow: hidden; }
   .foot-hints span { white-space: nowrap; }
@@ -272,7 +272,7 @@
   .skeleton { display: flex; flex-direction: column; gap: 10px; }
   .sk { height: 12px; border-radius: 4px; background: linear-gradient(90deg, var(--bg-inset) 25%, var(--bg-hover) 50%, var(--bg-inset) 75%); background-size: 200% 100%; animation: shim 1.4s infinite; }
   @keyframes shim { to { background-position: -200% 0; } }
-  .err { background: rgba(247,118,142,.08); border: 1px solid rgba(247,118,142,.35); border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); color: var(--text-secondary); }
+  .err { background: var(--danger-dim); border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); color: var(--text-secondary); }
   .err .t { color: var(--danger); font-weight: 600; margin-bottom: 2px; }
 
   /* ── 주간 리뷰 */

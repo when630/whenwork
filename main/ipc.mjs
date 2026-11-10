@@ -6,7 +6,7 @@ import { parseCapture, parseDue } from './parse.mjs';
 import { validateExport } from './store.mjs';
 import { platform } from './platform/index.mjs';
 import { updateLine } from './update.mjs';
-import { NOTIFY_AT_DEFAULT } from './brief.mjs';
+import { NOTIFY_AT_DEFAULT, dayKey } from './brief.mjs';
 
 // 캡처 저장의 단일 경로(D-01/D-03). capture:save 핸들러와 01-07의 주입 모드가 모두
 // 이 함수를 부른다 — 경로가 하나여야 테스트가 실경로를 밟는다.
@@ -281,7 +281,8 @@ export function registerIpc(ctx) {
     const win = BrowserWindow.fromWebContents(e.sender);
     ctx.suppressHide = true;
     try {
-      const stamp = new Date().toISOString().slice(0, 10);
+      // 로컬 날짜로 — toISOString()은 UTC라 한국 시간 00~09시에 내보내면 어제 날짜가 붙었다
+      const stamp = dayKey();
       const res = await dialog.showSaveDialog(win, {
         title: '데이터 내보내기',
         defaultPath: `whenwork-${stamp}.json`,

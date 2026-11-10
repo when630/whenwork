@@ -34,6 +34,13 @@
 ### 엔타이틀먼트 — 앱이 "무엇을 허용하나"를 묻는 단 하나의 길
 
 - **D-P02:** `main/entitlements.mjs`에 순수 함수 `entitlements(license, now)`를 둔다. 반환값은 `{ ads: bool, projectLimit: number, backup: bool, sync: bool, plan: 'free'|'adfree'|'pro', expiresAt }`. 앱의 다른 어디도 라이선스 원문을 직접 해석하지 않는다. 날짜 경계·유예·만료는 전부 이 함수의 단위 테스트로 증명한다(`parse.mjs`·`brief.mjs`와 같은 위치). — **Reversibility:** cheap
+  - **구현(2026-11-10):** `entitlements({ adfree, pro }, now)` + `canAddProject(ent, activeCount)`. 결정한 세부:
+    - 라이선스는 **둘을 따로** 받는다(`adfree: { activatedAt, revoked? }`, `pro: { expiresAt, revoked?, checkedAt? }`) — 광고 제거를 산 뒤 Pro를 구독했다가 끊어도 광고 제거는 남는다.
+    - 무제한은 `projectLimit: null`(Infinity는 JSON에서 null로 바뀌어 IPC 왕복에서 뜻이 흔들린다).
+    - Pro는 `expiresAt` 정각까지 정상, 그 뒤 `PRO_GRACE_DAYS`(14)일 끝 정각까지 유예(`proGraceUntil`로 안내 근거 제공), 1ms 지나면 무료. `revoked: true`면 유예 없이 끝.
+    - 회수는 `revoked === true`일 때만(엄격). 모양이 깨진 입력·읽을 수 없는 날짜는 던지지 않고 무료.
+    - `canAddProject`는 개수를 모르면(NaN 등) 막지 않는다.
+  - **아직 연결하지 않았다:** `ipc.mjs`의 `project:create`·`project:restore` 제한과 `today:getState`의 `ent`는 라이선스 모듈(`main/license.mjs`)과 함께 넣는다 — 지금 걸면 결제할 길이 없는 채로 모두에게 3개 제한만 걸린다.
 - **D-P03:** 판정 결과는 `today:getState`에 `ent` 필드로 실어 렌더러에 준다. 렌더러는 그 값으로 그리기만 하고 스스로 판단하지 않는다.
 
 ### 라이선스

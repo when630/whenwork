@@ -51,6 +51,14 @@
   - Pro: `expiresAt + 14일`까지 유효. 그 안에 재검증이 한 번이라도 성공하면 갱신된다. 네트워크 실패는 회수 사유가 아니다 — "서버에 닿지 못함"과 "구독 끝남"을 구분한다.
   - 시계 되돌리기는 막지 않는다(양심 판매 전제, D-P07).
   — **Reversibility:** costly — 토큰 형식과 공개키는 배포된 앱에 박힌다. 키 교체가 필요해질 때를 위해 토큰에 `kid`(키 번호)를 넣고 앱은 공개키 목록을 갖는다.
+  - **구현(2026-11-10, `main/license.mjs`):** Electron 없이 `createLicense({ dir, publicKeys, apiBase, fetchImpl })`.
+    - 토큰 `v1.<kid>.<payload>.<sig>`, payload `{ kind, instance, activatedAt, expiresAt?, revoked?, issuedAt }`. 형식 버전·kid·서명·instance·칸(kind) 중 하나라도 어긋나면 무료.
+    - `userData/license.json`(`{ adfree: {key, token}, pro: {key, token} }`, 임시 파일 → rename), `userData/instance-id`.
+    - 재검증: Pro 하루·광고 제거 일주일(`issuedAt` 기준). **서명된 새 토큰만 상태를 바꾼다** — 네트워크 실패·서명 없는 오류 응답(404 포함)은 그대로 둔다.
+    - 해제는 서버에 닿지 못해도 로컬에서 지운다.
+    - 배포 기본값: `PUBLIC_KEYS = {}`(어떤 토큰도 믿지 않음), `API_BASE = null`(활성화 → "아직 판매를 시작하지 않았습니다"). 서버를 세우는 날 `tools/license-keygen.mjs <리포 밖 경로>`로 키를 만들고 공개키를 넣는다 — 이 도구는 리포 안 경로를 거절한다(공개 리포).
+    - 라이선스 키는 `license.json`에 평문으로 둔다(로컬 파일, 다른 앱들과 같은 수준). Electron `safeStorage`로 감싸는 것은 연결 단계에서 판단.
+  - **아직 연결하지 않았다:** IPC(`license:activate|deactivate|summary`), 재검증 타이머(`jobs.mjs`), 설정 탭 입력칸, 프로젝트 제한 — 서버가 생겨 실제로 활성화할 수 있게 된 뒤 한 번에.
 - **D-P06:** `instance`는 첫 실행 때 만드는 무작위 UUID(`userData/instance-id`)다. 하드웨어 정보·사용자명은 쓰지 않는다.
 - **D-P07:** 클라이언트는 MIT로 공개되므로 로컬 제한(광고·프로젝트 수)은 누구나 빌드해서 풀 수 있다. 이를 막으려 하지 않는다(난독화·무결성 검사 없음). 우회할 수 없는 건 서버 기능(백업·동기화)뿐이고, 그건 서버가 매 요청마다 키를 확인한다. 서버 코드는 비공개 리포(`whenwork-server`)에 둔다.
 

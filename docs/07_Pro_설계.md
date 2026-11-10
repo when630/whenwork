@@ -45,7 +45,8 @@
 
 ### 라이선스
 
-- **D-P04:** 결제·키 발급은 Lemon Squeezy(MoR)를 1순위로 한다. 일회성·구독 모두 라이선스 키를 자체 발급하고 활성화·검증 API가 있어, 1단계에서 별도 계정 체계가 필요 없다. **앱은 Lemon Squeezy를 직접 부르지 않고 내 Worker(`/v1/license/*`)만 부른다** — MoR을 Paddle 등으로 바꿔도 앱 업데이트가 필요 없게. 2026-01 Stripe Managed Payments 전환 공지가 있어 한국 정산 가능 여부를 출시 전 확인한다(미해결 Q1). — **Reversibility:** cheap(Worker 뒤에 숨겼으므로)
+- **D-P04 개정 (2026-11-10 조사):** 1순위를 **Paddle**로 바꾼다. Lemon Squeezy는 지금 한국 은행 정산을 지원하지만, 옮겨 가는 Stripe Managed Payments가 35여 개국만 지원하고 한국이 없다 — 가입해도 전환 때 빠질 수 있다. Paddle은 한국 개인사업자 심사 통과 사례가 여럿 있고, 원화 가격·카카오페이·네이버페이 구독(블로그 기준, 가입 때 확인)을 지원한다. Paddle에는 라이선스 키가 없으므로 **키 발급·보관·전달을 서버가 한다**: 결제 웹훅(transaction.completed, subscription.*) → 키 생성 → D1 저장 → 결제 완료 화면 + 메일로 전달, 환불·해지 웹훅 → 다음 재검증에 `revoked`/만료 반영. 2순위 Creem(공식 문서상 한국 은행 정산, 라이선스 키 기능 있음). 국내 PG(토스페이먼츠·포트원)는 세금·환불을 직접 해야 해 지금은 두지 않는다. 판매가는 부가세 10% 포함이다(MoR이 한국 소비자에게 걷는다). 앱 코드는 바뀌지 않는다 — 아래 원래 결정이 이걸 위해 Worker 뒤에 숨겼다.
+- **D-P04 (원래):** 결제·키 발급은 Lemon Squeezy(MoR)를 1순위로 한다. 일회성·구독 모두 라이선스 키를 자체 발급하고 활성화·검증 API가 있어, 1단계에서 별도 계정 체계가 필요 없다. **앱은 Lemon Squeezy를 직접 부르지 않고 내 Worker(`/v1/license/*`)만 부른다** — MoR을 Paddle 등으로 바꿔도 앱 업데이트가 필요 없게. 2026-01 Stripe Managed Payments 전환 공지가 있어 한국 정산 가능 여부를 출시 전 확인한다(미해결 Q1). — **Reversibility:** cheap(Worker 뒤에 숨겼으므로)
 - **D-P05:** 활성화 흐름: 설정 탭에서 키 입력 → Worker `POST /v1/license/activate {key, instance}` → Worker가 MoR에 활성화(기기당 1 인스턴스, 키당 3대) → `{ plan, expiresAt, checkedAt }`를 **Ed25519로 서명한 토큰**으로 돌려준다 → 앱은 내장 공개키로 검증 후 `userData/license.json`에 저장한다. 오프라인 규칙:
   - 광고 제거: 한 번 활성화되면 영구. 재검증은 주 1회 시도하되 실패해도 회수하지 않는다. 환불(서버가 `revoked`를 명시적으로 돌려줄 때)만 회수한다.
   - Pro: `expiresAt + 14일`까지 유효. 그 안에 재검증이 한 번이라도 성공하면 갱신된다. 네트워크 실패는 회수 사유가 아니다 — "서버에 닿지 못함"과 "구독 끝남"을 구분한다.
@@ -101,6 +102,19 @@
   - macOS 첫 실행 경고 넘기는 법(그림으로)
   - 광고 문의(스폰서 판매, D-P09)
   같은 도메인 아래에 Worker(`/v1/*`, `/go/*`)를 둔다. — **Reversibility:** cheap
+- **D-P18 (2026-11-10):** 도메인은 **시리즈 브랜드 `whendesk.app`**(웬데스크) 하나로 한다. WHENWORK·WHENCOMMAND 등 "책상 위에 상주하는 작은 도구" 시리즈를 한 도메인·한 결제 계정·한 라이선스 서버로 판다. `whenwork.com`은 2006년부터 타인 소유(이전 잠금), 시리즈 후보 중 `.com`은 대부분 등록돼 있어 `.app`(HTTPS 강제)으로 간다. Cloudflare Registrar에서 산다(도메인·Pages·Worker를 한 계정에).
+  ```
+  whendesk.app            시리즈 소개·앱 목록
+  whendesk.app/work       WHENWORK 랜딩 (다운로드·가격·키 입력 안내)
+  whendesk.app/command    WHENCOMMAND
+  whendesk.app/legal/…    이용약관·환불 정책·개인정보처리방침 (시리즈 공통)
+  whendesk.app/go/<id>    광고 클릭 집계 (D-P10)
+  api.whendesk.app        라이선스 서버 (시리즈 공통, D-P04)
+  ```
+  - **시리즈 공통 서버의 결과:** 토큰 payload에 `app`(예: `whenwork`)을 넣고 앱은 자기 이름의 토큰만 믿어야 한다 — 안 그러면 다른 앱의 Pro 키가 WHENWORK를 연다. `main/license.mjs`는 아직 `app`을 보지 않는다 → 서버를 만들 때 함께 넣는다.
+  - 사업자등록 상호를 시리즈 이름(웬데스크)으로 하면 결제사 심사·영수증·약관의 판매자 이름이 하나로 맞는다.
+  - 상표(KIPRIS) "WHENDESK"·"WHENWORK" 검색은 구매 전에 한다.
+  — **Reversibility:** costly — 배포된 앱에 `API_BASE`와 공개키가 박힌다. 바꾸려면 옛 주소를 계속 살려 둬야 한다.
 - **D-P16:** Windows의 기본 배포처는 **Microsoft Store**로 한다. 개인 개발자 등록이 무료이고(2025-09~), 스토어가 패키지에 서명하므로 SmartScreen 경고가 사라진다 — Azure 서명(연 ~17만 원) 없이 Q2가 풀린다. 게임이 아닌 앱은 자체 결제를 쓰고 수수료 0%라 라이선스 구조(D-P04)를 그대로 쓴다. electron-builder `appx` 타깃을 추가한다.
   - 스토어판의 업데이트는 스토어가 한다 — `update.mjs`의 자동 업데이트를 스토어판에서는 끈다(`process.windowsStore`).
   - MSIX 패키지에서 확인할 것: 전역 단축키, `whenwork://` 프로토콜(매니페스트 선언), 로그인 시 시작, `userData` 경로 가상화, 단일 인스턴스 락, `~/.when/apps` 매니페스트 쓰기.
@@ -125,7 +139,7 @@
 
 ```
 앱 ──HTTPS──▶ Cloudflare Worker (whenwork-server, 비공개)
-                ├─ /v1/license/activate|validate  → Lemon Squeezy License API
+                ├─ /v1/license/activate|validate  → D1(키) ← Paddle 웹훅 (D-P04 개정)
                 ├─ /v1/ads.json, /go/<id>          → KV
                 ├─ /v1/backup/*   (2단계)          → R2
                 └─ /v1/sync/*     (3단계)          → Durable Objects
@@ -156,9 +170,9 @@
 
 ## 미해결
 
-- **Q1:** Lemon Squeezy의 한국 판매자 정산 가능 여부(Stripe Managed Payments 전환 이후). 안 되면 Paddle + Worker가 키를 직접 발급하는 구조로 바꾼다(D-P04 덕에 앱은 그대로).
+- **Q1:** ~~Lemon Squeezy 한국 정산~~ → Paddle로 바꿈(D-P04 개정). 남은 확인: Paddle 심사 통과, 카카오페이·네이버페이 지원, 정산 통화(원화 직접 vs 달러 후 환전).
 - **Q2:** ~~Windows 서명~~ → Microsoft Store로 대체(D-P16). 남은 질문: MSIX에서 D-P16의 확인 목록이 모두 통과하는가. 하나라도 막히면 그때 Azure 서명(연 ~17만 원)으로 돌아간다.
-- **Q5:** 도메인 이름.
+- **Q5:** ~~도메인 이름~~ → `whendesk.app`(D-P18).
 - **Q3:** 구독이 끝난 Pro 사용자의 클라우드 백업 보관 기간(예: 90일 후 삭제).
 - **Q4:** 무료 사용자가 광고를 닫으면 그날 하루 숨길지, 항상 다시 보일지.
 

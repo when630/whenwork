@@ -56,8 +56,8 @@ function store(overrides = {}) {
   return (route, { key, instance }) => {
     if (overrides[route]) return overrides[route]({ key, instance });
     if (route === 'deactivate') return { status: 200, json: { ok: true } };
-    if (key === 'ADFREE-KEY-0001')
-      return { status: 200, json: { token: sign({ kind: 'adfree', instance, activatedAt: iso(NOW), issuedAt: iso(NOW) }) } };
+    if (key === 'LITE00-KEY-0001')
+      return { status: 200, json: { token: sign({ kind: 'lite', instance, activatedAt: iso(NOW), issuedAt: iso(NOW) }) } };
     if (key === 'PRO-KEY-00000001')
       return {
         status: 200,
@@ -120,22 +120,22 @@ test('instance id는 한 번 만들면 그대로다 — 무작위 UUID', () => {
   assert.notEqual(make(tmpDir(), store()).instanceId(), a);
 });
 
-test('광고 제거 키를 활성화하면 광고가 꺼지고, 다시 열어도 유지된다', async () => {
+test('Lite 키를 활성화하면 광고가 꺼지고, 다시 열어도 유지된다', async () => {
   const dir = tmpDir();
   const lic = make(dir, store());
-  const r = await lic.activate('  ADFREE-KEY-0001 \n');
-  assert.deepEqual(r, { ok: true, kind: 'adfree' });
+  const r = await lic.activate('  LITE00-KEY-0001 \n');
+  assert.deepEqual(r, { ok: true, kind: 'lite' });
   assert.equal(entitlements(make(dir, store()).state(), NOW).ads, false);
-  assert.deepEqual(make(dir, store()).summary(), { adfree: { key: 'ADFR••••0001', valid: true }, pro: null });
+  assert.deepEqual(make(dir, store()).summary(), { lite: { key: 'LITE••••0001', valid: true }, pro: null });
 });
 
-test('광고 제거와 Pro는 각자 칸에 들어간다 — 둘 다 가질 수 있다', async () => {
+test('Lite와 Pro는 각자 칸에 들어간다 — 둘 다 가질 수 있다', async () => {
   const dir = tmpDir();
   const lic = make(dir, store());
-  await lic.activate('ADFREE-KEY-0001');
+  await lic.activate('LITE00-KEY-0001');
   await lic.activate('PRO-KEY-00000001');
   const st = lic.state();
-  assert.equal(st.adfree.kind, 'adfree');
+  assert.equal(st.lite.kind, 'lite');
   assert.equal(st.pro.kind, 'pro');
   assert.equal(entitlements(st, NOW).plan, 'pro');
 });
@@ -168,9 +168,9 @@ test('서버가 서명 없이 준 토큰·다른 기기 토큰으로는 활성�
 
 test('환불된 키는 활성화되지 않는다 — 서버가 revoked 토큰을 줄 때', async () => {
   const lic = make(tmpDir(), store({
-    activate: ({ instance }) => ({ status: 200, json: { token: sign({ kind: 'adfree', instance, activatedAt: iso(NOW), revoked: true }) } }),
+    activate: ({ instance }) => ({ status: 200, json: { token: sign({ kind: 'lite', instance, activatedAt: iso(NOW), revoked: true }) } }),
   }));
-  const r = await lic.activate('ADFREE-KEY-0001');
+  const r = await lic.activate('LITE00-KEY-0001');
   assert.equal(r.ok, false);
   assert.match(r.error, /환불/);
   assert.ok(!fs.existsSync(lic.file));
@@ -181,16 +181,16 @@ test('license.json을 다른 PC로 복사하면 그 PC에서는 무료다', asyn
   await make(a, store()).activate('PRO-KEY-00000001');
   const b = tmpDir();
   fs.copyFileSync(path.join(a, 'license.json'), path.join(b, 'license.json')); // instance-id는 복사하지 않는다
-  assert.deepEqual(make(b, store()).state(), { adfree: null, pro: null });
+  assert.deepEqual(make(b, store()).state(), { lite: null, pro: null });
   assert.deepEqual(make(b, store()).summary().pro, { key: 'PRO-••••0001', valid: false });
 });
 
-test('칸과 내용이 어긋난 토큰은 믿지 않는다 — pro 칸에 adfree 토큰', async () => {
+test('칸과 내용이 어긋난 토큰은 믿지 않는다 — pro 칸에 lite 토큰', async () => {
   const dir = tmpDir();
   const lic = make(dir, store());
-  await lic.activate('ADFREE-KEY-0001');
+  await lic.activate('LITE00-KEY-0001');
   const data = JSON.parse(fs.readFileSync(lic.file, 'utf8'));
-  fs.writeFileSync(lic.file, JSON.stringify({ pro: data.adfree }));
+  fs.writeFileSync(lic.file, JSON.stringify({ pro: data.lite }));
   assert.equal(lic.state().pro, null);
 });
 
@@ -199,7 +199,7 @@ test('깨진 license.json은 던지지 않고 무료다', () => {
   const lic = make(dir, store());
   for (const junk of ['{', '[]', 'null', '"x"', '{"pro":{"token":5}}']) {
     fs.writeFileSync(lic.file, junk);
-    assert.deepEqual(lic.state(), { adfree: null, pro: null }, junk);
+    assert.deepEqual(lic.state(), { lite: null, pro: null }, junk);
     assert.doesNotThrow(() => lic.summary());
   }
 });
@@ -219,12 +219,12 @@ test('재검증: 네트워크 실패·서명 없는 오류 응답은 지금 토�
 
 test('재검증: 서명된 revoked 토큰이 오면 그때 회수된다 (환불)', async () => {
   const dir = tmpDir();
-  await make(dir, store()).activate('ADFREE-KEY-0001');
+  await make(dir, store()).activate('LITE00-KEY-0001');
   const lic = make(dir, store({
-    validate: ({ instance }) => ({ status: 200, json: { token: sign({ kind: 'adfree', instance, activatedAt: iso(NOW), revoked: true, issuedAt: iso(NOW + 8 * 86400_000) }) } }),
+    validate: ({ instance }) => ({ status: 200, json: { token: sign({ kind: 'lite', instance, activatedAt: iso(NOW), revoked: true, issuedAt: iso(NOW + 8 * 86400_000) }) } }),
   }));
   const r = await lic.revalidate(NOW + 8 * 86400_000);
-  assert.deepEqual(r.changed, ['adfree']);
+  assert.deepEqual(r.changed, ['lite']);
   assert.equal(entitlements(lic.state(), NOW + 8 * 86400_000).ads, true);
 });
 
@@ -239,13 +239,13 @@ test('재검증: 갱신된 구독은 새 만료일로 바뀐다', async () => {
   assert.equal(lic.state().pro.expiresAt, renewed);
 });
 
-test('재검증 주기: Pro 하루, 광고 제거 일주일 — 때가 안 됐으면 서버를 부르지 않는다', async () => {
+test('재검증 주기: Pro 하루, Lite 일주일 — 때가 안 됐으면 서버를 부르지 않는다', async () => {
   assert.equal(REVALIDATE_MS.pro, 86400_000);
-  assert.equal(REVALIDATE_MS.adfree, 7 * 86400_000);
+  assert.equal(REVALIDATE_MS.lite, 7 * 86400_000);
   const p = { kind: 'pro', issuedAt: iso(NOW) };
   assert.equal(dueForRevalidation(p, NOW + 86400_000 - 1), false);
   assert.equal(dueForRevalidation(p, NOW + 86400_000), true);
-  assert.equal(dueForRevalidation({ kind: 'adfree', issuedAt: iso(NOW) }, NOW + 6 * 86400_000), false);
+  assert.equal(dueForRevalidation({ kind: 'lite', issuedAt: iso(NOW) }, NOW + 6 * 86400_000), false);
   assert.equal(dueForRevalidation({ kind: 'pro' }, NOW), true, 'issuedAt이 없으면 확인한다');
   assert.equal(dueForRevalidation(null, NOW), false);
 

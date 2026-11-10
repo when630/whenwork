@@ -20,23 +20,26 @@ test('아무 라이선스도 없으면 무료 — 광고, 프로젝트 3개, 백
   assert.equal(entitlements().plan, 'free');
 });
 
-test('광고 제거는 광고만 끈다 — 프로젝트 제한은 그대로', () => {
-  const e = entitlements({ adfree: { activatedAt: days(-400) } }, NOW);
-  assert.equal(e.plan, 'adfree');
+test('Lite는 로컬 제한을 푼다 — 광고 없음, 프로젝트 무제한. 서버 기능(백업·동기화)은 없다', () => {
+  const e = entitlements({ lite: { activatedAt: days(-400) } }, NOW);
+  assert.equal(e.plan, 'lite');
   assert.equal(e.ads, false);
-  assert.equal(e.projectLimit, 3);
+  assert.equal(e.projectLimit, null);
   assert.equal(e.backup, false);
+  assert.equal(e.sync, false);
 });
 
-test('광고 제거는 영구다 — 몇 년이 지나도, 재검증 날짜가 없어도', () => {
-  const e = entitlements({ adfree: { activatedAt: days(-3650) } }, NOW);
+test('Lite는 영구다 — 몇 년이 지나도, 재검증 날짜가 없어도', () => {
+  const e = entitlements({ lite: { activatedAt: days(-3650) } }, NOW);
   assert.equal(e.ads, false);
 });
 
-test('광고 제거는 서버가 명시적으로 회수했을 때만 사라진다 (환불)', () => {
-  assert.equal(entitlements({ adfree: { activatedAt: days(-1), revoked: true } }, NOW).ads, true);
+test('Lite는 서버가 명시적으로 회수했을 때만 사라진다 (환불)', () => {
+  const revoked = entitlements({ lite: { activatedAt: days(-1), revoked: true } }, NOW);
+  assert.equal(revoked.ads, true);
+  assert.equal(revoked.projectLimit, 3, '환불하면 프로젝트 제한도 돌아온다');
   // revoked가 true가 아닌 다른 값(문자열 등)이면 회수로 보지 않는다 — 회수는 엄격하게
-  assert.equal(entitlements({ adfree: { activatedAt: days(-1), revoked: 'yes' } }, NOW).ads, false);
+  assert.equal(entitlements({ lite: { activatedAt: days(-1), revoked: 'yes' } }, NOW).ads, false);
 });
 
 test('Pro는 전부 연다 — 광고 없음, 프로젝트 무제한(null), 백업·동기화', () => {
@@ -70,11 +73,13 @@ test('유예 마지막 순간까지는 Pro, 1ms 지나면 무료', () => {
   assert.equal(e.proExpiresAt, null);
 });
 
-test('Pro가 끝나도 따로 산 광고 제거는 남는다', () => {
-  const e = entitlements({ adfree: { activatedAt: days(-500) }, pro: { expiresAt: days(-100) } }, NOW);
-  assert.equal(e.plan, 'adfree');
+test('Pro가 끝나도 따로 산 Lite는 남는다 — 백업·동기화만 멈춘다', () => {
+  const e = entitlements({ lite: { activatedAt: days(-500) }, pro: { expiresAt: days(-100) } }, NOW);
+  assert.equal(e.plan, 'lite');
   assert.equal(e.ads, false);
-  assert.equal(e.projectLimit, 3);
+  assert.equal(e.projectLimit, null);
+  assert.equal(e.backup, false);
+  assert.equal(e.sync, false);
 });
 
 test('회수된 Pro는 유예 없이 바로 끝난다', () => {
@@ -84,10 +89,10 @@ test('회수된 Pro는 유예 없이 바로 끝난다', () => {
 
 test('깨진 라이선스는 던지지 않고 무료로 본다 — 라이선스가 캡처를 막으면 안 된다', () => {
   const broken = [
-    { adfree: 'x' },
-    { adfree: [] },
-    { adfree: { activatedAt: '날짜아님' } },
-    { adfree: {} },
+    { lite: 'x' },
+    { lite: [] },
+    { lite: { activatedAt: '날짜아님' } },
+    { lite: {} },
     { pro: { expiresAt: 'not-a-date' } },
     { pro: { expiresAt: null } },
     { pro: 42 },
@@ -109,13 +114,14 @@ test('now는 Date·밀리초·ISO 모두 받고, 읽을 수 없으면 지금 시
 });
 
 test('결과는 JSON으로 왕복해도 같다 — IPC로 렌더러에 그대로 넘긴다', () => {
-  for (const lic of [{}, { adfree: { activatedAt: days(-1) } }, { pro: { expiresAt: days(-2) } }]) {
+  for (const lic of [{}, { lite: { activatedAt: days(-1) } }, { pro: { expiresAt: days(-2) } }]) {
     const e = entitlements(lic, NOW);
     assert.deepEqual(JSON.parse(JSON.stringify(e)), e);
   }
 });
 
-test('프로젝트 추가: 무료는 활성 3개 미만일 때만, Pro는 언제나', () => {
+test('프로젝트 추가: 무료는 활성 3개 미만일 때만, Lite·Pro는 언제나', () => {
+  assert.equal(canAddProject(entitlements({ lite: { activatedAt: days(-1) } }, NOW), 500), true);
   const free = entitlements({}, NOW);
   assert.equal(canAddProject(free, 0), true);
   assert.equal(canAddProject(free, 2), true);

@@ -1,6 +1,6 @@
-# 광고·광고 제거·Pro — 설계 (초안)
+# 광고·Lite·Pro — 설계 (초안)
 
-> 무료 앱에 광고 칸을 두고, 광고 제거(일회성)와 Pro(연 구독)를 판다. Pro는 프로젝트 무제한·자동 클라우드 백업·기기 간 동기화. 2026-11-10 초안. 배경 논의: 광고망 현실, 사업자등록(간이과세), MoR 수수료, 서버 비용.
+> 무료 앱에 광고 칸을 두고, Lite(일회성)와 Pro(연 구독)를 판다. Lite는 로컬 제한(광고·프로젝트 수)을 풀고, Pro는 여기에 자동 클라우드 백업·기기 간 동기화를 더한다(D-P19). 2026-11-10 초안. 배경 논의: 광고망 현실, 사업자등록(간이과세), MoR 수수료, 서버 비용.
 
 ## 지키는 것 (모든 결정보다 위)
 
@@ -15,27 +15,28 @@
 | 상품 | 가격(안) | 결제 | 주는 것 |
 |---|---|---|---|
 | 무료 | 0 | — | 전부 + 광고 한 줄 + 프로젝트 3개 |
-| 광고 제거 | 9,900원 | 일회성 | 광고 숨김 (영구) |
-| Pro | 연 19,800원 | 연 구독 | 광고 숨김 + 프로젝트 무제한 + 클라우드 백업 + 동기화 |
+| Lite | 9,900원 | 일회성 | 광고 없음 + 프로젝트 무제한 (영구) |
+| Pro | 연 19,800원 | 연 구독 | Lite 전부 + 클라우드 백업 + 동기화 |
 
-- 건당 고정 수수료 $0.50 때문에 4,900원 이하는 수수료가 19% 이상이다 — 광고 제거는 9,900원 아래로 내리지 않는다.
-- Pro 구독이 끝나면 광고 제거를 따로 산 적이 없는 한 광고가 돌아오고 프로젝트 제한이 다시 걸린다(D-P05의 유예 규칙).
+- **D-P19 (2026-11-10, 요금제 세분화):** "광고 제거" 상품을 **Lite**로 바꾼다 — 광고 제거에 프로젝트 무제한을 더한다. 나누는 기준은 서버 비용이다: 서버가 들지 않는 기능(광고·프로젝트 수, 로컬에서 푸는 제한)은 일회성 Lite, 서버에 데이터를 두는 기능(백업·동기화)은 구독 Pro. Pro 19,800원이 비싸게 느껴지는 사람에게 "제한만 풀고 싶다"는 싼 길을 따로 연다. 판매 전이라 이름을 바꿔도 영향받는 사용자가 없다 — 코드의 `adfree`를 `lite`로 바꿨다. — **Reversibility:** cheap(판매 전)
+- 건당 고정 수수료 $0.50 때문에 4,900원 이하는 수수료가 19% 이상이다 — Lite는 9,900원 아래로 내리지 않는다. Pro도 같은 이유로 월 결제를 두지 않는다.
+- Pro 구독이 끝나면 Lite를 따로 산 적이 없는 한 광고가 돌아오고 프로젝트 제한이 다시 걸린다(D-P05의 유예 규칙). Lite를 샀다면 백업·동기화만 멈춘다. 이미 만든 데이터는 어느 경우에도 지워지지 않는다.
 
 ## 결정
 
 ### 단계
 
 - **D-P01:** 세 단계로 낸다. 앞 단계에서 실제 결제가 나오는지 보고 다음 단계에 시간을 쓴다.
-  - **1단계 — 수익 골격:** 엔타이틀먼트 모듈, 라이선스 서버(Worker), 광고 칸, 광고 제거·Pro 결제, 프로젝트 3개 제한. Pro는 이때 "프로젝트 무제한 + 광고 제거"만으로 판다(백업·동기화는 출시 예정으로 표기).
+  - **1단계 — 수익 골격:** 엔타이틀먼트 모듈, 라이선스 서버(Worker), 광고 칸, Lite·Pro 결제, 프로젝트 3개 제한. 1단계에는 Lite만 팔고 Pro는 "출시 예정"으로 둔다 — 백업·동기화가 없는 Pro는 Lite와 차이가 없다(D-P19).
   - **2단계 — 자동 클라우드 백업.**
   - **3단계 — 기기 간 동기화.** 스키마 이행이 선행돼야 한다(D-P14).
   — **Reversibility:** cheap — 순서는 언제든 바꿀 수 있다. 단, 1단계 없이 2·3단계는 성립하지 않는다.
 
 ### 엔타이틀먼트 — 앱이 "무엇을 허용하나"를 묻는 단 하나의 길
 
-- **D-P02:** `main/entitlements.mjs`에 순수 함수 `entitlements(license, now)`를 둔다. 반환값은 `{ ads: bool, projectLimit: number, backup: bool, sync: bool, plan: 'free'|'adfree'|'pro', expiresAt }`. 앱의 다른 어디도 라이선스 원문을 직접 해석하지 않는다. 날짜 경계·유예·만료는 전부 이 함수의 단위 테스트로 증명한다(`parse.mjs`·`brief.mjs`와 같은 위치). — **Reversibility:** cheap
-  - **구현(2026-11-10):** `entitlements({ adfree, pro }, now)` + `canAddProject(ent, activeCount)`. 결정한 세부:
-    - 라이선스는 **둘을 따로** 받는다(`adfree: { activatedAt, revoked? }`, `pro: { expiresAt, revoked?, checkedAt? }`) — 광고 제거를 산 뒤 Pro를 구독했다가 끊어도 광고 제거는 남는다.
+- **D-P02:** `main/entitlements.mjs`에 순수 함수 `entitlements(license, now)`를 둔다. 반환값은 `{ ads: bool, projectLimit: number, backup: bool, sync: bool, plan: 'free'|'lite'|'pro', expiresAt }`. 앱의 다른 어디도 라이선스 원문을 직접 해석하지 않는다. 날짜 경계·유예·만료는 전부 이 함수의 단위 테스트로 증명한다(`parse.mjs`·`brief.mjs`와 같은 위치). — **Reversibility:** cheap
+  - **구현(2026-11-10):** `entitlements({ lite, pro }, now)` + `canAddProject(ent, activeCount)`. 결정한 세부:
+    - 라이선스는 **둘을 따로** 받는다(`lite: { activatedAt, revoked? }`, `pro: { expiresAt, revoked?, checkedAt? }`) — Lite를 산 뒤 Pro를 구독했다가 끊어도 Lite는 남는다. Lite는 `projectLimit: null`, `backup·sync: false`.
     - 무제한은 `projectLimit: null`(Infinity는 JSON에서 null로 바뀌어 IPC 왕복에서 뜻이 흔들린다).
     - Pro는 `expiresAt` 정각까지 정상, 그 뒤 `PRO_GRACE_DAYS`(14)일 끝 정각까지 유예(`proGraceUntil`로 안내 근거 제공), 1ms 지나면 무료. `revoked: true`면 유예 없이 끝.
     - 회수는 `revoked === true`일 때만(엄격). 모양이 깨진 입력·읽을 수 없는 날짜는 던지지 않고 무료.
@@ -48,14 +49,14 @@
 - **D-P04 개정 (2026-11-10 조사):** 1순위를 **Paddle**로 바꾼다. Lemon Squeezy는 지금 한국 은행 정산을 지원하지만, 옮겨 가는 Stripe Managed Payments가 35여 개국만 지원하고 한국이 없다 — 가입해도 전환 때 빠질 수 있다. Paddle은 한국 개인사업자 심사 통과 사례가 여럿 있고, 원화 가격·카카오페이·네이버페이 구독(블로그 기준, 가입 때 확인)을 지원한다. Paddle에는 라이선스 키가 없으므로 **키 발급·보관·전달을 서버가 한다**: 결제 웹훅(transaction.completed, subscription.*) → 키 생성 → D1 저장 → 결제 완료 화면 + 메일로 전달, 환불·해지 웹훅 → 다음 재검증에 `revoked`/만료 반영. 2순위 Creem(공식 문서상 한국 은행 정산, 라이선스 키 기능 있음). 국내 PG(토스페이먼츠·포트원)는 세금·환불을 직접 해야 해 지금은 두지 않는다. 판매가는 부가세 10% 포함이다(MoR이 한국 소비자에게 걷는다). 앱 코드는 바뀌지 않는다 — 아래 원래 결정이 이걸 위해 Worker 뒤에 숨겼다.
 - **D-P04 (원래):** 결제·키 발급은 Lemon Squeezy(MoR)를 1순위로 한다. 일회성·구독 모두 라이선스 키를 자체 발급하고 활성화·검증 API가 있어, 1단계에서 별도 계정 체계가 필요 없다. **앱은 Lemon Squeezy를 직접 부르지 않고 내 Worker(`/v1/license/*`)만 부른다** — MoR을 Paddle 등으로 바꿔도 앱 업데이트가 필요 없게. 2026-01 Stripe Managed Payments 전환 공지가 있어 한국 정산 가능 여부를 출시 전 확인한다(미해결 Q1). — **Reversibility:** cheap(Worker 뒤에 숨겼으므로)
 - **D-P05:** 활성화 흐름: 설정 탭에서 키 입력 → Worker `POST /v1/license/activate {key, instance}` → Worker가 MoR에 활성화(기기당 1 인스턴스, 키당 3대) → `{ plan, expiresAt, checkedAt }`를 **Ed25519로 서명한 토큰**으로 돌려준다 → 앱은 내장 공개키로 검증 후 `userData/license.json`에 저장한다. 오프라인 규칙:
-  - 광고 제거: 한 번 활성화되면 영구. 재검증은 주 1회 시도하되 실패해도 회수하지 않는다. 환불(서버가 `revoked`를 명시적으로 돌려줄 때)만 회수한다.
+  - Lite: 한 번 활성화되면 영구. 재검증은 주 1회 시도하되 실패해도 회수하지 않는다. 환불(서버가 `revoked`를 명시적으로 돌려줄 때)만 회수한다.
   - Pro: `expiresAt + 14일`까지 유효. 그 안에 재검증이 한 번이라도 성공하면 갱신된다. 네트워크 실패는 회수 사유가 아니다 — "서버에 닿지 못함"과 "구독 끝남"을 구분한다.
   - 시계 되돌리기는 막지 않는다(양심 판매 전제, D-P07).
   — **Reversibility:** costly — 토큰 형식과 공개키는 배포된 앱에 박힌다. 키 교체가 필요해질 때를 위해 토큰에 `kid`(키 번호)를 넣고 앱은 공개키 목록을 갖는다.
   - **구현(2026-11-10, `main/license.mjs`):** Electron 없이 `createLicense({ dir, publicKeys, apiBase, fetchImpl })`.
     - 토큰 `v1.<kid>.<payload>.<sig>`, payload `{ kind, instance, activatedAt, expiresAt?, revoked?, issuedAt }`. 형식 버전·kid·서명·instance·칸(kind) 중 하나라도 어긋나면 무료.
-    - `userData/license.json`(`{ adfree: {key, token}, pro: {key, token} }`, 임시 파일 → rename), `userData/instance-id`.
-    - 재검증: Pro 하루·광고 제거 일주일(`issuedAt` 기준). **서명된 새 토큰만 상태를 바꾼다** — 네트워크 실패·서명 없는 오류 응답(404 포함)은 그대로 둔다.
+    - `userData/license.json`(`{ lite: {key, token}, pro: {key, token} }`, 임시 파일 → rename), `userData/instance-id`.
+    - 재검증: Pro 하루·Lite 일주일(`issuedAt` 기준). **서명된 새 토큰만 상태를 바꾼다** — 네트워크 실패·서명 없는 오류 응답(404 포함)은 그대로 둔다.
     - 해제는 서버에 닿지 못해도 로컬에서 지운다.
     - 배포 기본값: `PUBLIC_KEYS = {}`(어떤 토큰도 믿지 않음), `API_BASE = null`(활성화 → "아직 판매를 시작하지 않았습니다"). 서버를 세우는 날 `tools/license-keygen.mjs <리포 밖 경로>`로 키를 만들고 공개키를 넣는다 — 이 도구는 리포 안 경로를 거절한다(공개 리포).
     - 라이선스 키는 `license.json`에 평문으로 둔다(로컬 파일, 다른 앱들과 같은 수준). Electron `safeStorage`로 감싸는 것은 연결 단계에서 판단.
@@ -65,7 +66,7 @@
 
 ### 광고
 
-- **D-P08:** 광고 칸은 오늘 뷰 `footer` 위 한 줄(텍스트 + 작은 라벨 "광고"). 캡처 창·알림·트레이 메뉴에는 넣지 않는다. 닫기 버튼이 곧 "광고 제거" 안내다.
+- **D-P08:** 광고 칸은 오늘 뷰 `footer` 위 한 줄(텍스트 + 작은 라벨 "광고"). 캡처 창·알림·트레이 메뉴에는 넣지 않는다. 닫기 버튼이 곧 Lite 안내다.
 - **D-P09:** 광고 소스는 외부 광고망이 아니다 — 데스크톱용 광고망(Overwolf·Playwire)은 게임·대형 트래픽 위주이고, AdSense·애드핏은 웹·모바일용이라 정책 위반 소지가 있다. 대신 Worker가 내려주는 `ads.json`(직접 판 스폰서, Pro 안내, 형제 앱 WHENCOMMAND 홍보)을 하루 1회 받아 캐시한다. 받기 실패·오프라인이면 앱에 내장된 하우스 광고(Pro 안내)를 보인다. 요청에는 앱 버전·OS만 담는다.
 - **D-P10:** 클릭은 `https://<도메인>/go/<광고id>` 리다이렉트로 집계한다(광고 id별 카운트만, 사용자 식별자 없음). 외부 브라우저로 연다(`shell.openExternal`), 앱 안에서 웹을 띄우지 않는다.
 

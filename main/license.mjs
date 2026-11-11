@@ -16,7 +16,7 @@
 // 토큰 형식: v1.<kid>.<payload base64url JSON>.<signature base64url>
 //   서명 대상은 "v1.<kid>.<payload>" 문자열의 UTF-8 바이트. kid로 공개키를 고른다 — 키를 바꿔야 할
 //   때 새 kid를 앱에 먼저 실어 두고 서버를 옮긴다.
-//   payload: { kind: 'adfree'|'pro', instance, activatedAt, expiresAt?, revoked?, issuedAt }
+//   payload: { kind: 'lite'|'pro', instance, activatedAt, expiresAt?, revoked?, issuedAt }
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -30,11 +30,11 @@ export const PUBLIC_KEYS = {};
 export const API_BASE = null;
 
 const TIMEOUT_MS = 5000;
-const KINDS = ['adfree', 'pro'];
+const KINDS = ['lite', 'pro'];
 const DAY_MS = 86400_000;
 
-// 재검증 주기. Pro는 만료·해지를 알아야 하므로 하루, 광고 제거는 환불만 보면 되므로 일주일.
-export const REVALIDATE_MS = { pro: DAY_MS, adfree: 7 * DAY_MS };
+// 재검증 주기. Pro는 만료·해지를 알아야 하므로 하루, Lite는 환불만 보면 되므로 일주일.
+export const REVALIDATE_MS = { pro: DAY_MS, lite: 7 * DAY_MS };
 
 // 서버가 돌려주는 오류 코드 → 사람 말. 모르는 코드는 일반 문구로 — 내부 문자열을 그대로 보이지 않는다.
 const ERRORS = {
@@ -114,7 +114,7 @@ export function createLicense({
     return instance;
   }
 
-  // license.json: { adfree: { key, token }, pro: { key, token } }
+  // license.json: { lite: { key, token }, pro: { key, token } }
   function readFile() {
     try {
       const data = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -140,10 +140,10 @@ export function createLicense({
   // 검증을 통과한 내용만. entitlements()에 그대로 넘긴다.
   function state() {
     const data = readFile();
-    const out = { adfree: null, pro: null };
+    const out = { lite: null, pro: null };
     for (const kind of KINDS) {
       const p = verifyToken(data[kind]?.token, { publicKeys, instance: instanceId() });
-      // 칸과 내용이 어긋난 토큰(pro 칸의 adfree 토큰)은 믿지 않는다
+      // 칸과 내용이 어긋난 토큰(pro 칸의 lite 토큰)은 믿지 않는다
       if (p && p.kind === kind) out[kind] = p;
     }
     return out;

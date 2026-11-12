@@ -334,3 +334,15 @@ test('앱 안 구매: 결제 확인 전이면 pending — 다른 기기의 토�
     assert.equal(lic.state().lite, null);
   }
 });
+
+test('활성화하면 서버가 정리해 준 키로 저장한다 — 붙여 넣은 소문자·공백이 화면에 남지 않게', async () => {
+  const dir = tmpDir();
+  const f = fakeFetch((route, body) => ({ status: 200, json: { key: 'ABCDE-FGHJK-MNPQR-STVWX-YZ012', token: sign({ kind: 'lite', instance: body.instance, activatedAt: iso(NOW), issuedAt: iso(NOW) }) } }));
+  const lic = createLicense({ dir, publicKeys: KEYS, apiBase: 'https://lic.test', fetchImpl: f });
+  await lic.activate('  abcde fghjk mnpqr stvwx yz012 ');
+  assert.equal(lic.summary().lite.key, 'ABCD••••Z012');
+  // 옛 서버(key를 안 주는)와도 그대로 된다
+  const old = createLicense({ dir: tmpDir(), publicKeys: KEYS, apiBase: 'https://lic.test', fetchImpl: fakeFetch(store()) });
+  assert.equal((await old.activate('LITE00-KEY-0001')).ok, true);
+  assert.equal(old.summary().lite.key, 'LITE••••0001');
+});

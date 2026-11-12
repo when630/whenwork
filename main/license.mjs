@@ -200,7 +200,9 @@ export function createLicense({
     if (!p) return { ok: false, error: MSG_BAD_RESPONSE };
     if (p.revoked === true) return { ok: false, error: ERRORS.refunded };
     const data = readFile();
-    data[p.kind] = { key, token: r.json.token };
+    // 서버가 정리해 준 키(대문자·하이픈)가 있으면 그걸 — 붙여 넣은 모양 그대로 두면 화면에 소문자·공백으로 보인다
+    const saved = typeof r.json.key === 'string' && r.json.key ? r.json.key : key;
+    data[p.kind] = { key: saved, token: r.json.token };
     if (!writeFile(data)) return { ok: false, error: '라이선스를 저장하지 못했습니다' };
     return { ok: true, kind: p.kind };
   }

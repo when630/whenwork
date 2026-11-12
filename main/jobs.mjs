@@ -107,12 +107,21 @@ export function scheduleJobs(ctx) {
     }
   }
 
+  // 광고 목록 받기 — 실제로 서버에 묻는 주기는 ads.mjs가 정한다(하루 한 번 꼴). 실패는 조용히.
+  async function refreshAds() {
+    try {
+      const { changed } = await ctx.ads.refresh();
+      if (changed) refreshToday();
+    } catch {}
+  }
+
   // IPC 핸들러(main/ipc.mjs)가 불러야 하는 것 — ctx.jobs에 붙여 둔다.
   ctx.jobs = {
     replayQueueOnce,
     maybeBrief,
     purgeOnce,
     revalidateLicense,
+    refreshAds,
     watchPurchase,
     purchaseWatching: () => !!watch,
   };
@@ -126,6 +135,8 @@ export function scheduleJobs(ctx) {
     setTimeout(maybeBrief, COLLECT_DELAY_MS); // 켠 직후 한 번 (저장소가 붙을 시간을 준다)
     setInterval(maybeBrief, BRIEFING_CHECK_MS);
     setTimeout(revalidateLicense, COLLECT_DELAY_MS);
+    setTimeout(refreshAds, COLLECT_DELAY_MS);
+    setInterval(refreshAds, LICENSE_CHECK_MS);
     setInterval(revalidateLicense, LICENSE_CHECK_MS);
   }
 }

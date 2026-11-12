@@ -136,7 +136,16 @@ export function registerIpc(ctx) {
     const openTab = ctx.openTab ?? null;
     ctx.openTab = null;
     // 결제 상태가 허용하는 것(D-P03) — 렌더러는 이 값으로 그리기만 하고 스스로 판단하지 않는다
-    const base = { pending: ctx.pending, notice, hotkeyLabel, inboxHotkeyLabel, openTab, ent: ctx.plan() };
+    const ent = ctx.plan();
+    // 광고는 결제 상태가 허용할 때만 싣는다(무료). 커피 사주기는 요금제와 상관없이 — 서버가 주소를 둔 앱만
+    let ad = null;
+    let support = null;
+    try {
+      const t = ctx.ads.today();
+      ad = ent.ads ? t.ad : null;
+      support = t.support;
+    } catch {}
+    const base = { pending: ctx.pending, notice, hotkeyLabel, inboxHotkeyLabel, openTab, ent, ad, support };
     const st = ctx.store.status();
     if (!st.ok) return { ...base, online: false, notice: st.notice };
     // WR-03: st.ok가 true인 뒤에도 getViewState() 실행 중 SQLite 오류(디스크 I/O 등)가 날 수
@@ -363,6 +372,13 @@ export function registerIpc(ctx) {
   };
 
   ipcMain.handle('license:get', () => ({
+    support: (() => {
+      try {
+        return ctx.ads.today().support;
+      } catch {
+        return null;
+      }
+    })(),
     selling: SALES_OPEN,
     plan: ctx.plan(),
     summary: ctx.license.summary(),
@@ -408,6 +424,27 @@ export function registerIpc(ctx) {
   });
 
   ipcMain.on('shop:open', () => shell.openExternal(SHOP_URL));
+
+  // 광고를 눌렀다. 하우스 광고(Lite 안내)는 앱 안 구매로, 나머지는 서버의 /go/<id>로 — 앱은 광고 주소를 모른다
+  ipcMain.handle('ad:open', async (_e, id) => {
+    const url = ctx.ads.clickUrl(id);
+    if (url) {
+      await shell.openExternal(url);
+      return { ok: true };
+    }
+    if (!SALES_OPEN) return { ok: false, error: '아직 판매를 시작하지 않았습니다' };
+    await shell.openExternal(buyUrl('lite', ctx.license.instanceId()));
+    ctx.jobs?.watchPurchase?.();
+    return { ok: true, buying: true };
+  });
+
+  // 개발자에게 커피 사주기(D-P22) — 서버가 정한 주소로(/go/support)
+  ipcMain.handle('support:open', async () => {
+    const url = ctx.ads.supportUrl();
+    if (!url) return { ok: false };
+    await shell.openExternal(url);
+    return { ok: true };
+  });
 
   ipcMain.on('win:hide', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);

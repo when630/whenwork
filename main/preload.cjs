@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld('whenwork', {
   licenseRestoreStart: (email) => ipcRenderer.invoke('license:restoreStart', email),
   licenseRestoreVerify: (email, code) => ipcRenderer.invoke('license:restoreVerify', email, code),
   shopOpen: () => ipcRenderer.send('shop:open'),
+  adOpen: (id) => ipcRenderer.invoke('ad:open', id),
+  supportOpen: () => ipcRenderer.invoke('support:open'),
 
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),

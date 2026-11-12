@@ -334,3 +334,34 @@ test('앱 안 구매: 결제 확인 전이면 pending — 다른 기기의 토�
     assert.equal(lic.state().lite, null);
   }
 });
+
+test('구매 복원: 이메일 → 코드 → 이 기기에 저장. 사용자는 키를 보지 않는다(D-P21)', async () => {
+  const dir = tmpDir();
+  const f = fakeFetch((route, body) => {
+    if (route === 'restore-start') return { status: 200, json: { ok: true } };
+    if (route === 'restore-verify') {
+      if (body.code !== '123456') return { status: 400, json: { error: 'code_invalid' } };
+      return { status: 200, json: { licenses: [{ kind: 'lite', key: 'AAAAA-BBBBB-CCCCC-DDDDD-EEEEE', token: sign({ kind: 'lite', instance: body.instance, activatedAt: iso(NOW), issuedAt: iso(NOW) }) }] } };
+    }
+    return { status: 404, json: { error: 'not_found' } };
+  });
+  const lic = createLicense({ dir, publicKeys: KEYS, apiBase: 'https://lic.test', fetchImpl: f });
+  assert.deepEqual(await lic.restoreStart(' buyer@example.com '), { ok: true });
+  assert.deepEqual(f.calls[0].body, { email: 'buyer@example.com', instance: lic.instanceId(), app: 'whenwork' });
+  const wrong = await lic.restoreVerify('buyer@example.com', '000000');
+  assert.equal(wrong.ok, false);
+  assert.match(wrong.error, /코드가 맞지 않습니다/);
+  assert.deepEqual(await lic.restoreVerify('buyer@example.com', '123 456'), { ok: true, kinds: ['lite'] });
+  assert.equal(f.calls.at(-1).body.code, '123456', '공백 섞인 코드도 숫자만 보낸다');
+  assert.equal(entitlements(lic.state(), NOW).plan, 'lite');
+});
+
+test('구매 복원: 이메일·코드 형식이 틀리면 서버에 묻지 않는다 · 서버 오류는 사람 말로', async () => {
+  const f = fakeFetch(() => ({ status: 503, json: { error: 'mail_unavailable' } }));
+  const lic = createLicense({ dir: tmpDir(), publicKeys: KEYS, apiBase: 'https://lic.test', fetchImpl: f });
+  assert.equal((await lic.restoreStart('not-an-email')).ok, false);
+  assert.equal((await lic.restoreVerify('a@b.co', '12')).ok, false);
+  assert.equal(f.calls.length, 0);
+  const r = await lic.restoreStart('a@b.co');
+  assert.match(r.error, /메일을 보낼 수 없습니다/);
+});

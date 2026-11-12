@@ -409,7 +409,7 @@ const KEYMAP = [
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 프로젝트 보기']]],
   ['지운 프로젝트', [['↑↓', '고르기'], ['Enter', '되살리기'], ['Esc', '뒤로']]],
-  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json'], ['L', '라이선스 키 입력']]],
+  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json'], ['L', '구매 복원(이메일)'], ['K', '라이선스 키 직접 입력(지원용)']]],
   ['퀵캡처', [['{hotkey}', '열기·닫기'], ['Enter', '저장'], ['Tab', '오늘 뷰']]],
   ['인박스 단축키', [['{inboxHotkey}', '어디서든 인박스 열기·닫기']]],
 ];
@@ -715,11 +715,13 @@ function renderLicense() {
     if (lic.watching) sec.append(el('div', 'ctx', '결제를 마치면 키를 입력하지 않아도 자동으로 적용됩니다'));
     act('결제를 마쳤는데 그대로예요 (C)', runClaim);
   }
-  act('키 입력 (L) — 다른 PC에서 산 키, 메일로 받은 키', runKeyEntry);
+  // 사용자는 키를 보지 않는다(D-P21) — 다른 PC·재설치는 결제한 이메일로 복원한다.
+  // 키 직접 입력은 지원용으로 K에만 남긴다(전체 키 ? 에만 적는다).
+  act('구매 복원 (L) — 다른 PC·재설치에서, 결제한 이메일로', runRestore);
   for (const [kind, name] of [['lite', 'Lite'], ['pro', 'Pro']]) {
     const s = lic.summary?.[kind];
     if (!s) continue;
-    act(`${name} 키 ${s.key}${s.valid ? '' : ' (확인되지 않음)'} — 이 PC에서 해제`, () => runDeactivate(kind, name));
+    act(`${name}${s.valid ? '' : ' (확인되지 않음)'} — 이 PC에서 해제 (다른 PC로 옮길 때)`, () => runDeactivate(kind, name));
   }
   return sec;
 }
@@ -737,6 +739,23 @@ async function runClaim() {
   if (r.ok) toast('적용됐습니다 — 고맙습니다', { holdMs: 4000 });
   else if (r.pending) toast('아직 결제 확인이 오지 않았습니다 — 잠시 뒤 다시 눌러 주세요. 메일로 받은 키를 입력해도 됩니다', { holdMs: 7000 });
   else toast(r.error ?? '확인하지 못했습니다', { holdMs: 6000 });
+  await loadSettings();
+  return refresh();
+}
+
+async function runRestore() {
+  const email = await promptText('결제할 때 쓴 이메일', '');
+  if (!email) return;
+  toast('확인하는 중…', { spinner: true, holdMs: 0 });
+  const s = await window.whenwork.licenseRestoreStart(email);
+  if (!s.ok) return toast(s.error ?? '코드를 보내지 못했습니다', { holdMs: 7000 });
+  // 그 이메일에 구매가 있는지는 서버가 말하지 않는다 — 있으면 메일이 간다
+  toast('구매 기록이 있으면 이 이메일로 6자리 코드를 보냈습니다', { holdMs: 6000 });
+  const code = await promptText(`${email}로 받은 6자리 코드 (10분 안에)`, '');
+  if (!code) return;
+  toast('코드를 확인하는 중…', { spinner: true, holdMs: 0 });
+  const r = await window.whenwork.licenseRestoreVerify(email, code);
+  toast(r.ok ? '복원했습니다 — 이 PC에 적용됐습니다' : (r.error ?? '복원하지 못했습니다'), { holdMs: r.ok ? 4000 : 7000 });
   await loadSettings();
   return refresh();
 }
@@ -997,7 +1016,7 @@ function renderFooter() {
     add('E', '내보내기');
     add('I', '가져오기');
     add('R', '업데이트');
-    if (cfg?.license?.selling) add('L', '라이선스 키');
+    if (cfg?.license?.selling) add('L', '구매 복원');
   } else if (selectedItem()?.archived) {
     add('Space', '되살리기');
   } else if (tab === 'projects') {
@@ -1506,6 +1525,12 @@ document.addEventListener('keydown', async (e) => {
         return runUpdate();
       case 'l':
       case 'L':
+        e.preventDefault();
+        if (cfg?.license?.selling) return runRestore();
+        return;
+      // 지원용 — 키를 직접 받은 경우(메일 복원이 안 될 때 지원팀이 안내). 화면 목록에는 적지 않는다
+      case 'k':
+      case 'K':
         e.preventDefault();
         if (cfg?.license?.selling) return runKeyEntry();
         return;

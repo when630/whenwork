@@ -46,6 +46,12 @@ const ERRORS = {
   activation_limit: '이 키로 쓸 수 있는 기기 수를 넘었습니다 — 다른 기기에서 해제한 뒤 다시 시도해 주세요',
   refunded: '환불된 구매의 키입니다',
   expired: '구독이 끝난 키입니다 — 구독을 갱신하면 다시 쓸 수 있습니다',
+  // 구매 복원(D-P21)
+  code_invalid: '코드가 맞지 않습니다 — 가장 최근에 받은 메일의 6자리를 입력해 주세요',
+  code_expired: '코드가 만료됐습니다(10분) — 코드를 다시 받아 주세요',
+  too_many: '시도가 너무 많습니다 — 잠시 뒤 다시 해 주세요',
+  mail_unavailable: '지금은 메일을 보낼 수 없습니다 — support@whendesk.app으로 알려 주세요',
+  bad_request: '이메일 주소를 확인해 주세요',
 };
 const MSG_NETWORK = '라이선스 서버에 닿지 못했습니다 — 인터넷 연결을 확인하고 다시 시도해 주세요';
 const MSG_NOT_SELLING = '아직 판매를 시작하지 않았습니다';
@@ -227,14 +233,12 @@ export function createLicense({
     return { changed };
   }
 
-  // 앱 안에서 결제한 직후 — 키를 입력하지 않고 받아 온다. 결제 알림이 서버에서 이 기기에 이미 켜 두었다.
-  // 아직 알림이 안 왔으면 { ok:false, pending:true } — 호출부가 잠시 뒤 다시 묻는다.
-  async function claim() {
-    const r = await call('claim', { instance: instanceId() });
-    if (!r.ok) return { ok: false, pending: r.code === 'pending', error: r.error };
+  // 서버가 이 기기에 켜 준 라이선스 목록({ licenses: [{ kind, key, token }] })을 검증해 저장한다.
+  // claim(앱 안 구매 직후)과 구매 복원이 같은 모양으로 받는다.
+  function storeLicenses(json) {
     const data = readFile();
     const kinds = [];
-    for (const lic of Array.isArray(r.json.licenses) ? r.json.licenses : []) {
+    for (const lic of Array.isArray(json?.licenses) ? json.licenses : []) {
       const p = verifyToken(lic?.token, { publicKeys, instance: instanceId() });
       if (!p || p.kind !== lic.kind || p.revoked === true || typeof lic.key !== 'string') continue;
       data[p.kind] = { key: lic.key, token: lic.token };
@@ -243,6 +247,31 @@ export function createLicense({
     if (!kinds.length) return { ok: false, pending: false, error: MSG_BAD_RESPONSE };
     if (!writeFile(data)) return { ok: false, error: '라이선스를 저장하지 못했습니다' };
     return { ok: true, kinds };
+  }
+
+  // 앱 안에서 결제한 직후 — 키를 입력하지 않고 받아 온다. 결제 알림이 서버에서 이 기기에 이미 켜 두었다.
+  // 아직 알림이 안 왔으면 { ok:false, pending:true } — 호출부가 잠시 뒤 다시 묻는다.
+  async function claim() {
+    const r = await call('claim', { instance: instanceId() });
+    if (!r.ok) return { ok: false, pending: r.code === 'pending', error: r.error };
+    return storeLicenses(r.json);
+  }
+
+  // 구매 복원(D-P21) — 다른 PC·재설치. 결제한 이메일로 6자리 코드를 받고, 맞으면 이 기기에 켠다.
+  // 사용자는 키를 보지 않는다. start는 그 이메일에 구매가 있는지 말하지 않는다(서버가 숨긴다).
+  async function restoreStart(email) {
+    const e = String(email ?? '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return { ok: false, error: ERRORS.bad_request };
+    const r = await call('restore-start', { email: e, instance: instanceId() });
+    return r.ok ? { ok: true } : { ok: false, error: r.error };
+  }
+
+  async function restoreVerify(email, code) {
+    const c = String(code ?? '').replace(/\D/g, '');
+    if (c.length !== 6) return { ok: false, error: '메일로 받은 6자리 숫자를 입력해 주세요' };
+    const r = await call('restore-verify', { email: String(email ?? '').trim(), code: c, instance: instanceId() });
+    if (!r.ok) return { ok: false, error: r.error };
+    return storeLicenses(r.json);
   }
 
   // 이 기기에서 해제한다. 로컬에서는 **항상** 지운다 — 서버에 닿지 못해도 사용자가 "지웠다"고
@@ -259,5 +288,5 @@ export function createLicense({
     return { ok: true, server: r.ok };
   }
 
-  return { instanceId, state, summary, activate, claim, revalidate, deactivate, file };
+  return { instanceId, state, summary, activate, claim, restoreStart, restoreVerify, revalidate, deactivate, file };
 }

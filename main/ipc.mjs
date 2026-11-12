@@ -399,6 +399,14 @@ export function registerIpc(ctx) {
     return r;
   });
 
+  // 구매 복원(D-P21) — 결제한 이메일로 코드를 받고, 맞으면 이 기기에 켠다
+  ipcMain.handle('license:restoreStart', (_e, email) => ctx.license.restoreStart(email));
+  ipcMain.handle('license:restoreVerify', async (_e, email, code) => {
+    const r = await ctx.license.restoreVerify(email, code);
+    if (r.ok) refreshViews();
+    return r;
+  });
+
   ipcMain.on('shop:open', () => shell.openExternal(SHOP_URL));
 
   ipcMain.on('win:hide', (e) => {

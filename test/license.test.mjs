@@ -23,7 +23,9 @@ const K = generate('t1');
 const KEYS = { t1: K.x };
 const priv = crypto.createPrivateKey({ key: K.privateJwk, format: 'jwk' });
 
+// 서버처럼 app을 담는다 — 일부러 빼거나 바꾸려면 payload에 app을 직접 넣는다
 function sign(payload, { kid = 't1', key = priv } = {}) {
+  if (!('app' in payload)) payload = { app: 'whenwork', ...payload };
   const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   const msg = `v1.${kid}.${body}`;
   return `${msg}.${crypto.sign(null, Buffer.from(msg, 'utf8'), key).toString('base64url')}`;
@@ -87,7 +89,7 @@ test('서버 주소가 없으면 활성화는 "아직 판매 전"이라고 말�
 });
 
 test('서명 검증: 맞는 키로 서명한 토큰만, 다른 키·변조·모르는 kid는 거절', () => {
-  const p = { kind: 'pro', instance: 'i1', expiresAt: iso(NOW) };
+  const p = { app: 'whenwork', kind: 'pro', instance: 'i1', expiresAt: iso(NOW) };
   assert.deepEqual(verifyToken(sign(p), { publicKeys: KEYS }), p);
   const other = crypto.generateKeyPairSync('ed25519').privateKey;
   assert.equal(verifyToken(sign(p, { key: other }), { publicKeys: KEYS }), null, '다른 키로 서명');
@@ -110,6 +112,13 @@ test('토큰은 이 기기(instance)에 묶이고, 종류(kind)를 모르는 토
   assert.ok(verifyToken(tok, { publicKeys: KEYS, instance: 'pc-A' }));
   assert.equal(verifyToken(tok, { publicKeys: KEYS, instance: 'pc-B' }), null);
   assert.equal(verifyToken(sign({ kind: 'admin', instance: 'pc-A' }), { publicKeys: KEYS }), null);
+});
+
+test('다른 시리즈 앱의 토큰, 앱 이름이 없는 토큰은 믿지 않는다 (D-P18 — 서버는 시리즈 공통)', () => {
+  const base = { kind: 'pro', instance: 'pc-A', expiresAt: iso(NOW) };
+  assert.ok(verifyToken(sign(base), { publicKeys: KEYS }));
+  assert.equal(verifyToken(sign({ ...base, app: 'whencommand' }), { publicKeys: KEYS }), null);
+  assert.equal(verifyToken(sign({ ...base, app: undefined }), { publicKeys: KEYS }), null);
 });
 
 test('instance id는 한 번 만들면 그대로다 — 무작위 UUID', () => {
@@ -258,7 +267,7 @@ test('재검증 주기: Pro 하루, Lite 일주일 — 때가 안 됐으면 서�
   assert.equal(f.calls.length, 0, '한 시간 만에 다시 묻지 않는다');
   await lic.revalidate(NOW + 3600_000, { force: true });
   assert.equal(f.calls.length, 1, 'force면 바로 묻는다');
-  assert.deepEqual(f.calls[0], { route: 'validate', body: { key: 'PRO-KEY-00000001', instance: lic.instanceId() } });
+  assert.deepEqual(f.calls[0], { route: 'validate', body: { key: 'PRO-KEY-00000001', instance: lic.instanceId(), app: 'whenwork' } });
 });
 
 test('해제는 서버에 닿지 못해도 로컬에서는 지운다', async () => {
@@ -272,11 +281,12 @@ test('해제는 서버에 닿지 못해도 로컬에서는 지운다', async () 
   assert.equal((await lic.deactivate('admin')).ok, false);
 });
 
-test('서버로 보내는 것은 키와 instance뿐이다', async () => {
+test('서버로 보내는 것은 키·instance·앱 이름뿐이다 — 앱 이름은 서버가 다른 앱의 키를 거절하는 근거(D-P18)', async () => {
   const f = fakeFetch(store());
   const lic = createLicense({ dir: tmpDir(), publicKeys: KEYS, apiBase: 'https://lic.test', fetchImpl: f });
   await lic.activate('PRO-KEY-00000001');
-  assert.deepEqual(Object.keys(f.calls[0].body).sort(), ['instance', 'key']);
+  assert.deepEqual(Object.keys(f.calls[0].body).sort(), ['app', 'instance', 'key']);
+  assert.equal(f.calls[0].body.app, 'whenwork');
 });
 
 test('키 표시는 앞뒤 4자만', () => {

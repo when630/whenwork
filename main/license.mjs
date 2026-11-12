@@ -16,7 +16,9 @@
 // 토큰 형식: v1.<kid>.<payload base64url JSON>.<signature base64url>
 //   서명 대상은 "v1.<kid>.<payload>" 문자열의 UTF-8 바이트. kid로 공개키를 고른다 — 키를 바꿔야 할
 //   때 새 kid를 앱에 먼저 실어 두고 서버를 옮긴다.
-//   payload: { kind: 'lite'|'pro', instance, activatedAt, expiresAt?, revoked?, issuedAt }
+//   payload: { app, kind: 'lite'|'pro', instance, activatedAt, expiresAt?, revoked?, issuedAt }
+//   app — 서버는 WHENDESK 시리즈 공통이다(D-P18). 다른 시리즈 앱의 토큰으로 이 앱이 열리면 안 되므로
+//   app이 APP과 같은 토큰만 믿고, 요청에도 이름을 실어 보낸다(서버가 다른 앱의 키를 거절한다).
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -28,6 +30,8 @@ export const PUBLIC_KEYS = {};
 
 // 라이선스 서버 주소. 도메인을 정하기 전(설계 Q5)에는 null — 활성화는 "아직 판매 전"이라고 말한다.
 export const API_BASE = null;
+
+export const APP = 'whenwork';
 
 const TIMEOUT_MS = 5000;
 const KINDS = ['lite', 'pro'];
@@ -50,7 +54,7 @@ const MSG_BAD_RESPONSE = '라이선스 서버의 응답을 확인하지 못했�
 const b64urlDecode = (s) => Buffer.from(String(s), 'base64url');
 
 // 토큰 하나를 검증해 payload를 돌려준다. 어떤 이유로든 믿을 수 없으면 null.
-export function verifyToken(token, { publicKeys = PUBLIC_KEYS, instance = null } = {}) {
+export function verifyToken(token, { publicKeys = PUBLIC_KEYS, instance = null, app = APP } = {}) {
   try {
     const parts = String(token ?? '').split('.');
     if (parts.length !== 4 || parts[0] !== 'v1') return null;
@@ -62,6 +66,8 @@ export function verifyToken(token, { publicKeys = PUBLIC_KEYS, instance = null }
     if (!ok) return null;
     const payload = JSON.parse(b64urlDecode(body).toString('utf8'));
     if (!payload || typeof payload !== 'object' || !KINDS.includes(payload.kind)) return null;
+    // 다른 앱의 토큰, 앱 이름이 없는 토큰은 믿지 않는다
+    if (payload.app !== app) return null;
     // 다른 기기의 토큰은 믿지 않는다
     if (instance != null && payload.instance !== instance) return null;
     return payload;
@@ -167,7 +173,7 @@ export function createLicense({
       res = await fetchImpl(`${apiBase}/v1/license/${route}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, app: APP }),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {

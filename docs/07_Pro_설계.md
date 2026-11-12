@@ -62,7 +62,7 @@
     - 라이선스 키는 `license.json`에 평문으로 둔다(로컬 파일, 다른 앱들과 같은 수준). Electron `safeStorage`로 감싸는 것은 연결 단계에서 판단.
   - **아직 연결하지 않았다:** IPC(`license:activate|deactivate|summary`), 재검증 타이머(`jobs.mjs`), 설정 탭 입력칸, 프로젝트 제한 — 서버가 생겨 실제로 활성화할 수 있게 된 뒤 한 번에.
 - **D-P06:** `instance`는 첫 실행 때 만드는 무작위 UUID(`userData/instance-id`)다. 하드웨어 정보·사용자명은 쓰지 않는다.
-- **D-P07:** 클라이언트는 MIT로 공개되므로 로컬 제한(광고·프로젝트 수)은 누구나 빌드해서 풀 수 있다. 이를 막으려 하지 않는다(난독화·무결성 검사 없음). 우회할 수 없는 건 서버 기능(백업·동기화)뿐이고, 그건 서버가 매 요청마다 키를 확인한다. 서버 코드는 비공개 리포(`whenwork-server`)에 둔다.
+- **D-P07:** 클라이언트는 MIT로 공개되므로 로컬 제한(광고·프로젝트 수)은 누구나 빌드해서 풀 수 있다. 이를 막으려 하지 않는다(난독화·무결성 검사 없음). 우회할 수 없는 건 서버 기능(백업·동기화)뿐이고, 그건 서버가 매 요청마다 키를 확인한다. 서버 코드는 비공개 리포(`when630/whendesk-api`, 시리즈 공통 — D-P18)에 둔다.
 
 ### 광고
 
@@ -112,7 +112,7 @@
   whendesk.app/go/<id>    광고 클릭 집계 (D-P10)
   api.whendesk.app        라이선스 서버 (시리즈 공통, D-P04)
   ```
-  - **시리즈 공통 서버의 결과:** 토큰 payload에 `app`(예: `whenwork`)을 넣고 앱은 자기 이름의 토큰만 믿어야 한다 — 안 그러면 다른 앱의 Pro 키가 WHENWORK를 연다. `main/license.mjs`는 아직 `app`을 보지 않는다 → 서버를 만들 때 함께 넣는다.
+  - **시리즈 공통 서버의 결과:** 토큰 payload에 `app`(예: `whenwork`)을 넣고 앱은 자기 이름의 토큰만 믿어야 한다 — 안 그러면 다른 앱의 Pro 키가 WHENWORK를 연다. **구현(2026-11-12):** 앱은 `app === 'whenwork'`인 토큰만 믿고 요청에 `app`을 싣는다. 서버는 다른 앱의 키를 `invalid_key`로 거절한다.
   - 사업자등록 상호를 시리즈 이름(웬데스크)으로 하면 결제사 심사·영수증·약관의 판매자 이름이 하나로 맞는다.
   - 상표(KIPRIS) "WHENDESK"·"WHENWORK" 검색은 구매 전에 한다.
   — **Reversibility:** costly — 배포된 앱에 `API_BASE`와 공개키가 박힌다. 바꾸려면 옛 주소를 계속 살려 둬야 한다.
@@ -139,12 +139,17 @@
 ## 서버 구성
 
 ```
-앱 ──HTTPS──▶ Cloudflare Worker (whenwork-server, 비공개)
-                ├─ /v1/license/activate|validate  → D1(키) ← Paddle 웹훅 (D-P04 개정)
-                ├─ /v1/ads.json, /go/<id>          → KV
+앱 ──HTTPS──▶ Cloudflare Worker (when630/whendesk-api, 비공개, api.whendesk.app)
+                ├─ /v1/license/activate|validate|deactivate → D1(licenses, activations)
+                ├─ /v1/paddle/webhook   ← Paddle (결제 → 키, 갱신 → 만료 연장, 환불 → 회수)
+                ├─ /v1/checkout/keys    ← 결제 완료 화면 (결제 뒤 2시간)
+                ├─ /v1/ads.json, /go/<id>          → KV (아직)
                 ├─ /v1/backup/*   (2단계)          → R2
                 └─ /v1/sync/*     (3단계)          → Durable Objects
 ```
+
+- **구현(2026-11-12, 첫 판):** 외부 패키지 없는 Worker + D1. 키는 Crockford base32 25자(종류를 담지 않는다), 키당 기기 3대. 알림은 서명(5분 재전송 창)·`event_id`·결제 id로 중복을 막는다. 활성화는 환불·만료 키를 거절하고, 재검증은 서명된 `revoked`·지난 `expiresAt`을 돌려준다. 키 메일(Resend)·구매자 이메일 조회(Paddle API)는 비밀값이 있을 때만. 테스트 28개(`node --test`, D1은 node:sqlite).
+- **세우기 남은 것:** D1 생성, 서명 키(`tools/license-keygen.mjs`) → Worker 비밀값 + 앱 `PUBLIC_KEYS`, Paddle sandbox 상품·가격 → `PRICES`, 알림 목적지, `API_BASE = 'https://api.whendesk.app'`. 순서는 서버 리포 README.
 
 - 1단계는 Workers 무료 플랜(일 10만 요청)으로 충분하다. 동기화를 켜면 유료 플랜(월 $5)으로 올린다.
 - 앱 쪽 네트워크 코드는 `main/cloud.mjs` 한 곳. 타임아웃 5초, 실패는 삼키고 상태만 남긴다(지금 `update.mjs`와 같은 태도).

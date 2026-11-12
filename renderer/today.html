@@ -223,6 +223,17 @@
   .sync .led { width: 7px; height: 7px; border-radius: 99px; background: var(--success); box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent); }
   .sync.off .led { background: var(--warning); box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 60%, transparent); }
   /* 힌트가 늘어 폭을 넘기면 레이아웃이 밀리는 대신 뒤쪽(관습적인 Esc 등)부터 잘린다 */
+  /* 광고 한 줄(D-P08) — 무료 사용자의 오늘 뷰 아래에만. 캡처 창·알림·트레이에는 없다 */
+  .adline {
+    display: flex; align-items: center; gap: 10px; padding: 6px var(--sp-5);
+    border-top: 1px solid var(--border); font-size: var(--fs-xs); color: var(--text-secondary); flex: none;
+  }
+  .adline .lbl { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+  .adline .go { cursor: pointer; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adline .go:hover { color: var(--text-primary); }
+  .adline .go b { color: var(--accent); font-weight: 600; }
+  .adline .x { cursor: pointer; color: var(--text-muted); padding: 0 4px; }
+  .adline .x:hover { color: var(--text-primary); }
   .foot-hints { display: flex; gap: var(--sp-3); flex-wrap: nowrap; overflow: hidden; }
   .foot-hints span { white-space: nowrap; }
 
@@ -329,6 +340,7 @@
     </div>
     <div class="body" id="body" tabindex="-1"></div>
     <div class="numlegend" id="numlegend"></div>
+    <div class="adline" id="adline" hidden></div>
     <footer>
       <span class="sync" id="sync"><span class="led"></span><span id="syncText">동기화됨</span></span>
       <span class="foot-hints" id="hints"></span>

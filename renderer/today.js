@@ -409,7 +409,7 @@ const KEYMAP = [
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 프로젝트 보기']]],
   ['지운 프로젝트', [['↑↓', '고르기'], ['Enter', '되살리기'], ['Esc', '뒤로']]],
-  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json']]],
+  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json'], ['L', '라이선스 키 입력']]],
   ['퀵캡처', [['{hotkey}', '열기·닫기'], ['Enter', '저장'], ['Tab', '오늘 뷰']]],
   ['인박스 단축키', [['{inboxHotkey}', '어디서든 인박스 열기·닫기']]],
 ];
@@ -462,6 +462,43 @@ function renderLegend() {
   });
 }
 
+// ── 광고 한 줄(D-P08·D-P09) — 지금은 하우스 광고(Lite 안내)뿐이다. 외부 광고망·추적 없음.
+// 닫으면 그날은 다시 띄우지 않는다. 닫은 날은 이 PC의 이 창에만 남는다(localStorage).
+const AD_HIDE_KEY = 'adHiddenOn';
+const todayStamp = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+};
+function adHiddenToday() {
+  try {
+    return localStorage.getItem(AD_HIDE_KEY) === todayStamp();
+  } catch {
+    return false;
+  }
+}
+function renderAd() {
+  const line = $('adline');
+  const on = !!state?.ent?.ads && !adHiddenToday();
+  line.hidden = !on;
+  if (!on) return line.replaceChildren();
+  if (line.childElementCount) return;
+  const go = el('span', 'go');
+  go.append(el('b', null, 'WHENWORK Lite'), document.createTextNode(' — 광고 없이, 프로젝트 제한 없이 · 9,900원 한 번'));
+  go.onclick = async () => {
+    const r = await window.whenwork.licenseBuy('lite');
+    toast(r.ok ? '결제 페이지를 열었습니다 — 결제를 마치면 자동으로 적용됩니다' : (r.error ?? '결제 페이지를 열지 못했습니다'), { holdMs: 6000 });
+  };
+  const x = el('span', 'x', '×');
+  x.title = '오늘은 그만 보기';
+  x.onclick = () => {
+    try {
+      localStorage.setItem(AD_HIDE_KEY, todayStamp());
+    } catch {}
+    renderAd();
+  };
+  line.append(el('span', 'lbl', '광고'), go, x);
+}
+
 function openSearch() {
   if (tab === 'settings' || view === 'trash') return; // 설정·지운 프로젝트 화면에는 검색할 목록이 없다
   searchOn = true;
@@ -505,6 +542,7 @@ function render() {
     renderBody();
   }
   renderLegend();
+  renderAd();
   renderFooter();
   body.scrollTop = keep;
   keepSelectionVisible();
@@ -609,6 +647,9 @@ function renderSettings() {
   open.onclick = () => window.whenwork.settingsOpenFile();
   dbSec.append(open);
 
+  // ── 라이선스 (D-P05·D-P19)
+  body.append(renderLicense());
+
   // ── 업데이트
   const upSec = el('div', 'set-foot');
   upSec.append(el('div', 'sec-h', '업데이트'));
@@ -641,6 +682,87 @@ function renderSettings() {
   dataSec.append(exp, imp);
   body.append(dataSec);
   body.append(dbSec);
+}
+
+// 지금 요금제를 한 줄로 — 판매 전 빌드에서는 제한이 없다는 사실을 그대로 말한다
+function planLine(lic) {
+  const p = lic?.plan ?? {};
+  if (!lic?.selling || p.plan === 'open') return '모든 기능을 제한 없이 쓰는 중 — 유료 플랜은 준비 중입니다';
+  if (p.plan === 'pro') {
+    const until = (p.proExpiresAt ?? '').slice(0, 10);
+    if (p.proGraceUntil) return `Pro — 갱신이 확인되지 않았습니다. ${p.proGraceUntil.slice(0, 10)}까지는 그대로 쓸 수 있습니다`;
+    return `Pro — ${until}까지`;
+  }
+  if (p.plan === 'lite') return 'Lite — 광고 없음, 프로젝트 제한 없음';
+  return `무료 — 광고 한 줄, 프로젝트 ${p.projectLimit ?? 3}개까지`;
+}
+
+function renderLicense() {
+  const lic = cfg?.license;
+  const sec = el('div', 'set-foot');
+  sec.append(el('div', 'sec-h', '라이선스'));
+  sec.append(el('div', 'ctx', planLine(lic)));
+  if (!lic?.selling) return sec;
+
+  const act = (label, fn) => {
+    const a = el('div', 'set-act');
+    a.append(window.ICONS.context(), document.createTextNode(` ${label}`));
+    a.onclick = fn;
+    sec.append(a);
+  };
+  if (lic.buyKinds?.includes('lite') && lic.plan?.plan === 'free') {
+    act('Lite 구매 — 9,900원, 한 번 (B)', runBuy);
+    if (lic.watching) sec.append(el('div', 'ctx', '결제를 마치면 키를 입력하지 않아도 자동으로 적용됩니다'));
+    act('결제를 마쳤는데 그대로예요 (C)', runClaim);
+  }
+  act('키 입력 (L) — 다른 PC에서 산 키, 메일로 받은 키', runKeyEntry);
+  for (const [kind, name] of [['lite', 'Lite'], ['pro', 'Pro']]) {
+    const s = lic.summary?.[kind];
+    if (!s) continue;
+    act(`${name} 키 ${s.key}${s.valid ? '' : ' (확인되지 않음)'} — 이 PC에서 해제`, () => runDeactivate(kind, name));
+  }
+  return sec;
+}
+
+async function runBuy() {
+  const r = await window.whenwork.licenseBuy('lite');
+  if (!r.ok) return toast(r.error ?? '결제 페이지를 열지 못했습니다');
+  toast('결제 페이지를 열었습니다 — 결제를 마치면 자동으로 적용됩니다', { holdMs: 6000 });
+  return loadSettings();
+}
+
+async function runClaim() {
+  toast('구매를 확인하는 중…', { spinner: true, holdMs: 0 });
+  const r = await window.whenwork.licenseClaim();
+  if (r.ok) toast('적용됐습니다 — 고맙습니다', { holdMs: 4000 });
+  else if (r.pending) toast('아직 결제 확인이 오지 않았습니다 — 잠시 뒤 다시 눌러 주세요. 메일로 받은 키를 입력해도 됩니다', { holdMs: 7000 });
+  else toast(r.error ?? '확인하지 못했습니다', { holdMs: 6000 });
+  await loadSettings();
+  return refresh();
+}
+
+async function runKeyEntry() {
+  const key = await promptText('라이선스 키 (구매 메일의 키를 붙여 넣으세요)', '');
+  if (!key) return;
+  toast('키를 확인하는 중…', { spinner: true, holdMs: 0 });
+  const r = await window.whenwork.licenseActivate(key);
+  toast(r.ok ? '적용됐습니다' : (r.error ?? '키를 확인하지 못했습니다'), { holdMs: r.ok ? 3000 : 7000 });
+  await loadSettings();
+  return refresh();
+}
+
+async function runDeactivate(kind, name) {
+  const yes = await promptText(`이 PC에서 ${name}를 해제합니다. 다른 PC에서 쓰려면 해제해 두세요. 계속하려면 y`, '');
+  if (yes?.toLowerCase() !== 'y') return;
+  const r = await window.whenwork.licenseDeactivate(kind);
+  toast(r.ok ? (r.server ? '해제했습니다' : '이 PC에서 지웠습니다 — 서버에는 다음에 연결될 때 알립니다') : (r.error ?? '해제하지 못했습니다'), { holdMs: 5000 });
+  await loadSettings();
+  return refresh();
+}
+
+// 프로젝트 개수 제한에 걸렸을 때 — 무엇이 막혔고 어떻게 푸는지 그 자리에서 말한다
+function limitToast(res) {
+  toast(`무료는 프로젝트 ${res.limit ?? 3}개까지입니다 — 설정 → 라이선스에서 Lite로 제한을 풀 수 있습니다`, { holdMs: 7000 });
 }
 
 // 확인과 설치를 한 키(R)에 둔다 — 상태에 따라 할 일이 하나뿐이라 고르게 할 이유가 없다.
@@ -685,6 +807,11 @@ function settingFields() {
 
 async function loadSettings() {
   cfg = await window.whenwork.settingsGet();
+  try {
+    cfg.license = await window.whenwork.licenseGet();
+  } catch {
+    cfg.license = null;
+  }
   render();
 }
 
@@ -870,6 +997,7 @@ function renderFooter() {
     add('E', '내보내기');
     add('I', '가져오기');
     add('R', '업데이트');
+    if (cfg?.license?.selling) add('L', '라이선스 키');
   } else if (selectedItem()?.archived) {
     add('Space', '되살리기');
   } else if (tab === 'projects') {
@@ -1055,6 +1183,10 @@ async function restoreFromTrash() {
   const itemIds = i >= 0 ? undoStack[i].itemIds : [];
   if (i >= 0) undoStack.splice(i, 1);
   const res = await window.whenwork.projectRestore(pick.id, itemIds);
+  if (res?.reason === 'limit') {
+    if (i >= 0) undoStack.push({ kind: 'projectDelete', id: pick.id, title: pick.name, itemIds });
+    return limitToast(res);
+  }
   if (!res.ok) return toast('되돌리기 실패');
   toast(`되돌림 — "${clip(pick.name)}"${itemIds.length ? ` · 할 일 ${itemIds.length}건도 함께` : ''}`);
   await refresh();
@@ -1349,7 +1481,7 @@ document.addEventListener('keydown', async (e) => {
   // 설정 탭
   if (tab === 'settings') {
     const f = settingFields()[sel] ?? null;
-    if (['x', 'o', 'b', 'c'].includes(e.key.toLowerCase())) e.preventDefault();
+    if (['x', 'o', 'b', 'c', 'l'].includes(e.key.toLowerCase())) e.preventDefault();
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
@@ -1372,6 +1504,19 @@ document.addEventListener('keydown', async (e) => {
       case 'R':
         e.preventDefault();
         return runUpdate();
+      case 'l':
+      case 'L':
+        e.preventDefault();
+        if (cfg?.license?.selling) return runKeyEntry();
+        return;
+      case 'b':
+      case 'B':
+        if (cfg?.license?.selling && cfg.license.plan?.plan === 'free') return runBuy();
+        return;
+      case 'c':
+      case 'C':
+        if (cfg?.license?.selling) return runClaim();
+        return;
     }
     return;
   }
@@ -1386,7 +1531,8 @@ document.addEventListener('keydown', async (e) => {
       case 'N': {
         const name = await promptText('새 프로젝트 이름');
         if (name) {
-          await window.whenwork.projectCreate(name);
+          const res = await window.whenwork.projectCreate(name);
+          if (res?.reason === 'limit') limitToast(res);
           await refresh();
         }
         return;
@@ -1525,7 +1671,13 @@ document.addEventListener('keydown', async (e) => {
       const last = undoStack.pop();
       if (!last) return toast('되돌릴 것 없음');
       if (last.kind === 'nudge') await window.whenwork.nudgeUndo(last.id, last.at, last.count);
-      else if (last.kind === 'projectDelete') await window.whenwork.projectRestore(last.id, last.itemIds);
+      else if (last.kind === 'projectDelete') {
+        const res = await window.whenwork.projectRestore(last.id, last.itemIds);
+        if (res?.reason === 'limit') {
+          undoStack.push(last);
+          return limitToast(res);
+        }
+      }
       else await window.whenwork.restore(last.id);
       toast(`되돌림 — "${clip(last.title)}"`);
       return refresh();

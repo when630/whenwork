@@ -303,3 +303,34 @@ test('키 생성 도구는 개인키를 리포 안에 쓰지 않는다', () => {
   assert.equal(insideRepo(path.join(root, '..', 'outside', 'k.json'), root), false);
   assert.equal(insideRepo(path.join(os.tmpdir(), 'k.json'), root), false);
 });
+
+test('앱 안 구매: claim으로 받아 온 토큰을 저장한다 — 키를 입력하지 않아도 Lite', async () => {
+  const dir = tmpDir();
+  let inst = null;
+  const f = fakeFetch((route, body) => {
+    inst = body.instance;
+    if (route !== 'claim') return { status: 404, json: { error: 'not_found' } };
+    return { status: 200, json: { licenses: [{ kind: 'lite', key: 'AAAAA-BBBBB-CCCCC-DDDDD-EEEEE', token: sign({ kind: 'lite', instance: body.instance, activatedAt: iso(NOW), issuedAt: iso(NOW) }) }] } };
+  });
+  const lic = createLicense({ dir, publicKeys: KEYS, apiBase: 'https://lic.test', fetchImpl: f });
+  assert.deepEqual(await lic.claim(), { ok: true, kinds: ['lite'] });
+  assert.equal(f.calls[0].body.instance, lic.instanceId());
+  assert.equal(f.calls[0].body.app, 'whenwork');
+  assert.equal(entitlements(lic.state(), NOW).plan, 'lite');
+  assert.equal(lic.summary().lite.key, 'AAAA••••EEEE', '받아 온 키는 해제·다른 PC용으로 남는다');
+});
+
+test('앱 안 구매: 결제 확인 전이면 pending — 다른 기기의 토큰·환불된 토큰은 저장하지 않는다', async () => {
+  const pending = createLicense({ dir: tmpDir(), publicKeys: KEYS, apiBase: 'https://lic.test', fetchImpl: fakeFetch(() => ({ status: 404, json: { error: 'pending' } })) });
+  const r = await pending.claim();
+  assert.equal(r.ok, false);
+  assert.equal(r.pending, true);
+
+  for (const bad of [{ instance: '00000000-0000-4000-8000-000000000000' }, { revoked: true }]) {
+    const dir = tmpDir();
+    const f = fakeFetch((route, body) => ({ status: 200, json: { licenses: [{ kind: 'lite', key: 'K', token: sign({ kind: 'lite', instance: body.instance, activatedAt: iso(NOW), issuedAt: iso(NOW), ...bad }) }] } }));
+    const lic = createLicense({ dir, publicKeys: KEYS, apiBase: 'https://lic.test', fetchImpl: f });
+    assert.equal((await lic.claim()).ok, false, JSON.stringify(bad));
+    assert.equal(lic.state().lite, null);
+  }
+});

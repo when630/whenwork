@@ -476,17 +476,23 @@ function adHiddenToday() {
     return false;
   }
 }
+// 무엇을 띄울지는 main이 정한다(state.ad) — 서버가 내려준 광고와 하우스 광고(Lite 안내)를 날짜마다 돌린다
 function renderAd() {
   const line = $('adline');
-  const on = !!state?.ent?.ads && !adHiddenToday();
+  const ad = state?.ad;
+  const on = !!state?.ent?.ads && !!ad && !adHiddenToday();
   line.hidden = !on;
   if (!on) return line.replaceChildren();
-  if (line.childElementCount) return;
+  if (line.dataset.id === ad.id && line.childElementCount) return;
+  line.replaceChildren();
+  line.dataset.id = ad.id;
   const go = el('span', 'go');
-  go.append(el('b', null, 'WHENWORK Lite'), document.createTextNode(' — 광고 없이, 프로젝트 제한 없이 · 9,900원 한 번'));
+  if (ad.strong) go.append(el('b', null, ad.strong), document.createTextNode(' — '));
+  go.append(document.createTextNode(ad.text));
   go.onclick = async () => {
-    const r = await window.whenwork.licenseBuy('lite');
-    toast(r.ok ? '결제 페이지를 열었습니다 — 결제를 마치면 자동으로 적용됩니다' : (r.error ?? '결제 페이지를 열지 못했습니다'), { holdMs: 6000 });
+    const r = await window.whenwork.adOpen(ad.id);
+    if (r.buying) toast('결제 페이지를 열었습니다 — 결제를 마치면 자동으로 적용됩니다', { holdMs: 6000 });
+    else if (!r.ok) toast(r.error ?? '열지 못했습니다');
   };
   const x = el('span', 'x', '×');
   x.title = '오늘은 그만 보기';
@@ -649,6 +655,18 @@ function renderSettings() {
 
   // ── 라이선스 (D-P05·D-P19)
   body.append(renderLicense());
+
+  // ── 응원하기(D-P22) — 서버가 커피 사주기 주소를 둔 앱만
+  if (cfg?.license?.support) {
+    const sup = el('div', 'set-foot');
+    sup.append(el('div', 'sec-h', '응원하기'));
+    sup.append(el('div', 'ctx', '도움이 됐다면 커피 한 잔으로 응원해 주세요. 기능은 달라지지 않습니다'));
+    const a = el('div', 'set-act');
+    a.append(window.ICONS.context(), document.createTextNode(` ${cfg.license.support.label} ☕`));
+    a.onclick = () => window.whenwork.supportOpen();
+    sup.append(a);
+    body.append(sup);
+  }
 
   // ── 업데이트
   const upSec = el('div', 'set-foot');

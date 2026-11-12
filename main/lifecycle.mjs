@@ -18,7 +18,8 @@ import { winBackground } from './theme.mjs';
 import { createQueue } from './queue.mjs';
 import { createStore } from './store.mjs';
 import { createSettings } from './settings.mjs';
-import { createLicense } from './license.mjs';
+import { createLicense, API_BASE } from './license.mjs';
+import { createAds } from './ads.mjs';
 import { currentPlan } from './plan.mjs';
 import { pickPosition } from './place.mjs';
 import { scheduleJobs } from './jobs.mjs';
@@ -292,6 +293,8 @@ export function bootstrap() {
   // 라이선스(D-P05) — license.json·instance-id도 같은 폴더. 판매가 열리기 전 빌드에서는 plan()이
   // 제한 없는 상태를 돌려준다(main/plan.mjs). 어떤 실패도 던지지 않는다 — 캡처를 막지 않는다(원칙 1).
   ctx.license = createLicense({ dir: app.getPath('userData') });
+  // 광고 한 줄·커피 사주기 링크(D-P08~D-P10·D-P22) — 서버가 하루 한 번 내려준다. 보내는 건 이름·버전·OS뿐
+  ctx.ads = createAds({ dir: app.getPath('userData'), apiBase: API_BASE, version: app.getVersion(), os: platform.name });
   ctx.plan = () => {
     try {
       return currentPlan({ licenseState: ctx.license.state() });

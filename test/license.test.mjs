@@ -364,6 +364,7 @@ test('구매 복원: 이메일·코드 형식이 틀리면 서버에 묻지 않�
   assert.equal(f.calls.length, 0);
   const r = await lic.restoreStart('a@b.co');
   assert.match(r.error, /메일을 보낼 수 없습니다/);
+});
 
 test('활성화하면 서버가 정리해 준 키로 저장한다 — 붙여 넣은 소문자·공백이 화면에 남지 않게', async () => {
   const dir = tmpDir();

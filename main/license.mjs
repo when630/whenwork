@@ -227,6 +227,24 @@ export function createLicense({
     return { changed };
   }
 
+  // 앱 안에서 결제한 직후 — 키를 입력하지 않고 받아 온다. 결제 알림이 서버에서 이 기기에 이미 켜 두었다.
+  // 아직 알림이 안 왔으면 { ok:false, pending:true } — 호출부가 잠시 뒤 다시 묻는다.
+  async function claim() {
+    const r = await call('claim', { instance: instanceId() });
+    if (!r.ok) return { ok: false, pending: r.code === 'pending', error: r.error };
+    const data = readFile();
+    const kinds = [];
+    for (const lic of Array.isArray(r.json.licenses) ? r.json.licenses : []) {
+      const p = verifyToken(lic?.token, { publicKeys, instance: instanceId() });
+      if (!p || p.kind !== lic.kind || p.revoked === true || typeof lic.key !== 'string') continue;
+      data[p.kind] = { key: lic.key, token: lic.token };
+      kinds.push(p.kind);
+    }
+    if (!kinds.length) return { ok: false, pending: false, error: MSG_BAD_RESPONSE };
+    if (!writeFile(data)) return { ok: false, error: '라이선스를 저장하지 못했습니다' };
+    return { ok: true, kinds };
+  }
+
   // 이 기기에서 해제한다. 로컬에서는 **항상** 지운다 — 서버에 닿지 못해도 사용자가 "지웠다"고
   // 본 것이 남아 있으면 안 된다. 서버 쪽 기기 칸은 다음에 닿을 때 풀리도록 결과만 알린다.
   async function deactivate(kind) {
@@ -241,5 +259,5 @@ export function createLicense({
     return { ok: true, server: r.ok };
   }
 
-  return { instanceId, state, summary, activate, revalidate, deactivate, file };
+  return { instanceId, state, summary, activate, claim, revalidate, deactivate, file };
 }

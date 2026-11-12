@@ -18,6 +18,8 @@ import { winBackground } from './theme.mjs';
 import { createQueue } from './queue.mjs';
 import { createStore } from './store.mjs';
 import { createSettings } from './settings.mjs';
+import { createLicense } from './license.mjs';
+import { currentPlan } from './plan.mjs';
 import { pickPosition } from './place.mjs';
 import { scheduleJobs } from './jobs.mjs';
 import { registerIpc, saveCapture } from './ipc.mjs';
@@ -286,6 +288,17 @@ export function bootstrap() {
   // 새 저장소(D-14) — settings.json·queue.jsonl 옆의 store.sqlite 한 파일이다. 파일 이름에
   // 앱 이름을 넣지 않아 Phase 5 개명이 파일명을 건드리지 않는다.
   ctx.store = createStore(path.join(app.getPath('userData'), 'store.sqlite'));
+
+  // 라이선스(D-P05) — license.json·instance-id도 같은 폴더. 판매가 열리기 전 빌드에서는 plan()이
+  // 제한 없는 상태를 돌려준다(main/plan.mjs). 어떤 실패도 던지지 않는다 — 캡처를 막지 않는다(원칙 1).
+  ctx.license = createLicense({ dir: app.getPath('userData') });
+  ctx.plan = () => {
+    try {
+      return currentPlan({ licenseState: ctx.license.state() });
+    } catch {
+      return currentPlan({ licenseState: {} });
+    }
+  };
 
   // ipcMain.handle/.on 등록은 원래도 모듈 로드 시점(동기)이었다 — app.whenReady보다 먼저,
   // ctx를 만든 직후 등록한다. 핸들러 본문의 ctx.jobs.* 호출은 실제 IPC가 올 때(항상

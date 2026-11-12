@@ -7,6 +7,7 @@ import { validateExport } from './store.mjs';
 import { platform } from './platform/index.mjs';
 import { updateLine } from './update.mjs';
 import { NOTIFY_AT_DEFAULT, dayKey } from './brief.mjs';
+import { SALES_OPEN, SHOP_URL, BUY_KINDS, buyUrl, projectGate } from './plan.mjs';
 
 // 캡처 저장의 단일 경로(D-01/D-03). capture:save 핸들러와 01-07의 주입 모드가 모두
 // 이 함수를 부른다 — 경로가 하나여야 테스트가 실경로를 밟는다.
@@ -134,7 +135,8 @@ export function registerIpc(ctx) {
     // 인박스로 튀면 그게 더 성가시다.
     const openTab = ctx.openTab ?? null;
     ctx.openTab = null;
-    const base = { pending: ctx.pending, notice, hotkeyLabel, inboxHotkeyLabel, openTab };
+    // 결제 상태가 허용하는 것(D-P03) — 렌더러는 이 값으로 그리기만 하고 스스로 판단하지 않는다
+    const base = { pending: ctx.pending, notice, hotkeyLabel, inboxHotkeyLabel, openTab, ent: ctx.plan() };
     const st = ctx.store.status();
     if (!st.ok) return { ...base, online: false, notice: st.notice };
     // WR-03: st.ok가 true인 뒤에도 getViewState() 실행 중 SQLite 오류(디스크 I/O 등)가 날 수
@@ -174,7 +176,6 @@ export function registerIpc(ctx) {
     'item:remove': (id) => ctx.store.removeItem(id),
     'item:restore': (id) => ctx.store.restoreItem(id),
     'item:note': (id, note) => ctx.store.setNote(id, note),
-    'project:create': (name) => ctx.store.createProject(name),
     'project:update': (id, fields) => ctx.store.updateProject(id, fields),
     'project:move': (id, dir) => ctx.store.moveProject(id, dir),
   };
@@ -199,7 +200,31 @@ export function registerIpc(ctx) {
     }
   });
 
+  // 프로젝트 개수 제한(D-P11~13) — 새로 만들기와 지운 것 되살리기에만. 저장소가 아니라 여기서 건다:
+  // 가져오기(importAll)·이전 도구가 같은 저장소 함수를 지나도 잘리지 않게(원칙 3).
+  // 이미 제한을 넘게 쓰는 사람(그랜드파더)은 아무것도 잃지 않는다 — 새로 늘리지만 못한다.
+  function gate() {
+    let count = NaN;
+    try {
+      count = ctx.store.getProjects().length;
+    } catch {}
+    return projectGate(ctx.plan(), count);
+  }
+
+  ipcMain.handle('project:create', async (_e, name) => {
+    const g = gate();
+    if (!g.ok) return { ok: false, reason: g.reason, limit: g.limit };
+    try {
+      ctx.store.createProject(name);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  });
+
   ipcMain.handle('project:restore', async (_e, id, movedItemIds = []) => {
+    const g = gate();
+    if (!g.ok) return { ok: false, reason: g.reason, limit: g.limit };
     try {
       ctx.store.restoreProject(id, Array.isArray(movedItemIds) ? movedItemIds : []);
       return { ok: true };
@@ -331,6 +356,51 @@ export function registerIpc(ctx) {
   });
 
   // Esc·헤더 ×가 부른다. 숨기는 순서는 platform이 안다(D8) — Windows는 minimize를 거쳐야 직전 창에 포커스가 돌아온다
+  // ── 라이선스 (D-P05). 키 원문은 렌더러로 보내지 않는다 — summary가 앞뒤 4자만 준다.
+  const refreshViews = () => {
+    const tw = ctx.todayWin;
+    if (tw && !tw.isDestroyed()) tw.webContents.send('today:refresh');
+  };
+
+  ipcMain.handle('license:get', () => ({
+    selling: SALES_OPEN,
+    plan: ctx.plan(),
+    summary: ctx.license.summary(),
+    buyKinds: SALES_OPEN ? BUY_KINDS : [],
+    watching: !!ctx.jobs?.purchaseWatching?.(),
+  }));
+
+  ipcMain.handle('license:activate', async (_e, key) => {
+    const r = await ctx.license.activate(key);
+    if (r.ok) refreshViews();
+    return r;
+  });
+
+  ipcMain.handle('license:deactivate', async (_e, kind) => {
+    const r = await ctx.license.deactivate(kind);
+    refreshViews();
+    return r;
+  });
+
+  // 앱 안 구매 — 결제 페이지를 열고, 결제가 끝나면 키 입력 없이 풀리도록 지켜본다
+  ipcMain.handle('license:buy', async (_e, kind) => {
+    if (!SALES_OPEN) return { ok: false, error: '아직 판매를 시작하지 않았습니다' };
+    const url = buyUrl(kind, ctx.license.instanceId());
+    if (!url) return { ok: false, error: '살 수 없는 상품입니다' };
+    await shell.openExternal(url);
+    ctx.jobs?.watchPurchase?.();
+    return { ok: true };
+  });
+
+  // "결제를 마쳤는데 아직 그대로예요" — 지켜보기를 기다리지 않고 바로 물어본다
+  ipcMain.handle('license:claim', async () => {
+    const r = await ctx.license.claim();
+    if (r.ok) refreshViews();
+    return r;
+  });
+
+  ipcMain.on('shop:open', () => shell.openExternal(SHOP_URL));
+
   ipcMain.on('win:hide', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (win && !win.isDestroyed()) platform.deactivate(win);

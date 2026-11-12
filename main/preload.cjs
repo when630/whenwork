@@ -47,6 +47,14 @@ contextBridge.exposeInMainWorld('whenwork', {
   dataExport: () => ipcRenderer.invoke('data:export'),
   dataImport: () => ipcRenderer.invoke('data:import'),
 
+  // ── 라이선스
+  licenseGet: () => ipcRenderer.invoke('license:get'),
+  licenseActivate: (key) => ipcRenderer.invoke('license:activate', key),
+  licenseDeactivate: (kind) => ipcRenderer.invoke('license:deactivate', kind),
+  licenseBuy: (kind) => ipcRenderer.invoke('license:buy', kind),
+  licenseClaim: () => ipcRenderer.invoke('license:claim'),
+  shopOpen: () => ipcRenderer.send('shop:open'),
+
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),
   openApp: () => ipcRenderer.send('app:open'),

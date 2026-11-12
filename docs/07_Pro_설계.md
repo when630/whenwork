@@ -41,7 +41,7 @@
     - Pro는 `expiresAt` 정각까지 정상, 그 뒤 `PRO_GRACE_DAYS`(14)일 끝 정각까지 유예(`proGraceUntil`로 안내 근거 제공), 1ms 지나면 무료. `revoked: true`면 유예 없이 끝.
     - 회수는 `revoked === true`일 때만(엄격). 모양이 깨진 입력·읽을 수 없는 날짜는 던지지 않고 무료.
     - `canAddProject`는 개수를 모르면(NaN 등) 막지 않는다.
-  - **아직 연결하지 않았다:** `ipc.mjs`의 `project:create`·`project:restore` 제한과 `today:getState`의 `ent`는 라이선스 모듈(`main/license.mjs`)과 함께 넣는다 — 지금 걸면 결제할 길이 없는 채로 모두에게 3개 제한만 걸린다.
+  - **연결(2026-11-12, `main/plan.mjs`):** `currentPlan()`이 앱의 단 하나의 답이다. **판매가 열리지 않은 빌드(`API_BASE`·`PUBLIC_KEYS`가 비어 있음, `SALES_OPEN=false`)는 제한이 없다** — 광고도 3개 제한도 없다. 결제할 길이 없는데 걸면 기능을 빼앗는 것이다. `today:getState`가 `ent`를 싣고, `project:create`·`project:restore`가 `projectGate`를 묻는다(`{ ok:false, reason:'limit', limit }` → 렌더러가 "설정 → 라이선스" 안내).
 - **D-P03:** 판정 결과는 `today:getState`에 `ent` 필드로 실어 렌더러에 준다. 렌더러는 그 값으로 그리기만 하고 스스로 판단하지 않는다.
 
 ### 라이선스
@@ -60,13 +60,14 @@
     - 해제는 서버에 닿지 못해도 로컬에서 지운다.
     - 배포 기본값: `PUBLIC_KEYS = {}`(어떤 토큰도 믿지 않음), `API_BASE = null`(활성화 → "아직 판매를 시작하지 않았습니다"). 서버를 세우는 날 `tools/license-keygen.mjs <리포 밖 경로>`로 키를 만들고 공개키를 넣는다 — 이 도구는 리포 안 경로를 거절한다(공개 리포).
     - 라이선스 키는 `license.json`에 평문으로 둔다(로컬 파일, 다른 앱들과 같은 수준). Electron `safeStorage`로 감싸는 것은 연결 단계에서 판단.
-  - **아직 연결하지 않았다:** IPC(`license:activate|deactivate|summary`), 재검증 타이머(`jobs.mjs`), 설정 탭 입력칸, 프로젝트 제한 — 서버가 생겨 실제로 활성화할 수 있게 된 뒤 한 번에.
+  - **연결(2026-11-12):** IPC `license:get|activate|deactivate|buy|claim`, 재검증(`jobs.mjs`, 켠 뒤 30초·6시간마다 시도, 실제 호출 주기는 Pro 하루·Lite 일주일), 설정 탭 "라이선스"(현재 요금제, Lite 구매 B, 결제 확인 C, 키 입력 L, 키별 해제).
+  - **D-P20 (2026-11-12) 앱 안 구매는 키 입력 없이 풀린다:** 설정의 "Lite 구매"·광고 줄이 `https://whendesk.app/buy?plan=lite&app=whenwork&i=<instance>`를 연다. 결제 페이지가 Paddle `custom_data`에 `{instance, app}`을 싣고, 서버는 결제 알림을 받으면 만든 키를 그 기기에 바로 켜 둔다. 앱은 20분 동안 5초마다 `POST /v1/license/claim {instance, app}`으로 받아 와 적용하고 알림을 띄운다(그 뒤는 "결제를 마쳤는데 그대로예요"로 직접). claim은 그 기기에 켜진, 24시간 안에 만든, 환불 안 된 키만 준다. 키는 그대로 만들어 메일로도 보낸다 — 다른 PC·재설치용. 구매자가 `custom_data`를 바꿔 남의 기기 번호를 넣어도 그 사람에게 공짜 키를 켜 줄 뿐이라 막지 않는다. — **Reversibility:** cheap
 - **D-P06:** `instance`는 첫 실행 때 만드는 무작위 UUID(`userData/instance-id`)다. 하드웨어 정보·사용자명은 쓰지 않는다.
 - **D-P07:** 클라이언트는 MIT로 공개되므로 로컬 제한(광고·프로젝트 수)은 누구나 빌드해서 풀 수 있다. 이를 막으려 하지 않는다(난독화·무결성 검사 없음). 우회할 수 없는 건 서버 기능(백업·동기화)뿐이고, 그건 서버가 매 요청마다 키를 확인한다. 서버 코드는 비공개 리포(`when630/whendesk-api`, 시리즈 공통 — D-P18)에 둔다.
 
 ### 광고
 
-- **D-P08:** 광고 칸은 오늘 뷰 `footer` 위 한 줄(텍스트 + 작은 라벨 "광고"). 캡처 창·알림·트레이 메뉴에는 넣지 않는다. 닫기 버튼이 곧 Lite 안내다.
+- **D-P08:** 광고 칸은 오늘 뷰 `footer` 위 한 줄(텍스트 + 작은 라벨 "광고"). 캡처 창·알림·트레이 메뉴에는 넣지 않는다. **구현(2026-11-12):** 지금은 하우스 광고(Lite 안내)뿐 — 누르면 앱 안 구매(D-P20), ×는 그날 하루 숨김(Q4를 이걸로 정함, 이 PC의 localStorage).
 - **D-P09:** 광고 소스는 외부 광고망이 아니다 — 데스크톱용 광고망(Overwolf·Playwire)은 게임·대형 트래픽 위주이고, AdSense·애드핏은 웹·모바일용이라 정책 위반 소지가 있다. 대신 Worker가 내려주는 `ads.json`(직접 판 스폰서, Pro 안내, 형제 앱 WHENCOMMAND 홍보)을 하루 1회 받아 캐시한다. 받기 실패·오프라인이면 앱에 내장된 하우스 광고(Pro 안내)를 보인다. 요청에는 앱 버전·OS만 담는다.
 - **D-P10:** 클릭은 `https://<도메인>/go/<광고id>` 리다이렉트로 집계한다(광고 id별 카운트만, 사용자 식별자 없음). 외부 브라우저로 연다(`shell.openExternal`), 앱 안에서 웹을 띄우지 않는다.
 
@@ -184,7 +185,7 @@
 - **Q2:** ~~Windows 서명~~ → Microsoft Store로 대체(D-P16). 남은 질문: MSIX에서 D-P16의 확인 목록이 모두 통과하는가. 하나라도 막히면 그때 Azure 서명(연 ~17만 원)으로 돌아간다.
 - **Q5:** ~~도메인 이름~~ → `whendesk.app`(D-P18).
 - **Q3:** 구독이 끝난 Pro 사용자의 클라우드 백업 보관 기간(예: 90일 후 삭제).
-- **Q4:** 무료 사용자가 광고를 닫으면 그날 하루 숨길지, 항상 다시 보일지.
+- **Q4:** ~~광고를 닫으면~~ → 그날 하루 숨긴다(D-P08 구현).
 
 ## 1단계 작업 목록
 

@@ -3,6 +3,11 @@
 // Phase 2: 제거 대상 기능의 배경 작업을 전부 걷어냈다. 남는 것은 큐 반영 1회, 아침 브리핑,
 // purge뿐이다 — 모두 저장소(store.mjs)만 거치고 외부 프로세스를 부르지 않는다.
 import { briefDecision, briefingLines, dayKey, NOTIFY_AT_DEFAULT, STALE_WAITING_DAYS } from './brief.mjs';
+import { SALES_OPEN } from './plan.mjs';
+
+const LICENSE_CHECK_MS = 6 * 3600_000; // 재검증 시도 간격 — 실제로 서버를 부를지는 license.mjs가 정한다(Pro 하루·Lite 일주일)
+const PURCHASE_POLL_MS = 5_000;
+const PURCHASE_WATCH_MS = 20 * 60_000; // 결제 페이지를 열고 이만큼 기다린다 — 그 뒤는 "결제 완료 확인"으로
 
 const PURGE_DAYS = 30; // 소프트 삭제한 항목을 실제로 비우기까지 두는 기간
 const BRIEFING_CHECK_MS = 60_000;
@@ -64,11 +69,52 @@ export function scheduleJobs(ctx) {
     }
   }
 
+  const refreshToday = () => {
+    const tw = ctx.todayWin;
+    if (tw && !tw.isDestroyed()) tw.webContents.send('today:refresh');
+  };
+
+  // 라이선스 재검증(D-P05). 실패는 조용히 — 네트워크 실패는 회수 사유가 아니다(license.mjs가 지킨다).
+  async function revalidateLicense() {
+    if (!SALES_OPEN) return;
+    try {
+      const { changed } = await ctx.license.revalidate();
+      if (changed.length) refreshToday();
+    } catch {}
+  }
+
+  // 앱 안 구매를 지켜본다 — 결제 알림이 서버에 닿으면 키 입력 없이 풀린다. 하나만 돈다.
+  let watch = null;
+  function watchPurchase() {
+    if (watch) return;
+    const until = Date.now() + PURCHASE_WATCH_MS;
+    watch = setInterval(async () => {
+      let r = null;
+      try {
+        r = await ctx.license.claim();
+      } catch {}
+      if (r?.ok) {
+        stop();
+        refreshToday();
+        ctx.notify('WHENWORK Lite가 적용됐습니다', '광고 없이, 프로젝트 제한 없이 쓸 수 있습니다', { onClick: () => ctx.showToday() });
+        return;
+      }
+      if (Date.now() > until) stop();
+    }, PURCHASE_POLL_MS);
+    function stop() {
+      clearInterval(watch);
+      watch = null;
+    }
+  }
+
   // IPC 핸들러(main/ipc.mjs)가 불러야 하는 것 — ctx.jobs에 붙여 둔다.
   ctx.jobs = {
     replayQueueOnce,
     maybeBrief,
     purgeOnce,
+    revalidateLicense,
+    watchPurchase,
+    purchaseWatching: () => !!watch,
   };
 
   // ── 타이머 등록. 큐 반영은 여기서 딱 한 번(D-02) — !SMOKE 가드 밖이다. 01-07의 강제종료
@@ -79,5 +125,7 @@ export function scheduleJobs(ctx) {
     setTimeout(purgeOnce, COLLECT_DELAY_MS); // 오래 전에 지운 것만 실제로 비운다 — 되돌릴 창을 지난 뒤다
     setTimeout(maybeBrief, COLLECT_DELAY_MS); // 켠 직후 한 번 (저장소가 붙을 시간을 준다)
     setInterval(maybeBrief, BRIEFING_CHECK_MS);
+    setTimeout(revalidateLicense, COLLECT_DELAY_MS);
+    setInterval(revalidateLicense, LICENSE_CHECK_MS);
   }
 }

@@ -404,7 +404,7 @@ export function registerIpc(ctx) {
     const url = buyUrl(kind, ctx.license.instanceId());
     if (!url) return { ok: false, error: '살 수 없는 상품입니다' };
     await shell.openExternal(url);
-    ctx.jobs?.watchPurchase?.();
+    ctx.jobs?.watchPurchase?.(kind);
     return { ok: true };
   });
 
@@ -453,7 +453,7 @@ export function registerIpc(ctx) {
     }
     if (!SALES_OPEN) return { ok: false, error: '아직 판매를 시작하지 않았습니다' };
     await shell.openExternal(buyUrl('lite', ctx.license.instanceId()));
-    ctx.jobs?.watchPurchase?.();
+    ctx.jobs?.watchPurchase?.('lite');
     return { ok: true, buying: true };
   });
 

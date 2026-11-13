@@ -3,7 +3,7 @@
 // Phase 2: 제거 대상 기능의 배경 작업을 전부 걷어냈다. 남는 것은 큐 반영 1회, 아침 브리핑,
 // purge뿐이다 — 모두 저장소(store.mjs)만 거치고 외부 프로세스를 부르지 않는다.
 import { briefDecision, briefingLines, dayKey, NOTIFY_AT_DEFAULT, STALE_WAITING_DAYS } from './brief.mjs';
-import { SALES_OPEN } from './plan.mjs';
+import { SALES_OPEN, purchaseArrived } from './plan.mjs';
 
 const LICENSE_CHECK_MS = 6 * 3600_000; // 재검증 시도 간격 — 실제로 서버를 부를지는 license.mjs가 정한다(Pro 하루·Lite 일주일)
 const PURCHASE_POLL_MS = 5_000;
@@ -84,8 +84,16 @@ export function scheduleJobs(ctx) {
   }
 
   // 앱 안 구매를 지켜본다 — 결제 알림이 서버에 닿으면 키 입력 없이 풀린다. 하나만 돈다.
+  // 서버의 claim은 이 기기의 최근 구매를 모두 돌려준다 — 방금 Lite를 산 기기가 Pro를 사면 Lite가 먼저
+  // 보이므로, 산 종류(kind)가 들어왔을 때만 멈춘다.
   let watch = null;
-  function watchPurchase() {
+  let watchKind = null;
+  const APPLIED = {
+    lite: ['WHENWORK Lite가 적용됐습니다', '광고 없이, 프로젝트 제한 없이 쓸 수 있습니다'],
+    pro: ['WHENWORK Pro가 적용됐습니다', '설정 → 클라우드 백업에서 백업을 켜 주세요'],
+  };
+  function watchPurchase(kind = 'lite') {
+    watchKind = kind;
     if (watch) return;
     const until = Date.now() + PURCHASE_WATCH_MS;
     watch = setInterval(async () => {
@@ -93,10 +101,11 @@ export function scheduleJobs(ctx) {
       try {
         r = await ctx.license.claim();
       } catch {}
-      if (r?.ok) {
+      if (r?.ok) refreshToday();
+      if (purchaseArrived(r, watchKind)) {
+        const [title, body] = APPLIED[watchKind] ?? APPLIED.lite;
         stop();
-        refreshToday();
-        ctx.notify('WHENWORK Lite가 적용됐습니다', '광고 없이, 프로젝트 제한 없이 쓸 수 있습니다', { onClick: () => ctx.showToday() });
+        ctx.notify(title, body, { onClick: () => ctx.showToday() });
         return;
       }
       if (Date.now() > until) stop();

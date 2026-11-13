@@ -423,6 +423,25 @@ export function registerIpc(ctx) {
     return r;
   });
 
+  // ── 클라우드 백업(D-P23). 암호는 렌더러에서 받아 바로 키로 바꾸고 버린다 — 어디에도 저장하지 않는다
+  const backupState = () => ({ available: !!ctx.plan().backup, ...ctx.backup.status() });
+  ipcMain.handle('backup:get', () => backupState());
+  ipcMain.handle('backup:enable', async (_e, password) => {
+    const r = await ctx.backup.enable(password);
+    return { ...r, state: backupState() };
+  });
+  ipcMain.handle('backup:disable', () => ({ ...ctx.backup.disable(), state: backupState() }));
+  ipcMain.handle('backup:now', async () => {
+    const r = await (ctx.jobs?.runBackup ? ctx.jobs.runBackup({ force: true }) : ctx.backup.run({ force: true }));
+    return { ...r, state: backupState() };
+  });
+  ipcMain.handle('backup:list', () => ctx.backup.list());
+  ipcMain.handle('backup:restore', async (_e, id, password) => {
+    const r = await ctx.backup.restore(id, password || null);
+    if (r.ok) refreshViews();
+    return r;
+  });
+
   ipcMain.on('shop:open', () => shell.openExternal(SHOP_URL));
 
   // 광고를 눌렀다. 하우스 광고(Lite 안내)는 앱 안 구매로, 나머지는 서버의 /go/<id>로 — 앱은 광고 주소를 모른다

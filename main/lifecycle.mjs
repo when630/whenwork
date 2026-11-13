@@ -9,6 +9,7 @@ import {
   Notification,
   shell,
   nativeTheme,
+  safeStorage,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +17,8 @@ import { fileURLToPath } from 'node:url';
 import { platform } from './platform/index.mjs';
 import { winBackground } from './theme.mjs';
 import { createQueue } from './queue.mjs';
-import { createStore } from './store.mjs';
+import { createStore, validateExport } from './store.mjs';
+import { createBackup } from './backup.mjs';
 import { createSettings } from './settings.mjs';
 import { createLicense, API_BASE } from './license.mjs';
 import { createAds } from './ads.mjs';
@@ -302,6 +304,21 @@ export function bootstrap() {
       return currentPlan({ licenseState: {} });
     }
   };
+  // 자동 클라우드 백업(D-P23) — Pro일 때만. 키는 OS 보안 저장소(safeStorage)로 감싸 backup.json에 둔다
+  ctx.backup = createBackup({
+    dir: app.getPath('userData'),
+    apiBase: API_BASE,
+    appVersion: app.getVersion(),
+    protect: (b) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('no safeStorage');
+      return safeStorage.encryptString(Buffer.from(b).toString('base64'));
+    },
+    unprotect: (b) => Buffer.from(safeStorage.decryptString(Buffer.from(b)), 'base64'),
+    exportData: () => ctx.store.exportAll(),
+    importData: (d) => ctx.store.importAll(d),
+    validate: validateExport,
+    credentials: () => (ctx.plan().backup ? ctx.license.proCredentials() : null),
+  });
 
   // ipcMain.handle/.on 등록은 원래도 모듈 로드 시점(동기)이었다 — app.whenReady보다 먼저,
   // ctx를 만든 직후 등록한다. 핸들러 본문의 ctx.jobs.* 호출은 실제 IPC가 올 때(항상

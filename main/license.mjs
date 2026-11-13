@@ -161,6 +161,13 @@ export function createLicense({
     return out;
   }
 
+  // 클라우드 백업용(main/backup.mjs) — 이 기기에서 검증되는 Pro가 있을 때만 키를 준다. 렌더러로는 보내지 않는다
+  function proCredentials() {
+    if (!state().pro) return null;
+    const key = readFile().pro?.key;
+    return key ? { key, instance: instanceId() } : null;
+  }
+
   // 설정 화면용 요약 — 키 원문은 내보내지 않는다
   function summary() {
     const data = readFile();
@@ -290,5 +297,5 @@ export function createLicense({
     return { ok: true, server: r.ok };
   }
 
-  return { instanceId, state, summary, activate, claim, restoreStart, restoreVerify, revalidate, deactivate, file };
+  return { instanceId, state, summary, proCredentials, activate, claim, restoreStart, restoreVerify, revalidate, deactivate, file };
 }

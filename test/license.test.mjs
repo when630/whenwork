@@ -382,3 +382,15 @@ test('활성화하면 서버가 정리해 준 키로 저장한다 — 붙여 넣
   assert.equal((await old.activate('LITE00-KEY-0001')).ok, true);
   assert.equal(old.summary().lite.key, 'LITE••••0001');
 });
+
+test('클라우드 백업용 키는 이 기기에서 검증되는 Pro일 때만 준다 — Lite·복사한 license.json은 null', async () => {
+  const a = tmpDir();
+  const lic = make(a, store());
+  await lic.activate('LITE00-KEY-0001');
+  assert.equal(lic.proCredentials(), null, 'Lite 키로는 백업 서버를 부르지 않는다');
+  await lic.activate('PRO-KEY-00000001');
+  assert.deepEqual(lic.proCredentials(), { key: 'PRO-KEY-00000001', instance: lic.instanceId() });
+  const b = tmpDir();
+  fs.copyFileSync(path.join(a, 'license.json'), path.join(b, 'license.json'));
+  assert.equal(make(b, store()).proCredentials(), null);
+});

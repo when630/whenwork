@@ -409,7 +409,7 @@ const KEYMAP = [
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 프로젝트 보기']]],
   ['지운 프로젝트', [['↑↓', '고르기'], ['Enter', '되살리기'], ['Esc', '뒤로']]],
-  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json'], ['L', '구매 복원(이메일)'], ['K', '라이선스 키 직접 입력(지원용)']]],
+  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json'], ['L', '구매 복원(이메일)'], ['S', '클라우드 백업(Pro)'], ['U', '백업에서 되살리기(Pro)'], ['K', '라이선스 키 직접 입력(지원용)']]],
   ['퀵캡처', [['{hotkey}', '열기·닫기'], ['Enter', '저장'], ['Tab', '오늘 뷰']]],
   ['인박스 단축키', [['{inboxHotkey}', '어디서든 인박스 열기·닫기']]],
 ];
@@ -656,6 +656,9 @@ function renderSettings() {
   // ── 라이선스 (D-P05·D-P19)
   body.append(renderLicense());
 
+  // ── 클라우드 백업(D-P23) — Pro일 때만
+  if (cfg?.backup?.available) body.append(renderBackup());
+
   // ── 응원하기(D-P22) — 서버가 커피 사주기 주소를 둔 앱만
   if (cfg?.license?.support) {
     const sup = el('div', 'set-foot');
@@ -742,6 +745,84 @@ function renderLicense() {
     act(`${name}${s.valid ? '' : ' (확인되지 않음)'} — 이 PC에서 해제 (다른 PC로 옮길 때)`, () => runDeactivate(kind, name));
   }
   return sec;
+}
+
+function renderBackup() {
+  const b = cfg.backup;
+  const sec = el('div', 'set-foot');
+  sec.append(el('div', 'sec-h', '클라우드 백업'));
+  const when = b.lastAt ? new Date(b.lastAt).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }) : null;
+  sec.append(el('div', 'ctx', b.enabled
+    ? `켜짐 — 하루 한 번, 바뀐 게 있을 때 암호화해서 올립니다${when ? ` · 마지막 ${when}` : ''}`
+    : '이 PC에서 암호화해서 올립니다 — 서버는 내용을 읽을 수 없습니다. 최근 7일 + 4주를 보관합니다'));
+  if (b.lastError) sec.append(el('div', 'ctx', b.lastError));
+  const act = (label, fn) => {
+    const a = el('div', 'set-act');
+    a.append(window.ICONS.context(), document.createTextNode(` ${label}`));
+    a.onclick = fn;
+    sec.append(a);
+  };
+  if (b.enabled) {
+    act('지금 백업 (S)', runBackupNow);
+    act('끄기', runBackupOff);
+  } else {
+    act('켜기 (S) — 백업 암호를 정합니다', runBackupOn);
+  }
+  act('백업에서 되살리기 (U) — 지금 데이터를 덮어씁니다', runBackupRestore);
+  return sec;
+}
+
+async function runBackupOn() {
+  const yes = await promptText('백업 암호를 잊으면 누구도(개발자도) 백업을 열 수 없습니다. 계속하려면 y', '');
+  if (yes?.toLowerCase() !== 'y') return;
+  const pw = await promptText('백업 암호 (8자 이상 — 다른 PC에서 되살릴 때 필요합니다)', '', { secret: true });
+  if (!pw) return;
+  const again = await promptText('백업 암호 한 번 더', '', { secret: true });
+  if (again !== pw) return toast('두 암호가 다릅니다 — 다시 켜 주세요', { holdMs: 5000 });
+  toast('백업을 켜고 첫 백업을 올리는 중…', { spinner: true, holdMs: 0 });
+  const r = await window.whenwork.backupEnable(pw);
+  toast(r.ok ? '켰습니다 — 첫 백업을 올렸습니다' : (r.error ?? '켜지 못했습니다'), { holdMs: r.ok ? 4000 : 7000 });
+  return loadSettings();
+}
+
+async function runBackupNow() {
+  toast('백업을 올리는 중…', { spinner: true, holdMs: 0 });
+  const r = await window.whenwork.backupNow();
+  toast(r.ok ? '백업했습니다' : (r.error ?? '백업하지 못했습니다'), { holdMs: r.ok ? 3000 : 7000 });
+  return loadSettings();
+}
+
+async function runBackupOff() {
+  const yes = await promptText('자동 백업을 끕니다 (이미 올린 백업은 보관 기간 동안 남습니다). 계속하려면 y', '');
+  if (yes?.toLowerCase() !== 'y') return;
+  await window.whenwork.backupDisable();
+  toast('껐습니다', { holdMs: 3000 });
+  return loadSettings();
+}
+
+async function runBackupRestore() {
+  toast('백업 목록을 불러오는 중…', { spinner: true, holdMs: 0 });
+  const l = await window.whenwork.backupList();
+  if (!l.ok) return toast(l.error ?? '목록을 불러오지 못했습니다', { holdMs: 7000 });
+  if (!l.backups.length) return toast('아직 올린 백업이 없습니다', { holdMs: 4000 });
+  const shown = l.backups.slice(0, 9);
+  const kb = (n) => `${Math.max(1, Math.round(n / 1024))}KB`;
+  const pick = await promptText(`되살릴 백업 번호 — ${shown.map((x, i) => `${i + 1}) ${x.id} ${kb(x.size)}`).join('  ')}`, '1');
+  const chosen = shown[Number(pick) - 1];
+  if (!chosen) return;
+  const yes = await promptText(`${chosen.id} 백업으로 지금 데이터를 바꿉니다 (직전 상태는 자동 백업). 계속하려면 y`, '');
+  if (yes?.toLowerCase() !== 'y') return;
+  toast('되살리는 중…', { spinner: true, holdMs: 0 });
+  let r = await window.whenwork.backupRestore(chosen.id);
+  if (!r.ok && r.needPassword) {
+    const pw = await promptText('이 백업을 만들 때 정한 백업 암호', '', { secret: true });
+    if (!pw) return toast('취소했습니다', { holdMs: 2000 });
+    toast('되살리는 중…', { spinner: true, holdMs: 0 });
+    r = await window.whenwork.backupRestore(chosen.id, pw);
+  }
+  toast(r.ok ? `되살렸습니다 — 프로젝트 ${r.project}건 · 항목 ${r.item}건` : (r.error ?? '되살리지 못했습니다'), { holdMs: r.ok ? 4000 : 7000 });
+  await loadSettings();
+  return refresh();
 }
 
 async function runBuy() {
@@ -848,6 +929,11 @@ async function loadSettings() {
     cfg.license = await window.whenwork.licenseGet();
   } catch {
     cfg.license = null;
+  }
+  try {
+    cfg.backup = await window.whenwork.backupGet();
+  } catch {
+    cfg.backup = null;
   }
   render();
 }
@@ -1035,6 +1121,7 @@ function renderFooter() {
     add('I', '가져오기');
     add('R', '업데이트');
     if (cfg?.license?.selling) add('L', '구매 복원');
+    if (cfg?.backup?.available) add('S', '백업');
   } else if (selectedItem()?.archived) {
     add('Space', '되살리기');
   } else if (tab === 'projects') {
@@ -1140,11 +1227,12 @@ function setModal(on) {
 // 한 줄 텍스트 입력 — null이면 취소.
 // 호출부는 반드시 keydown을 preventDefault한 뒤에 부른다. 안 그러면 다이얼로그를 연 그 키의
 // 기본 동작(문자 입력)이 방금 포커스된 입력창으로 들어간다 — 아래 rAF 리셋은 그 2차 방어.
-function promptText(label, initial = '') {
+function promptText(label, initial = '', { secret = false } = {}) {
   return new Promise((resolve) => {
     dlgResolve = resolve;
     setModal(true);
     $('dlgLabel').textContent = label;
+    $('dlgIn').type = secret ? 'password' : 'text'; // 백업 암호는 화면에 보이지 않게
     $('dlgIn').value = initial;
     $('dlg').classList.add('show');
     $('dlgIn').focus();
@@ -1354,7 +1442,10 @@ function closeDlg(commit) {
   dlgResolve = null;
   setModal(false);
   $('dlg').classList.remove('show');
-  resolve?.(commit ? $('dlgIn').value.trim() : null);
+  const value = $('dlgIn').value;
+  $('dlgIn').value = '';
+  $('dlgIn').type = 'text';
+  resolve?.(commit ? value.trim() : null);
 }
 
 // 입력할 때마다 걸러 보여준다 — 확정을 기다리면 오타를 알아채기 어렵다
@@ -1518,7 +1609,7 @@ document.addEventListener('keydown', async (e) => {
   // 설정 탭
   if (tab === 'settings') {
     const f = settingFields()[sel] ?? null;
-    if (['x', 'o', 'b', 'c', 'l'].includes(e.key.toLowerCase())) e.preventDefault();
+    if (['x', 'o', 'b', 'c', 'l', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
@@ -1555,6 +1646,14 @@ document.addEventListener('keydown', async (e) => {
       case 'b':
       case 'B':
         if (cfg?.license?.selling && cfg.license.plan?.plan === 'free') return runBuy();
+        return;
+      case 's':
+      case 'S':
+        if (!cfg?.backup?.available) return;
+        return cfg.backup.enabled ? runBackupNow() : runBackupOn();
+      case 'u':
+      case 'U':
+        if (cfg?.backup?.available) return runBackupRestore();
         return;
       case 'c':
       case 'C':

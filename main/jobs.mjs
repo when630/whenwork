@@ -115,6 +115,20 @@ export function scheduleJobs(ctx) {
     } catch {}
   }
 
+  // 클라우드 백업 — 실제로 올릴지(하루 한 번, 바뀐 게 있을 때)는 backup.mjs가 정한다. 실패는 조용히
+  let backingUp = false;
+  async function runBackup({ force = false } = {}) {
+    if (backingUp) return { ok: false, error: '백업하는 중입니다' };
+    backingUp = true;
+    try {
+      return await ctx.backup.run({ force });
+    } catch {
+      return { ok: false, error: '백업하지 못했습니다' };
+    } finally {
+      backingUp = false;
+    }
+  }
+
   // IPC 핸들러(main/ipc.mjs)가 불러야 하는 것 — ctx.jobs에 붙여 둔다.
   ctx.jobs = {
     replayQueueOnce,
@@ -123,6 +137,7 @@ export function scheduleJobs(ctx) {
     revalidateLicense,
     refreshAds,
     watchPurchase,
+    runBackup,
     purchaseWatching: () => !!watch,
   };
 
@@ -138,5 +153,7 @@ export function scheduleJobs(ctx) {
     setTimeout(refreshAds, COLLECT_DELAY_MS);
     setInterval(refreshAds, LICENSE_CHECK_MS);
     setInterval(revalidateLicense, LICENSE_CHECK_MS);
+    setTimeout(runBackup, COLLECT_DELAY_MS * 2); // 라이선스 재검증 뒤에
+    setInterval(runBackup, LICENSE_CHECK_MS);
   }
 }

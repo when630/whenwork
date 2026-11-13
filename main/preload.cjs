@@ -58,6 +58,12 @@ contextBridge.exposeInMainWorld('whenwork', {
   shopOpen: () => ipcRenderer.send('shop:open'),
   adOpen: (id) => ipcRenderer.invoke('ad:open', id),
   supportOpen: () => ipcRenderer.invoke('support:open'),
+  backupGet: () => ipcRenderer.invoke('backup:get'),
+  backupEnable: (password) => ipcRenderer.invoke('backup:enable', password),
+  backupDisable: () => ipcRenderer.invoke('backup:disable'),
+  backupNow: () => ipcRenderer.invoke('backup:now'),
+  backupList: () => ipcRenderer.invoke('backup:list'),
+  backupRestore: (id, password) => ipcRenderer.invoke('backup:restore', id, password),
 
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),

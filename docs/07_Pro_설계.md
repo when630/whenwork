@@ -140,6 +140,14 @@
   - 스토어 등록에는 개인정보처리방침 URL이 필요하다 → 랜딩 페이지가 스토어 제출보다 먼저다.
 - **D-P17:** GitHub Releases는 계속 원본으로 둔다(NSIS exe·dmg). 랜딩 페이지가 `releases/latest/download/<파일명>`으로 늘 최신을 가리키도록 버전 없는 이름의 사본도 함께 올린다. 랜딩 페이지의 "다른 설치 방법"과 macOS 버튼이 여기를 가리킨다. macOS는 Apple Developer 보류 동안 dmg 직접 배포뿐이다(Mac App Store는 Apple Developer가 필요).
 
+## 판매 시작 (2026-11-13, 0.3.0)
+
+- Paddle 실계정 인증 완료(onboarding `completed`, 도메인 `whendesk.app` 승인). 상품 WHENWORK Lite `pro_01m793ensj…`, 가격 9,900원 1회 `pri_01m793ep2sf4…`(부가세 포함), 결제 수단: 카드·PayPal·Apple Pay·Bancontact·**카카오페이·네이버페이**, 기본 결제 링크 `whendesk.app/buy`, 정산 Payoneer.
+- 서버 실서비스 전환: sandbox 라이선스·기록 삭제, `PADDLE_ENV=production`, 실계정 알림 비밀 키·API 키.
+- 실결제 시험: 100% 할인 1회용 코드로 0원 결제 → 알림 전달 → 키 생성 → 앱 기기에 자동 적용 → 구매 확인 메일(받은편지함) 확인 후 코드 보관 처리.
+- 앱 0.3.0: `API_BASE = https://api.whendesk.app`, `PUBLIC_KEYS = { k202611 }` → `SALES_OPEN`. 이때부터 무료 사용자에게 광고 한 줄·프로젝트 3개 제한, 설정에 라이선스·응원하기.
+- 사용자에게 기기 수("3대")는 말하지 않는다 — 다른 PC·재설치는 "구매 복원"으로 안내하고, 서버의 키당 3대 제한은 공유 방지용으로만 둔다.
+
 ## 서버 구성
 
 ```

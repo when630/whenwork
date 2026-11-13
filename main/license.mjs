@@ -23,13 +23,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-// 배포된 앱이 믿는 공개키(Ed25519 raw 32바이트의 base64url). 서버를 세우는 날
-// tools/license-keygen.mjs로 만들어 여기에 넣는다. **비어 있으면 어떤 토큰도 통과하지 못한다** —
-// 키 없이 내보낸 빌드가 아무 토큰이나 믿는 일은 없다.
-export const PUBLIC_KEYS = {};
+// 배포된 앱이 믿는 공개키(Ed25519 raw 32바이트의 base64url). 개인키는 라이선스 서버(Worker 비밀값)에만 있다.
+// 키를 바꿀 때는 새 kid를 여기에 **먼저** 더해 배포한 뒤 서버를 옮긴다 — 옛 kid를 빼면 이미 받은 토큰이 무효가 된다.
+// 비어 있으면 어떤 토큰도 통과하지 못한다(판매 전 빌드).
+export const PUBLIC_KEYS = { k202611: '9YjijV4BhTlCPBikR7y94fsyteI4xysg2WOcYcF1tsw' };
 
-// 라이선스 서버 주소. 도메인을 정하기 전(설계 Q5)에는 null — 활성화는 "아직 판매 전"이라고 말한다.
-export const API_BASE = null;
+// 라이선스 서버 주소(D-P18, when630/whendesk-api). null이면 활성화는 "아직 판매 전"이라고 말한다.
+export const API_BASE = 'https://api.whendesk.app';
 
 export const APP = 'whenwork';
 

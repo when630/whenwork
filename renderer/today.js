@@ -731,8 +731,11 @@ function renderLicense() {
     a.onclick = fn;
     sec.append(a);
   };
-  if (lic.buyKinds?.includes('lite') && lic.plan?.plan === 'free') {
-    act('Lite 구매 — 9,900원, 한 번 (B)', runBuy);
+  const canLite = lic.buyKinds?.includes('lite') && lic.plan?.plan === 'free';
+  const canPro = lic.buyKinds?.includes('pro') && lic.plan?.plan !== 'pro';
+  if (canLite) act('Lite 구매 — 9,900원, 한 번 (B)', () => runBuy('lite'));
+  if (canPro) act('Pro 구독 — 연 19,800원, 자동 클라우드 백업 (P)', () => runBuy('pro'));
+  if (canLite || canPro) {
     if (lic.watching) sec.append(el('div', 'ctx', '결제를 마치면 키를 입력하지 않아도 자동으로 적용됩니다'));
     act('결제를 마쳤는데 그대로예요 (C)', runClaim);
   }
@@ -825,8 +828,8 @@ async function runBackupRestore() {
   return refresh();
 }
 
-async function runBuy() {
-  const r = await window.whenwork.licenseBuy('lite');
+async function runBuy(kind = 'lite') {
+  const r = await window.whenwork.licenseBuy(kind);
   if (!r.ok) return toast(r.error ?? '결제 페이지를 열지 못했습니다');
   toast('결제 페이지를 열었습니다 — 결제를 마치면 자동으로 적용됩니다', { holdMs: 6000 });
   return loadSettings();
@@ -1609,7 +1612,7 @@ document.addEventListener('keydown', async (e) => {
   // 설정 탭
   if (tab === 'settings') {
     const f = settingFields()[sel] ?? null;
-    if (['x', 'o', 'b', 'c', 'l', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
+    if (['x', 'o', 'b', 'p', 'c', 'l', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
@@ -1645,7 +1648,11 @@ document.addEventListener('keydown', async (e) => {
         return;
       case 'b':
       case 'B':
-        if (cfg?.license?.selling && cfg.license.plan?.plan === 'free') return runBuy();
+        if (cfg?.license?.selling && cfg.license.plan?.plan === 'free') return runBuy('lite');
+        return;
+      case 'p':
+      case 'P':
+        if (cfg?.license?.buyKinds?.includes('pro') && cfg.license.plan?.plan !== 'pro') return runBuy('pro');
         return;
       case 's':
       case 'S':

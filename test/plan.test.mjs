@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { currentPlan, projectGate, buyUrl, SALES_OPEN, BUY_KINDS } from '../main/plan.mjs';
+import { currentPlan, projectGate, buyUrl, purchaseArrived, SALES_OPEN, BUY_KINDS } from '../main/plan.mjs';
 
 // 앱이 지금 무엇을 허용하나(D-P02·D-P03). 가장 위험한 실수는 결제할 길이 없는 빌드에서
 // 모두에게 광고와 3개 제한을 거는 것이다 — 그건 업데이트 한 번으로 기능을 빼앗는 일이다(원칙 2).
@@ -41,14 +41,15 @@ test('프로젝트 문: 무료 3개 미만만 열리고, 막을 때는 제한 �
   assert.deepEqual(projectGate(free, NaN), { ok: true }, '개수를 모르면 막지 않는다');
 });
 
-test('구매 주소: 1단계는 Lite만, 이 기기 번호와 앱 이름을 싣는다', () => {
-  assert.deepEqual(BUY_KINDS, ['lite']);
+test('구매 주소: Lite와 Pro, 이 기기 번호와 앱 이름을 싣는다', () => {
+  assert.deepEqual(BUY_KINDS, ['lite', 'pro']);
   const u = new URL(buyUrl('lite', '1b4e28ba-2fa1-11d2-883f-0016d3cca427'));
   assert.equal(u.origin + u.pathname, 'https://whendesk.app/buy');
   assert.equal(u.searchParams.get('plan'), 'lite');
   assert.equal(u.searchParams.get('app'), 'whenwork');
   assert.equal(u.searchParams.get('i'), '1b4e28ba-2fa1-11d2-883f-0016d3cca427');
-  assert.equal(buyUrl('pro', 'x'), null, 'Pro는 아직 팔지 않는다');
+  assert.equal(new URL(buyUrl('pro', 'x')).searchParams.get('plan'), 'pro');
+  assert.equal(buyUrl('adfree', 'x'), null, '없는 상품');
   assert.equal(buyUrl('../evil', 'x'), null);
 });
 
@@ -67,4 +68,12 @@ test('제한은 IPC에서만 건다 — 저장소에 넣으면 가져오기가 �
 test('광고는 오늘 뷰에만 — 퀵캡처 창에는 광고 자리가 없다(원칙 4)', () => {
   const cap = fs.readFileSync(path.join(ROOT, 'renderer', 'capture.html'), 'utf8') + fs.readFileSync(path.join(ROOT, 'renderer', 'capture.js'), 'utf8');
   assert.doesNotMatch(cap, /adline|광고|licenseBuy/);
+});
+
+test('구매 지켜보기는 산 종류가 들어왔을 때만 끝난다 — 최근 Lite가 있는 기기가 Pro를 사도 Pro를 기다린다', () => {
+  assert.equal(purchaseArrived({ ok: true, kinds: ['lite'] }, 'pro'), false);
+  assert.equal(purchaseArrived({ ok: true, kinds: ['lite', 'pro'] }, 'pro'), true);
+  assert.equal(purchaseArrived({ ok: true, kinds: ['lite'] }, 'lite'), true);
+  assert.equal(purchaseArrived({ ok: false, pending: true }, 'lite'), false);
+  assert.equal(purchaseArrived(null, 'lite'), false);
 });

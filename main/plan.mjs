@@ -11,12 +11,17 @@ export const SALES_OPEN = !!API_BASE && Object.keys(PUBLIC_KEYS).length > 0;
 // 구매 안내 페이지 — 렌더러가 임의 주소를 열지 못하게 여기서만 정한다
 export const SHOP_URL = 'https://whendesk.app/work';
 const BUY_URL = 'https://whendesk.app/buy';
-// 1단계는 Lite만 판다 — 백업·동기화가 없는 Pro는 Lite와 차이가 없다(docs/07 D-P19)
-export const BUY_KINDS = ['lite'];
+// Lite(한 번)와 Pro(연 구독). Pro는 자동 클라우드 백업이 생기며 열었다(docs/07 D-P19·D-P24)
+export const BUY_KINDS = ['lite', 'pro'];
 
 // 앱 안 구매 — 결제 페이지에 이 기기 번호를 실어 보낸다. 서버가 결제 알림을 받으면 그 기기에
 // 키를 켜 두고, 앱은 claim으로 받아 간다(키를 입력하지 않는다). 기기 번호는 무작위 UUID라 무엇을
 // 드러내지 않는다(D-P06).
+// 지켜보던 구매가 들어왔나 — claim 결과에 그 종류가 있어야 한다
+export function purchaseArrived(claimResult, kind) {
+  return !!claimResult?.ok && Array.isArray(claimResult.kinds) && claimResult.kinds.includes(kind);
+}
+
 export function buyUrl(kind, instance) {
   if (!BUY_KINDS.includes(kind)) return null;
   const q = new URLSearchParams({ plan: kind, app: 'whenwork', i: String(instance ?? '') });

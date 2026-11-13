@@ -72,16 +72,21 @@ function store(overrides = {}) {
 const make = (dir, handler, extra = {}) =>
   createLicense({ dir, publicKeys: KEYS, apiBase: 'https://lic.test', fetchImpl: fakeFetch(handler), ...extra });
 
-test('배포 기본값은 아무것도 믿지 않는다 — 공개키·서버 주소가 정해지기 전', () => {
-  assert.deepEqual(PUBLIC_KEYS, {}, '키 없이 내보낸 빌드가 아무 토큰이나 믿으면 안 된다');
-  assert.equal(API_BASE, null);
+test('배포된 앱은 라이선스 서버의 키 하나만 믿는다 — 다른 키로 서명한 토큰은 통과하지 못한다', () => {
+  assert.deepEqual(Object.keys(PUBLIC_KEYS), ['k202611']);
+  assert.match(PUBLIC_KEYS.k202611, /^[A-Za-z0-9_-]{43}$/, 'Ed25519 공개키(raw 32바이트 base64url)');
+  assert.equal(API_BASE, 'https://api.whendesk.app');
+  // 테스트 키(t1)로 서명한 토큰은 배포 공개키 목록으로 검증되지 않는다
   const tok = sign({ kind: 'pro', instance: 'x', expiresAt: iso(NOW + 1e10) });
-  assert.equal(verifyToken(tok), null, '기본 공개키 목록으로는 어떤 토큰도 통과하지 못한다');
+  assert.equal(verifyToken(tok), null);
+  // 같은 kid를 사칭해도 서명이 맞지 않으면 거절
+  assert.equal(verifyToken(sign({ kind: 'lite', instance: 'x' }, { kid: 'k202611' })), null);
 });
 
 test('서버 주소가 없으면 활성화는 "아직 판매 전"이라고 말하고 아무것도 쓰지 않는다', async () => {
   const dir = tmpDir();
-  const lic = createLicense({ dir, publicKeys: KEYS });
+  // apiBase를 명시해 끈다 — 생략하면 배포 서버 주소(API_BASE)를 쓰게 돼 테스트가 실제 서버를 부른다
+  const lic = createLicense({ dir, publicKeys: KEYS, apiBase: null });
   const r = await lic.activate('PRO-KEY-00000001');
   assert.equal(r.ok, false);
   assert.match(r.error, /판매/);

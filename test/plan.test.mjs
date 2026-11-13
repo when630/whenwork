@@ -19,10 +19,10 @@ test('판매가 열리지 않은 빌드는 제한이 없다 — 광고 없음, �
   assert.equal(projectGate(p, 50).ok, true);
 });
 
-test('지금 이 빌드는 판매 전이다 — 서버 주소·공개키가 비어 있으면 SALES_OPEN은 false', () => {
-  // 키를 넣는 날 이 테스트를 바꾼다. 실수로 판매를 여는 빌드가 나가지 않게 일부러 묶어 둔다.
-  assert.equal(SALES_OPEN, false);
-  assert.equal(currentPlan({ now: NOW }).plan, 'open');
+test('이 빌드는 판매가 열려 있다(0.3.0~) — 서버 주소와 공개키가 둘 다 있어야 열린다', () => {
+  // 판매를 다시 닫는 빌드를 내야 하면 API_BASE를 null로 — 이 테스트가 그 변경을 드러낸다
+  assert.equal(SALES_OPEN, true);
+  assert.equal(currentPlan({ licenseState: {}, now: NOW }).plan, 'free', '판매가 열리면 라이선스 없는 사람은 무료');
 });
 
 test('판매가 열리면 라이선스 상태대로 — 무료는 광고·3개, Lite는 둘 다 없음', () => {

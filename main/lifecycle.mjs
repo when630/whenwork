@@ -19,6 +19,7 @@ import { winBackground } from './theme.mjs';
 import { createQueue } from './queue.mjs';
 import { createStore, validateExport } from './store.mjs';
 import { createBackup } from './backup.mjs';
+import { createSync } from './sync.mjs';
 import { createSettings } from './settings.mjs';
 import { createLicense, API_BASE } from './license.mjs';
 import { createAds } from './ads.mjs';
@@ -304,6 +305,21 @@ export function bootstrap() {
       return currentPlan({ licenseState: {} });
     }
   };
+  // OS 보안 저장소 — 백업·동기화 키를 감싼다(Windows DPAPI, macOS 키체인)
+  const protectKey = (b) => {
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('no safeStorage');
+    return safeStorage.encryptString(Buffer.from(b).toString('base64'));
+  };
+  const unprotectKey = (b) => Buffer.from(safeStorage.decryptString(Buffer.from(b)), 'base64');
+  // 기기 간 동기화(D-P26) — Pro일 때만. 행을 이 기기에서 암호화해 주고받는다
+  ctx.sync = createSync({
+    dir: app.getPath('userData'),
+    apiBase: API_BASE,
+    protect: protectKey,
+    unprotect: unprotectKey,
+    store: ctx.store,
+    credentials: () => (ctx.plan().sync ? ctx.license.proCredentials() : null),
+  });
   // 자동 클라우드 백업(D-P23) — Pro일 때만. 키는 OS 보안 저장소(safeStorage)로 감싸 backup.json에 둔다
   ctx.backup = createBackup({
     dir: app.getPath('userData'),
@@ -508,6 +524,7 @@ export function bootstrap() {
     // 큐 반영은 앱 시작 시 1회뿐이다(D-01/D-02) — 여기서 다시 부르지 않는다.
     // 밀린 캡처가 있다면 다음 기동이 반영하고, 이번 실행의 실패 건수는 ctx.pending이 이미 보여준다.
     win.webContents.send('today:refresh');
+    ctx.jobs?.syncOnShow?.(); // 창을 열 때 다른 PC의 변경을 받아 온다(1분에 한 번까지)
     // 옮겨둔 자리가 있으면 거기, 없으면 화면 중앙 — 자리 잡기는 restore 뒤여야 한다(D8, 최소화 중의 setPosition은 버려진다)
     platform.activate(win, () => placeWindow(win, 'todayBounds'));
   }

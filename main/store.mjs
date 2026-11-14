@@ -889,7 +889,110 @@ export function createStore(file) {
     return dest;
   }
 
+  // ── 기기 간 동기화(D-P26) — main/sync.mjs가 부른다. 암호화·서버는 여기서 모른다.
+  //
+  // syncChanges(since): updated_at이 since보다 나중인 행. 항목은 로컬 project_id 대신 프로젝트 uid로
+  // 적는다(다른 기기의 id는 다르다).
+  function syncChanges(since = '') {
+    if (!db || !state.ok) return { project: [], item: [] };
+    const s = since ?? '';
+    return {
+      project: db
+        .prepare('SELECT uid, name, status, sort, deleted_at, updated_at FROM project WHERE updated_at > ? ORDER BY updated_at')
+        .all(s)
+        .map((r) => ({ ...r })),
+      item: db
+        .prepare(
+          `SELECT i.id, p.uid AS project_uid, i.kind, i.title, i.due, i.waiting_for, i.captured_at, i.done_at,
+                  i.source, i.context, i.note, i.nudged_at, i.nudge_count, i.deleted_at, i.updated_at
+             FROM item i LEFT JOIN project p ON p.id = i.project_id
+            WHERE i.updated_at > ? ORDER BY i.updated_at`
+        )
+        .all(s)
+        .map((r) => ({ ...r })),
+    };
+  }
+
+  // 받은 행 반영 — 로컬보다 나중에 바뀐 것만(같으면 그대로 둔다: 서버가 이미 같은 결론을 냈다).
+  // updated_at을 받은 값 그대로 적어, 트리거가 "이 기기에서 바뀐 것"으로 다시 찍지 않게 한다.
+  // 프로젝트를 먼저 — 항목이 가리킬 uid가 있어야 한다. 모르는 uid를 가리키는 항목은 프로젝트 없이 둔다.
+  // 같은 이름의 다른 프로젝트가 이미 있으면(두 기기에서 따로 만든 경우) 받은 쪽에 " (2)"를 붙인다 —
+  // 이름이 UNIQUE라 그대로는 못 들어가고, 합치면 어느 쪽 항목이 어디로 갔는지 알 수 없게 된다.
+  function applyRemote({ project = [], item = [] } = {}) {
+    if (!db || !state.ok) throw new Error('store not open');
+    let applied = 0;
+    let skipped = 0;
+    withTransaction(db, () => {
+      const byUid = db.prepare('SELECT id, updated_at FROM project WHERE uid = ?');
+      const nameTaken = db.prepare('SELECT 1 FROM project WHERE name = ? AND (uid IS NOT ? )');
+      const freeName = (name, uid) => {
+        if (!nameTaken.get(name, uid)) return name;
+        for (let n = 2; n < 1000; n++) {
+          const candidate = `${name} (${n})`;
+          if (!nameTaken.get(candidate, uid)) return candidate;
+        }
+        return `${name} (${uid.slice(0, 6)})`;
+      };
+      const insP = db.prepare(
+        `INSERT INTO project (uid, name, status, sort, deleted_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+      );
+      const updP = db.prepare(
+        `UPDATE project SET name = ?, status = ?, sort = ?, deleted_at = ?, updated_at = ? WHERE uid = ?`
+      );
+      for (const r of project) {
+        if (typeof r?.uid !== 'string' || typeof r?.name !== 'string' || !r.name.trim() || typeof r?.updated_at !== 'string') {
+          skipped++;
+          continue;
+        }
+        const local = byUid.get(r.uid);
+        if (local && local.updated_at >= r.updated_at) {
+          skipped++;
+          continue;
+        }
+        const name = freeName(r.name, r.uid);
+        const status = r.status === 'active' ? 'active' : 'archived';
+        if (local) updP.run(name, status, Number(r.sort ?? 0), r.deleted_at ?? null, r.updated_at, r.uid);
+        else insP.run(r.uid, name, status, Number(r.sort ?? 0), r.deleted_at ?? null, r.updated_at);
+        applied++;
+      }
+      const KINDS = new Set(['inbox', 'todo', 'waiting']);
+      const localItem = db.prepare('SELECT updated_at FROM item WHERE id = ?');
+      const upI = db.prepare(
+        `INSERT INTO item (id, project_id, kind, title, due, waiting_for, captured_at, done_at,
+                           source, context, note, nudged_at, nudge_count, deleted_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+           project_id = excluded.project_id, kind = excluded.kind, title = excluded.title, due = excluded.due,
+           waiting_for = excluded.waiting_for, captured_at = excluded.captured_at, done_at = excluded.done_at,
+           source = excluded.source, context = excluded.context, note = excluded.note, nudged_at = excluded.nudged_at,
+           nudge_count = excluded.nudge_count, deleted_at = excluded.deleted_at, updated_at = excluded.updated_at`
+      );
+      for (const r of item) {
+        if (typeof r?.id !== 'string' || !r.id || typeof r?.title !== 'string' || !r.title || typeof r?.captured_at !== 'string' || typeof r?.updated_at !== 'string') {
+          skipped++;
+          continue;
+        }
+        const local = localItem.get(r.id);
+        if (local && local.updated_at >= r.updated_at) {
+          skipped++;
+          continue;
+        }
+        const pid = r.project_uid ? byUid.get(r.project_uid)?.id ?? null : null;
+        upI.run(
+          r.id, pid, KINDS.has(r.kind) ? r.kind : 'inbox', r.title, r.due ?? null, r.waiting_for ?? null,
+          r.captured_at, r.done_at ?? null, r.source ?? 'manual',
+          r.context == null ? null : typeof r.context === 'string' ? r.context : JSON.stringify(r.context),
+          r.note ?? null, r.nudged_at ?? null, Number(r.nudge_count ?? 0), r.deleted_at ?? null, r.updated_at
+        );
+        applied++;
+      }
+    });
+    return { applied, skipped };
+  }
+
   return {
+    syncChanges,
+    applyRemote,
     open,
     close,
     reopen,

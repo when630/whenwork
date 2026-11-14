@@ -76,12 +76,57 @@ ALTER TABLE project ADD COLUMN deleted_at TEXT;
 UPDATE project SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE status != 'active';
 `;
 
+// v4 — 기기 간 동기화(Pro, docs/07 D-P14·D-P26)의 선행 이행.
+//   - project.uid: INTEGER id는 두 기기에서 겹친다. 동기화는 uid로 같은 프로젝트를 알아본다.
+//     항목은 처음부터 TEXT UUID라 그대로. 항목이 가리키는 것은 여전히 로컬 project_id다
+//     (동기화가 주고받을 때만 uid로 바꿔 적는다) — 쓰는 쪽 코드를 바꾸지 않으려고.
+//   - updated_at: 행이 마지막으로 바뀐 시각. 동기화는 나중에 바뀐 쪽을 남긴다.
+//     **트리거가 찍는다** — 쓰기 함수 20여 개를 하나하나 고치면 하나는 빠지고, 빠진 쓰기는
+//     다른 기기로 가지 않는다. 문장이 updated_at을 직접 정하면(동기화가 받아 적을 때) 손대지 않는다.
+//   - 기존 행의 updated_at은 "지금"이 아니라 그 행에서 알 수 있는 가장 늦은 시각으로 채운다 —
+//     같은 데이터를 가진 두 기기가 처음 맞춰 볼 때 같은 값이 나와 서로 덮어쓰지 않게.
+// 시각 형식은 앱의 다른 시각과 같은 ISO(밀리초, Z) — 문자열 비교가 곧 시간 비교다.
+const NOW_ISO = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`;
+const V4_SQL = `
+ALTER TABLE project ADD COLUMN uid TEXT;
+ALTER TABLE project ADD COLUMN updated_at TEXT;
+ALTER TABLE item ADD COLUMN updated_at TEXT;
+UPDATE project SET uid = lower(hex(randomblob(16)));
+UPDATE project SET updated_at = coalesce(deleted_at, ${NOW_ISO});
+UPDATE item SET updated_at = max(captured_at, coalesce(done_at, ''), coalesce(deleted_at, ''), coalesce(nudged_at, ''));
+CREATE UNIQUE INDEX project_uid ON project (uid);
+CREATE INDEX project_updated ON project (updated_at);
+CREATE INDEX item_updated ON item (updated_at);
+CREATE TRIGGER project_fill AFTER INSERT ON project
+  WHEN NEW.uid IS NULL OR NEW.updated_at IS NULL
+BEGIN
+  UPDATE project SET uid = coalesce(NEW.uid, lower(hex(randomblob(16)))),
+                     updated_at = coalesce(NEW.updated_at, ${NOW_ISO})
+   WHERE id = NEW.id;
+END;
+CREATE TRIGGER project_touch AFTER UPDATE ON project
+  WHEN NEW.updated_at IS OLD.updated_at
+BEGIN
+  UPDATE project SET updated_at = ${NOW_ISO} WHERE id = NEW.id;
+END;
+CREATE TRIGGER item_fill AFTER INSERT ON item
+  WHEN NEW.updated_at IS NULL
+BEGIN
+  UPDATE item SET updated_at = ${NOW_ISO} WHERE id = NEW.id;
+END;
+CREATE TRIGGER item_touch AFTER UPDATE ON item
+  WHEN NEW.updated_at IS OLD.updated_at
+BEGIN
+  UPDATE item SET updated_at = ${NOW_ISO} WHERE id = NEW.id;
+END;
+`;
+
 // PRAGMA user_version 순번 마이그레이션(D-12). 새 DB도 빈 상태(v0)에서 이 배열을 처음부터
 // 끝까지 밟아 올라간다 — 경로가 하나다. 한 번 배포된 함수는 절대 고치지 않는다.
-export const MIGRATIONS = [(db) => db.exec(V1_SQL), (db) => db.exec(V2_SQL), (db) => db.exec(V3_SQL)];
+export const MIGRATIONS = [(db) => db.exec(V1_SQL), (db) => db.exec(V2_SQL), (db) => db.exec(V3_SQL), (db) => db.exec(V4_SQL)];
 
 // schemaTables()가 대조하는 원본 — MIGRATIONS와 함수 대 함수로 짝을 이룬다.
-const MIGRATION_SQL = [V1_SQL, V2_SQL, V3_SQL];
+const MIGRATION_SQL = [V1_SQL, V2_SQL, V3_SQL, V4_SQL];
 
 // 스키마가 실제로 만드는 테이블 이름 — STOR-05 가드 테스트가 이것과 대조한다.
 export function schemaTables() {
@@ -766,11 +811,11 @@ export function createStore(file) {
       export_version: EXPORT_VERSION,
       schema_version: MIGRATIONS.length,
       exported_at: new Date().toISOString(),
-      project: db.prepare('SELECT id, name, status, sort FROM project ORDER BY sort, id').all(),
+      project: db.prepare('SELECT id, uid, name, status, sort, deleted_at, updated_at FROM project ORDER BY sort, id').all(),
       item: db
         .prepare(
           `SELECT id, project_id, kind, title, due, waiting_for, captured_at, done_at,
-                  source, context, note, nudged_at, nudge_count, deleted_at
+                  source, context, note, nudged_at, nudge_count, deleted_at, updated_at
              FROM item ORDER BY captured_at`
         )
         .all(),
@@ -794,14 +839,23 @@ export function createStore(file) {
       db.exec('DELETE FROM item');
       db.exec('DELETE FROM event');
       db.exec('DELETE FROM project');
-      const ip = db.prepare('INSERT INTO project (id, name, status, sort) VALUES (?, ?, ?, ?)');
+      const ip = db.prepare(
+        'INSERT INTO project (id, uid, name, status, sort, deleted_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      );
       // 옛 내보내기 파일에는 abbr이 들어 있다 — 그 필드는 그냥 버린다(스키마에 자리가 없다).
       // schema_version이 지금보다 낮은 파일은 validateExport가 통과시키므로 여기서 깨지면 안 된다.
-      for (const r of data.project) ip.run(r.id, r.name, r.status ?? 'active', r.sort ?? 0);
+      // v4 전 파일에는 uid·updated_at·deleted_at이 없다 — null이면 트리거가 uid·시각을 채운다.
+      // 지운 시각이 없는 옛 보관 프로젝트는 v3 이행과 같게 지금으로 채운다(30일 정리 규칙을 탄다).
+      const nowIso = new Date().toISOString();
+      for (const r of data.project) {
+        const status = r.status ?? 'active';
+        const deletedAt = r.deleted_at ?? (status !== 'active' ? nowIso : null);
+        ip.run(r.id, typeof r.uid === 'string' && r.uid ? r.uid : null, r.name, status, r.sort ?? 0, deletedAt, r.updated_at ?? null);
+      }
       const ii = db.prepare(
         `INSERT INTO item (id, project_id, kind, title, due, waiting_for, captured_at, done_at,
-                           source, context, note, nudged_at, nudge_count, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                           source, context, note, nudged_at, nudge_count, deleted_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (const r of data.item) {
         ii.run(
@@ -809,7 +863,8 @@ export function createStore(file) {
           r.captured_at, r.done_at ?? null, r.source ?? 'manual',
           // context는 객체로 내보냈으면 객체로 돌아와야 한다 — 문자열이면 그대로 둔다
           r.context == null ? null : typeof r.context === 'string' ? r.context : JSON.stringify(r.context),
-          r.note ?? null, r.nudged_at ?? null, Number(r.nudge_count ?? 0), r.deleted_at ?? null
+          r.note ?? null, r.nudged_at ?? null, Number(r.nudge_count ?? 0), r.deleted_at ?? null,
+          r.updated_at ?? null
         );
       }
       const ie = db.prepare('INSERT INTO event (id, at, kind, detail) VALUES (?, ?, ?, ?)');

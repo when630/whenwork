@@ -354,6 +354,7 @@ export function registerIpc(ctx) {
       const bad = validateExport(parsed);
       if (bad) return { ok: false, error: bad };
       const out = ctx.store.importAll(parsed);
+      ctx.sync?.markAllDirty?.(); // 동기화가 켜져 있으면 가져온 행을 다시 올린다 — 다른 PC의 더 최근 변경은 남는다
       ctx.todayWin?.webContents.send('today:refresh');
       return { ok: true, ...out };
     } catch {
@@ -438,8 +439,25 @@ export function registerIpc(ctx) {
   ipcMain.handle('backup:list', () => ctx.backup.list());
   ipcMain.handle('backup:restore', async (_e, id, password) => {
     const r = await ctx.backup.restore(id, password || null);
-    if (r.ok) refreshViews();
+    if (r.ok) {
+      ctx.sync?.markAllDirty?.();
+      refreshViews();
+    }
     return r;
+  });
+
+  // ── 기기 간 동기화(D-P26). 암호는 키로 바꾸고 버린다
+  const syncState = () => ({ available: !!ctx.plan().sync, ...ctx.sync.status() });
+  ipcMain.handle('sync:get', () => syncState());
+  ipcMain.handle('sync:enable', async (_e, password, reset) => {
+    const r = await ctx.sync.enable(password, { reset: !!reset });
+    if (r.ok && r.pulled > 0) refreshViews();
+    return { ...r, state: syncState() };
+  });
+  ipcMain.handle('sync:disable', () => ({ ...ctx.sync.disable(), state: syncState() }));
+  ipcMain.handle('sync:now', async () => {
+    const r = await (ctx.jobs?.runSync ? ctx.jobs.runSync() : ctx.sync.run());
+    return { ...r, state: syncState() };
   });
 
   ipcMain.on('shop:open', () => shell.openExternal(SHOP_URL));

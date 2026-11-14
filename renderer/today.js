@@ -409,7 +409,7 @@ const KEYMAP = [
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 프로젝트 보기']]],
   ['지운 프로젝트', [['↑↓', '고르기'], ['Enter', '되살리기'], ['Esc', '뒤로']]],
-  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json'], ['L', '구매 복원(이메일)'], ['S', '클라우드 백업(Pro)'], ['U', '백업에서 되살리기(Pro)'], ['K', '라이선스 키 직접 입력(지원용)']]],
+  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json'], ['L', '구매 복원(이메일)'], ['D', '기기 간 동기화(Pro)'], ['S', '클라우드 백업(Pro)'], ['U', '백업에서 되살리기(Pro)'], ['K', '라이선스 키 직접 입력(지원용)']]],
   ['퀵캡처', [['{hotkey}', '열기·닫기'], ['Enter', '저장'], ['Tab', '오늘 뷰']]],
   ['인박스 단축키', [['{inboxHotkey}', '어디서든 인박스 열기·닫기']]],
 ];
@@ -657,6 +657,7 @@ function renderSettings() {
   body.append(renderLicense());
 
   // ── 클라우드 백업(D-P23) — Pro일 때만
+  if (cfg?.sync?.available) body.append(renderSync());
   if (cfg?.backup?.available) body.append(renderBackup());
 
   // ── 응원하기(D-P22) — 서버가 커피 사주기 주소를 둔 앱만
@@ -748,6 +749,64 @@ function renderLicense() {
     act(`${name}${s.valid ? '' : ' (확인되지 않음)'} — 이 PC에서 해제 (다른 PC로 옮길 때)`, () => runDeactivate(kind, name));
   }
   return sec;
+}
+
+function renderSync() {
+  const s = cfg.sync;
+  const sec = el('div', 'set-foot');
+  sec.append(el('div', 'sec-h', '기기 간 동기화'));
+  const when = s.lastAt ? new Date(s.lastAt).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }) : null;
+  sec.append(el('div', 'ctx', s.enabled
+    ? `켜짐 — 바뀐 것이 있을 때와 창을 열 때 주고받습니다${when ? ` · 마지막 ${when}` : ''}`
+    : '같은 구매로 쓰는 PC끼리 항목·프로젝트를 맞춥니다. 이 PC에서 암호화해서 주고받아 서버는 내용을 읽을 수 없습니다'));
+  if (s.lastError) sec.append(el('div', 'ctx', s.lastError));
+  const act = (label, fn) => {
+    const a = el('div', 'set-act');
+    a.append(window.ICONS.context(), document.createTextNode(` ${label}`));
+    a.onclick = fn;
+    sec.append(a);
+  };
+  if (s.enabled) {
+    act('지금 동기화 (D)', runSyncNow);
+    act('끄기', runSyncOff);
+  } else {
+    act('켜기 (D) — 동기화 암호를 정합니다', runSyncOn);
+  }
+  return sec;
+}
+
+async function runSyncOn() {
+  const yes = await promptText('동기화 암호를 잊으면 누구도(개발자도) 동기화된 내용을 열 수 없습니다. 다른 PC에서도 같은 암호를 넣습니다. 계속하려면 y', '');
+  if (yes?.toLowerCase() !== 'y') return;
+  const pw = await promptText('동기화 암호 (8자 이상 — 백업 암호와 같게 정하면 기억하기 쉽습니다)', '', { secret: true });
+  if (!pw) return;
+  toast('동기화를 켜는 중…', { spinner: true, holdMs: 0 });
+  let r = await window.whenwork.syncEnable(pw, false);
+  if (!r.ok && r.wrongPassword) {
+    const again = await promptText('다른 PC에서 정한 동기화 암호와 다릅니다. 그 암호를 잊었다면 서버의 동기화 기록을 지우고 이 암호로 새로 시작할 수 있습니다(다른 PC들은 새 암호로 다시 켜야 합니다). 새로 시작하려면 y', '');
+    if (again?.toLowerCase() !== 'y') return toast('켜지 않았습니다 — 다른 PC에서 정한 암호로 다시 시도해 주세요', { holdMs: 6000 });
+    toast('동기화를 새로 시작하는 중…', { spinner: true, holdMs: 0 });
+    r = await window.whenwork.syncEnable(pw, true);
+  }
+  toast(r.ok ? `켰습니다 — 받은 것 ${r.pulled ?? 0}건, 올린 것 ${r.pushed ?? 0}건` : (r.error ?? '켜지 못했습니다'), { holdMs: r.ok ? 4000 : 7000 });
+  await loadSettings();
+  return refresh();
+}
+
+async function runSyncNow() {
+  toast('동기화하는 중…', { spinner: true, holdMs: 0 });
+  const r = await window.whenwork.syncNow();
+  toast(r.ok ? `동기화했습니다 — 받은 것 ${r.pulled ?? 0}건, 올린 것 ${r.pushed ?? 0}건` : (r.error ?? '동기화하지 못했습니다'), { holdMs: r.ok ? 3000 : 7000 });
+  await loadSettings();
+  return refresh();
+}
+
+async function runSyncOff() {
+  const yes = await promptText('이 PC의 동기화를 끕니다 (이 PC의 데이터와 다른 PC는 그대로입니다). 계속하려면 y', '');
+  if (yes?.toLowerCase() !== 'y') return;
+  await window.whenwork.syncDisable();
+  toast('껐습니다', { holdMs: 3000 });
+  return loadSettings();
 }
 
 function renderBackup() {
@@ -938,6 +997,11 @@ async function loadSettings() {
   } catch {
     cfg.backup = null;
   }
+  try {
+    cfg.sync = await window.whenwork.syncGet();
+  } catch {
+    cfg.sync = null;
+  }
   render();
 }
 
@@ -1124,6 +1188,7 @@ function renderFooter() {
     add('I', '가져오기');
     add('R', '업데이트');
     if (cfg?.license?.selling) add('L', '구매 복원');
+    if (cfg?.sync?.available) add('D', '동기화');
     if (cfg?.backup?.available) add('S', '백업');
   } else if (selectedItem()?.archived) {
     add('Space', '되살리기');
@@ -1612,7 +1677,7 @@ document.addEventListener('keydown', async (e) => {
   // 설정 탭
   if (tab === 'settings') {
     const f = settingFields()[sel] ?? null;
-    if (['x', 'o', 'b', 'p', 'c', 'l', 's', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
+    if (['x', 'o', 'b', 'p', 'c', 'l', 's', 'u', 'd'].includes(e.key.toLowerCase())) e.preventDefault();
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
@@ -1654,6 +1719,10 @@ document.addEventListener('keydown', async (e) => {
       case 'P':
         if (cfg?.license?.buyKinds?.includes('pro') && cfg.license.plan?.plan !== 'pro') return runBuy('pro');
         return;
+      case 'd':
+      case 'D':
+        if (!cfg?.sync?.available) return;
+        return cfg.sync.enabled ? runSyncNow() : runSyncOn();
       case 's':
       case 'S':
         if (!cfg?.backup?.available) return;

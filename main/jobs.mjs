@@ -12,6 +12,8 @@ const PURCHASE_WATCH_MS = 20 * 60_000; // 결제 페이지를 열고 이만큼 �
 const PURGE_DAYS = 30; // 소프트 삭제한 항목을 실제로 비우기까지 두는 기간
 const BRIEFING_CHECK_MS = 60_000;
 const COLLECT_DELAY_MS = 30_000; // 켜자마자 부팅이 무거워지지 않도록 조금 뒤에
+const SYNC_CHECK_MS = 60_000; // 이 기기에서 바뀐 것이 있는지(로컬만) 보는 간격
+const SYNC_SHOW_MS = 60_000; // 창을 열 때 받아 오기의 최소 간격
 
 // ── D-08: 백그라운드 작업·타이머 등록. ctx를 받아 그 안의 store/queue/settings/tray를 쓴다.
 //
@@ -138,6 +140,30 @@ export function scheduleJobs(ctx) {
     }
   }
 
+  // 기기 간 동기화 — 1분마다 이 기기에서 바뀐 것이 있는지 로컬로만 보고, 있을 때만 서버를 부른다.
+  // 창을 열 때는 받아 온다(1분에 한 번까지). 주기적으로 서버를 두드리지 않는다(요청 수 = 비용).
+  let lastSyncAt = 0;
+  async function runSync() {
+    try {
+      const r = await ctx.sync.run();
+      lastSyncAt = Date.now();
+      if (r?.pulled > 0) refreshToday();
+      return r;
+    } catch {
+      return { ok: false, error: '동기화하지 못했습니다' };
+    }
+  }
+  function syncIfChanged() {
+    try {
+      if (ctx.sync.hasLocalChanges()) runSync();
+    } catch {}
+  }
+  function syncOnShow() {
+    if (Date.now() - lastSyncAt < SYNC_SHOW_MS) return;
+    if (!ctx.sync.status().enabled) return;
+    runSync();
+  }
+
   // IPC 핸들러(main/ipc.mjs)가 불러야 하는 것 — ctx.jobs에 붙여 둔다.
   ctx.jobs = {
     replayQueueOnce,
@@ -147,6 +173,8 @@ export function scheduleJobs(ctx) {
     refreshAds,
     watchPurchase,
     runBackup,
+    runSync,
+    syncOnShow,
     purchaseWatching: () => !!watch,
   };
 
@@ -164,5 +192,7 @@ export function scheduleJobs(ctx) {
     setInterval(revalidateLicense, LICENSE_CHECK_MS);
     setTimeout(runBackup, COLLECT_DELAY_MS * 2); // 라이선스 재검증 뒤에
     setInterval(runBackup, LICENSE_CHECK_MS);
+    setTimeout(runSync, COLLECT_DELAY_MS * 2); // 켠 직후 한 번 — 꺼져 있던 동안의 다른 PC 변경
+    setInterval(syncIfChanged, SYNC_CHECK_MS);
   }
 }

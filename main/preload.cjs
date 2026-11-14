@@ -64,6 +64,10 @@ contextBridge.exposeInMainWorld('whenwork', {
   backupNow: () => ipcRenderer.invoke('backup:now'),
   backupList: () => ipcRenderer.invoke('backup:list'),
   backupRestore: (id, password) => ipcRenderer.invoke('backup:restore', id, password),
+  syncGet: () => ipcRenderer.invoke('sync:get'),
+  syncEnable: (password, reset) => ipcRenderer.invoke('sync:enable', password, reset),
+  syncDisable: () => ipcRenderer.invoke('sync:disable'),
+  syncNow: () => ipcRenderer.invoke('sync:now'),
 
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),

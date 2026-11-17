@@ -159,7 +159,10 @@ test('활성화 실패는 사람 말로 — 서버 오류 코드·네트워크',
   assert.match((await lic.activate('WRONG')).error, /확인되지 않는 키/);
   assert.match((await lic.activate('')).error, /입력/);
   const limit = make(tmpDir(), store({ activate: () => ({ status: 409, json: { error: 'activation_limit' } }) }));
-  assert.match((await limit.activate('PRO-KEY-00000001')).error, /기기 수/);
+  const full = (await limit.activate('PRO-KEY-00000001')).error;
+  assert.match(full, /이 PC에서 해제/);
+  assert.match(full, /30일/);
+  assert.doesNotMatch(full, /d+대|키로/, '기기 수와 키는 말하지 않는다(D-P21)');
   const down = make(tmpDir(), store({ activate: () => 'network' }));
   assert.match((await down.activate('PRO-KEY-00000001')).error, /인터넷 연결/);
   const weird = make(tmpDir(), store({ activate: () => ({ status: 500, json: { error: 'stack trace at /srv/x.js' } }) }));

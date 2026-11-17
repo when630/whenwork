@@ -59,9 +59,9 @@
       "shortcutName": "WHENWORK"
     },
     "appx": {
-      "identityName": "when630.WHENWORK",
-      "publisher": "CN=WHENWORK-Dev",
-      "publisherDisplayName": "when630",
+      "identityName": "WHENDESK.WHENWORK",
+      "publisher": "CN=36721C0C-F537-46DB-B77F-16A73702E925",
+      "publisherDisplayName": "WHENDESK",
       "applicationId": "WHENWORK",
       "displayName": "WHENWORK",
       "languages": [

@@ -112,3 +112,15 @@ test('무게대로 섞인다', () => {
   assert.equal(counts.heavy, 30);
   assert.equal(counts['house-lite'], 10);
 });
+
+test('광고 줄 자리 — 목록 바로 아래·번호 띠 위, 닫거나 광고가 없으면 칸째 사라진다', async () => {
+  const fsm = await import('node:fs');
+  const pathm = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = pathm.join(pathm.dirname(fileURLToPath(import.meta.url)), '..');
+  const html = fsm.readFileSync(pathm.join(root, 'renderer', 'today.html'), 'utf8');
+  const at = (id) => html.indexOf(`id="${id}"`);
+  assert.ok(at('body') < at('adline') && at('adline') < at('numlegend'), '목록 → 광고 → 번호 띠 순서');
+  // .adline { display: flex }가 hidden 속성을 이기면 닫은 뒤에도 테두리·여백만 있는 빈 띠가 남는다
+  assert.match(html, /\.adline\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
+});

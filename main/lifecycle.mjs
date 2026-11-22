@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { platform } from './platform/index.mjs';
-import { winBackground } from './theme.mjs';
+import { winBackground, themeSource } from './theme.mjs';
 import { createQueue } from './queue.mjs';
 import { createStore, validateExport } from './store.mjs';
 import { createBackup } from './backup.mjs';
@@ -679,7 +679,14 @@ export function bootstrap() {
   app.setName('whenwork');
 
   app.whenReady().then(async () => {
-    // OS 테마가 바뀌면 렌더러 CSS는 알아서 바뀐다 — 창 바탕색(그리기 전 한 프레임)만 따라 맞춘다
+    // 화면 테마(설정) — 창을 만들기 전에 정한다. 바꾸면 'updated'가 와서 창 바탕색도 따라간다
+    ctx.applyTheme = () => {
+      try {
+        nativeTheme.themeSource = themeSource(ctx.settings.get('theme'));
+      } catch {}
+    };
+    ctx.applyTheme();
+    // OS 테마(또는 설정)가 바뀌면 렌더러 CSS는 알아서 바뀐다 — 창 바탕색(그리기 전 한 프레임)만 따라 맞춘다
     nativeTheme.on('updated', () => {
       const dark = nativeTheme.shouldUseDarkColors;
       for (const [win, kind] of [[ctx.captureWin, 'capture'], [ctx.todayWin, 'today']]) {

@@ -44,6 +44,17 @@ const SETTING_FIELDS = [
     onlyIf: 'keepOpen',
     hint: '끄면 일반 창처럼 다른 창 뒤로 가고 작업 표시줄에 버튼이 생긴다 — 트레이를 누르면 다시 앞으로 온다',
   },
+  {
+    key: 'theme',
+    label: '화면 테마',
+    kind: 'choice',
+    options: [
+      ['system', '시스템 설정 따름'],
+      ['light', '밝게'],
+      ['dark', '어둡게'],
+    ],
+    hint: 'Enter를 누를 때마다 바뀝니다 — 시스템 설정을 따르거나, 이 앱만 밝게·어둡게 고정합니다',
+  },
 ];
 
 let state = null; // 마지막으로 받은 서버 상태
@@ -1009,6 +1020,13 @@ async function editSetting(f) {
   if (!f || !cfg) return;
   if (f.kind === 'bool') {
     await window.whenwork.settingsSet(f.key, cfg.values[f.key] === false);
+    return loadSettings();
+  }
+  // 고르기 — Enter마다 다음 것으로. 첫 번째(기본)로 돌아오면 설정에서 지운다
+  if (f.kind === 'choice') {
+    const keys = f.options.map(([k]) => k);
+    const next = keys[(Math.max(0, keys.indexOf(cfg.values[f.key] ?? keys[0])) + 1) % keys.length];
+    await window.whenwork.settingsSet(f.key, next === keys[0] ? null : next);
     return loadSettings();
   }
   if (f.kind === 'hotkey') {

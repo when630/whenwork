@@ -315,3 +315,11 @@ test('정렬 — 마감순은 마감 없는 것을 뒤로, 최신·오래된·�
   assert.deepEqual(ids('이름순'), ['g', 'n', 'd']);
   assert.deepEqual(list.map((r) => r.id), ['n', 'g', 'd']);
 });
+
+test('고르기 설정은 고른 것의 이름을, 안 골랐으면 첫 번째에 (기본)을 붙여 보인다', () => {
+  const f = { key: 'theme', kind: 'choice', options: [['system', '시스템 설정 따름'], ['light', '밝게'], ['dark', '어둡게']] };
+  assert.equal(VIEW.settingDisplay(f, {}), '시스템 설정 따름 (기본)');
+  assert.equal(VIEW.settingDisplay(f, { theme: 'dark' }), '어둡게');
+  assert.equal(VIEW.settingDisplay(f, { theme: 'light' }), '밝게');
+  assert.equal(VIEW.settingDisplay(f, { theme: 'weird' }), '시스템 설정 따름 (기본)');
+});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WIN_BG, winBackground } from '../main/theme.mjs';
+import { WIN_BG, winBackground, THEMES, themeSource } from '../main/theme.mjs';
 
 // 브랜드 색(안개 + 라임)은 renderer/tokens.css 한 곳에 있다. 화면을 켜 봐서는 놓치기 쉬운 것 —
 // 대비가 기준 아래로 떨어진 글자, 토큰을 거치지 않고 박힌 색, 창 바탕색과 CSS의 어긋남 — 을 여기서 잡는다.
@@ -95,4 +95,28 @@ test('lifecycle.mjs는 창 바탕색을 theme.mjs에서만 받는다', () => {
   const life = fs.readFileSync(path.join(ROOT, 'main', 'lifecycle.mjs'), 'utf8');
   assert.equal((life.match(/backgroundColor:\s*'#/g) ?? []).length, 0);
   assert.match(life, /nativeTheme\.on\('updated'/);
+});
+
+test('화면 테마 설정 — 시스템·밝게·어둡게만, 모르는 값과 빈 값은 시스템을 따른다', () => {
+  assert.deepEqual(THEMES, ['system', 'light', 'dark']);
+  assert.equal(themeSource('dark'), 'dark');
+  assert.equal(themeSource('light'), 'light');
+  assert.equal(themeSource(undefined), 'system');
+  assert.equal(themeSource(''), 'system');
+  assert.equal(themeSource('purple'), 'system');
+});
+
+test('화면 테마는 설정을 저장하면 바로 적용하고, 앱을 켤 때 창보다 먼저 적용한다', () => {
+  const ipc = fs.readFileSync(path.join(ROOT, 'main', 'ipc.mjs'), 'utf8');
+  const keys = ipc.slice(ipc.indexOf('const SETTING_KEYS'), ipc.indexOf(';', ipc.indexOf('const SETTING_KEYS')));
+  assert.ok(keys.includes("'theme'"), '설정 화면에서 바꿀 수 있는 키');
+  assert.ok(ipc.includes("if (key === 'theme') ctx.applyTheme?.();"), '저장하면 바로 적용');
+  assert.ok(ipc.includes("if (key === 'theme' && value != null && value !== '' && !THEMES.includes(value)) return { ok: false };"), '모르는 값은 저장하지 않는다');
+  const life = fs.readFileSync(path.join(ROOT, 'main', 'lifecycle.mjs'), 'utf8');
+  assert.ok(life.includes("nativeTheme.themeSource = themeSource(ctx.settings.get('theme'));"));
+  const ready = life.indexOf('app.whenReady()');
+  const applied = life.indexOf('ctx.applyTheme();', ready);
+  assert.ok(applied > ready && applied < life.indexOf('new Tray(', ready), '창·트레이보다 먼저');
+  // 렌더러는 OS 미디어 쿼리 하나만 본다 — themeSource가 그 값을 바꾼다. 다른 테마 스위치를 따로 두면 둘이 어긋난다
+  assert.ok(css.includes('@media (prefers-color-scheme: dark)'));
 });

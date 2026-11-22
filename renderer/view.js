@@ -218,6 +218,11 @@
       return extra[`${field.key}Ok`] === false ? `${shown} — 등록 실패! 다른 조합으로 바꾸세요` : shown;
     }
     if (field.kind === 'time') return v || `${defaults.notifyAt ?? '09:00'} (기본)`;
+    // 고르기 — 고른 것의 이름. 고르지 않았으면 첫 번째가 기본
+    if (field.kind === 'choice') {
+      const hit = field.options?.find(([k]) => k === v);
+      return hit ? hit[1] : `${field.options?.[0]?.[1] ?? ''} (기본)`;
+    }
     if (v) return v;
     return '미설정';
   }

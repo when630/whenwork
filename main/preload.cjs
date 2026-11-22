@@ -68,6 +68,8 @@ contextBridge.exposeInMainWorld('whenwork', {
   syncEnable: (password, reset) => ipcRenderer.invoke('sync:enable', password, reset),
   syncDisable: () => ipcRenderer.invoke('sync:disable'),
   syncNow: () => ipcRenderer.invoke('sync:now'),
+  mcpGet: () => ipcRenderer.invoke('mcp:get'),
+  mcpCopy: (which) => ipcRenderer.invoke('mcp:copy', which),
 
   // ── 공통
   hide: () => ipcRenderer.send('win:hide'),

@@ -281,7 +281,9 @@ function quarantine(file) {
   return quarantinedName;
 }
 
-export function createStore(file) {
+// recover: 손상된 파일을 격리하고 새로 만드는 복구를 할지. 앱만 한다 — 같은 파일을 여는 다른 프로세스
+// (AI 연결 MCP 서버, main/mcp/server.mjs)는 손상을 만나면 열지 않고 실패만 알린다(D-15·D-P29).
+export function createStore(file, { recover = true } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let db = null;
   let state = { ok: false, reason: null, notice: null, quarantined: null };
@@ -316,7 +318,7 @@ export function createStore(file) {
       checkIntegrity(db);
     } catch (err) {
       closeQuietly();
-      if (!isCorruptError(err)) {
+      if (!isCorruptError(err) || !recover) {
         state = genericFailure();
         return state;
       }
@@ -325,6 +327,7 @@ export function createStore(file) {
         db = new DatabaseSync(file); // 같은 자리에 빈 DB를 새로 연다
         db.exec('PRAGMA journal_mode = WAL');
         db.exec('PRAGMA synchronous = FULL');
+        db.exec('PRAGMA busy_timeout = 5000');
         migrate(db, file);
         state = {
           ok: true,
@@ -346,6 +349,8 @@ export function createStore(file) {
 
     // (c) 정상 파일 — 프라그마·마이그레이션. 상위 버전(D-13)은 여기서 걸린다.
     try {
+      // busy_timeout: 앱과 AI 연결(MCP) 프로세스가 같은 파일에 쓴다 — 한쪽이 쓰는 중이면 실패하지 말고 기다린다
+      db.exec('PRAGMA busy_timeout = 5000');
       db.exec('PRAGMA journal_mode = WAL');
       db.exec('PRAGMA synchronous = FULL');
       migrate(db, file);
@@ -990,7 +995,20 @@ export function createStore(file) {
     return { applied, skipped };
   }
 
+  // 항목 하나 — 있는지·어떤 상태인지(AI 연결이 id로 고칠 때 먼저 본다)
+  function findItem(id) {
+    if (!db || !state.ok) return null;
+    const r = db
+      .prepare(
+        `SELECT i.id, i.title, i.kind, i.due, i.done_at, i.deleted_at, i.project_id, p.name AS project_name
+           FROM item i LEFT JOIN project p ON p.id = i.project_id WHERE i.id = ?`
+      )
+      .get(String(id ?? ''));
+    return r ? { ...r } : null;
+  }
+
   return {
+    findItem,
     syncChanges,
     applyRemote,
     open,

@@ -420,7 +420,7 @@ const KEYMAP = [
   ['대기', [['Space', '회신 옴'], ['P', '재촉함']]],
   ['프로젝트', [['N', '추가'], ['E', '이름'], ['Shift+↑↓', '순서'], ['X', '삭제'], ['U', '지운 프로젝트 보기']]],
   ['지운 프로젝트', [['↑↓', '고르기'], ['Enter', '되살리기'], ['Esc', '뒤로']]],
-  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json'], ['L', '구매 복원(이메일)'], ['D', '기기 간 동기화(Pro)'], ['S', '클라우드 백업(Pro)'], ['U', '백업에서 되살리기(Pro)'], ['K', '라이선스 키 직접 입력(지원용)']]],
+  ['설정', [['Enter', '변경'], ['X', '기본값'], ['E', '내보내기'], ['I', '가져오기'], ['R', '업데이트'], ['O', 'settings.json'], ['L', '구매 복원(이메일)'], ['A', 'AI 연결(MCP) 켜기·끄기'], ['D', '기기 간 동기화(Pro)'], ['S', '클라우드 백업(Pro)'], ['U', '백업에서 되살리기(Pro)'], ['K', '라이선스 키 직접 입력(지원용)']]],
   ['퀵캡처', [['{hotkey}', '열기·닫기'], ['Enter', '저장'], ['Tab', '오늘 뷰']]],
   ['인박스 단축키', [['{inboxHotkey}', '어디서든 인박스 열기·닫기']]],
 ];
@@ -668,6 +668,7 @@ function renderSettings() {
   body.append(renderLicense());
 
   // ── 클라우드 백업(D-P23) — Pro일 때만
+  if (cfg?.mcp?.available) body.append(renderMcp());
   if (cfg?.sync?.available) body.append(renderSync());
   if (cfg?.backup?.available) body.append(renderBackup());
 
@@ -760,6 +761,42 @@ function renderLicense() {
     act(`${name}${s.valid ? '' : ' (확인되지 않음)'} — 이 PC에서 해제 (다른 PC로 옮길 때)`, () => runDeactivate(kind, name));
   }
   return sec;
+}
+
+// ── AI 연결(MCP, D-P29) — Claude 같은 AI 앱이 할 일을 넣고 읽고 끝내게. 기본은 꺼짐
+function renderMcp() {
+  const m = cfg.mcp;
+  const sec = el('div', 'set-foot');
+  sec.append(el('div', 'sec-h', 'AI 연결 (MCP)'));
+  sec.append(el('div', 'ctx', m.enabled
+    ? '켜짐 — 연결한 AI 앱이 할 일을 추가하고, 읽고, 완료·마감·프로젝트를 정할 수 있습니다. 지우기는 할 수 없습니다'
+    : 'Claude 같은 AI 앱에서 "할 일 추가해 줘", "오늘 할 일 뭐야?"라고 하면 WHENWORK에 넣고 읽게 합니다'));
+  // 할 일이 어디로 가는지 — WHENWORK가 보내지 않아도, 연결한 AI 앱은 읽은 내용을 자기 서비스로 보낸다
+  sec.append(el('div', 'ctx', '연결한 AI 앱은 읽은 할 일을 그 AI 서비스로 보냅니다. WHENWORK는 아무것도 보내지 않습니다'));
+  const act = (label, fn) => {
+    const a = el('div', 'set-act');
+    a.append(window.ICONS.context(), document.createTextNode(` ${label}`));
+    a.onclick = fn;
+    sec.append(a);
+  };
+  act(m.enabled ? '끄기 (A)' : '켜기 (A)', runMcpToggle);
+  if (m.enabled) {
+    act('Claude Desktop 설정 복사 — 설정 → 개발자 → 설정 편집에 붙여 넣기', () => runMcpCopy('desktop'));
+    act('Claude Code 명령 복사 — 터미널에 붙여 넣기', () => runMcpCopy('code'));
+  }
+  return sec;
+}
+
+async function runMcpToggle() {
+  const on = !cfg?.mcp?.enabled;
+  await window.whenwork.settingsSet('mcpEnabled', on ? true : null);
+  toast(on ? 'AI 연결을 켰습니다 — 아래에서 설정을 복사해 AI 앱에 붙여 넣으세요' : 'AI 연결을 껐습니다 — AI 앱은 더 이상 할 일을 읽거나 바꾸지 못합니다', { holdMs: 5000 });
+  return loadSettings();
+}
+
+async function runMcpCopy(which) {
+  const r = await window.whenwork.mcpCopy(which);
+  toast(r.ok ? (which === 'code' ? '명령을 복사했습니다 — 터미널에 붙여 넣고 Enter' : '설정을 복사했습니다 — Claude Desktop 설정 파일에 붙여 넣고 Claude를 다시 시작하세요') : (r.error ?? '복사하지 못했습니다'), { holdMs: 6000 });
 }
 
 function renderSync() {
@@ -1013,6 +1050,11 @@ async function loadSettings() {
   } catch {
     cfg.sync = null;
   }
+  try {
+    cfg.mcp = await window.whenwork.mcpGet();
+  } catch {
+    cfg.mcp = null;
+  }
   render();
 }
 
@@ -1206,6 +1248,7 @@ function renderFooter() {
     add('I', '가져오기');
     add('R', '업데이트');
     if (cfg?.license?.selling) add('L', '구매 복원');
+    if (cfg?.mcp?.available) add('A', 'AI 연결');
     if (cfg?.sync?.available) add('D', '동기화');
     if (cfg?.backup?.available) add('S', '백업');
   } else if (selectedItem()?.archived) {
@@ -1695,7 +1738,7 @@ document.addEventListener('keydown', async (e) => {
   // 설정 탭
   if (tab === 'settings') {
     const f = settingFields()[sel] ?? null;
-    if (['x', 'o', 'b', 'p', 'c', 'l', 's', 'u', 'd'].includes(e.key.toLowerCase())) e.preventDefault();
+    if (['x', 'o', 'b', 'p', 'c', 'l', 's', 'u', 'd', 'a'].includes(e.key.toLowerCase())) e.preventDefault();
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
@@ -1736,6 +1779,10 @@ document.addEventListener('keydown', async (e) => {
       case 'p':
       case 'P':
         if (cfg?.license?.buyKinds?.includes('pro') && cfg.license.plan?.plan !== 'pro') return runBuy('pro');
+        return;
+      case 'a':
+      case 'A':
+        if (cfg?.mcp?.available) return runMcpToggle();
         return;
       case 'd':
       case 'D':

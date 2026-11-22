@@ -1,5 +1,7 @@
 // main/ipc.mjs — 모든 ipcMain 핸들러 등록 (D-08 분할, main/index.mjs에서 이동)
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, clipboard } from 'electron';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { parseCapture, parseDue } from './parse.mjs';
@@ -9,6 +11,7 @@ import { updateLine } from './update.mjs';
 import { NOTIFY_AT_DEFAULT, dayKey } from './brief.mjs';
 import { SALES_OPEN, SHOP_URL, BUY_KINDS, buyUrl, projectGate } from './plan.mjs';
 import { THEMES } from './theme.mjs';
+import { buildConfig } from './mcp/config.mjs';
 
 // 캡처 저장의 단일 경로(D-01/D-03). capture:save 핸들러와 01-07의 주입 모드가 모두
 // 이 함수를 부른다 — 경로가 하나여야 테스트가 실경로를 밟는다.
@@ -57,7 +60,7 @@ export function registerIpc(ctx) {
   //
   // DB가 꺼져 있어도 봐야 하는 화면이라(접속 정보 확인) DB 경로를 타지 않는다.
   // 앱에서 만지는 건 아래 네 개뿐이고, DB 접속은 settings.json을 직접 고쳐 재시작한다.
-  const SETTING_KEYS = ['notifyEnabled', 'notifyAt', 'keepOpen', 'keepOnTop', 'theme', 'hotkey', 'inboxHotkey'];
+  const SETTING_KEYS = ['notifyEnabled', 'notifyAt', 'keepOpen', 'keepOnTop', 'theme', 'mcpEnabled', 'hotkey', 'inboxHotkey'];
 
   // 전역 단축키 두 개. 값은 settings:set이 아니라 hotkey:set으로만 바꾼다 — 등록 성공까지
   // 확인해야 저장할 수 있다. label은 서로 같은 조합을 고르려 할 때 어느 쪽과 겹치는지 말할 때 쓴다.
@@ -108,6 +111,7 @@ export function registerIpc(ctx) {
     if (key in HOTKEYS) return { ok: false, reason: 'use hotkey:set' };
     if (!SETTING_KEYS.includes(key)) return { ok: false };
     if (key === 'theme' && value != null && value !== '' && !THEMES.includes(value)) return { ok: false };
+    if (key === 'mcpEnabled' && value != null && value !== true) return { ok: false }; // 켜기(true)나 지우기(끄기)만
     if (value === null || value === '') ctx.settings.remove(key);
     else ctx.settings.set(key, value);
     ctx.settings.flush(); // 설정은 미루지 않고 바로 쓴다
@@ -115,6 +119,24 @@ export function registerIpc(ctx) {
     if (key === 'keepOpen' || key === 'keepOnTop') ctx.applyTodayLayer?.();
     if (key === 'theme') ctx.applyTheme?.(); // 열린 창에 바로 — 재시작을 기다리지 않는다
     return { ok: true };
+  });
+
+  // ── AI 연결(MCP, D-P29). 켜고 끄는 것은 settings:set('mcpEnabled'), 여기서는 상태와 붙여 넣을 설정만.
+  // Store(MSIX)판은 다른 프로그램이 앱 실행 파일을 직접 띄울 수 있는지 확인하기 전까지 열지 않는다.
+  const mcpConfig = () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const script = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar', 'main', 'mcp', 'server.mjs')
+      : path.join(here, 'mcp', 'server.mjs');
+    return buildConfig({ execPath: process.execPath, script });
+  };
+  ipcMain.handle('mcp:get', () => ({ available: !process.windowsStore, enabled: ctx.settings.get('mcpEnabled') === true }));
+  ipcMain.handle('mcp:copy', (_e, which) => {
+    if (process.windowsStore) return { ok: false, error: 'Microsoft Store판에서는 아직 쓸 수 없습니다' };
+    const c = mcpConfig();
+    const value = which === 'code' ? c.code : c.desktop;
+    clipboard.writeText(value);
+    return { ok: true, value };
   });
 
   ipcMain.handle('settings:openFile', async () => {

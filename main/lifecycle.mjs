@@ -30,6 +30,7 @@ import { registerIpc, saveCapture } from './ipc.mjs';
 import { setupUpdater, updateLine } from './update.mjs';
 import { SCHEME, APP_ID as LINK_ID, parseDeepLink, fromArgv, buildManifest } from './deeplink.mjs';
 import os from 'node:os';
+import { SIGNAL_FILE as MCP_SIGNAL } from './mcp/server.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -529,6 +530,19 @@ export function bootstrap() {
     platform.activate(win, () => placeWindow(win, 'todayBounds'));
   }
   ctx.showToday = showToday;
+
+  // AI 연결(MCP)이 할 일을 바꾸면 mcp-signal을 건드린다 — 떠 있는 오늘 뷰를 새로 그린다(D-P29)
+  try {
+    let t = null;
+    fs.watch(app.getPath('userData'), (_ev, name) => {
+      if (name !== MCP_SIGNAL) return;
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const tw = ctx.todayWin;
+        if (tw && !tw.isDestroyed()) tw.webContents.send('today:refresh');
+      }, 200);
+    });
+  } catch {}
 
   // 인박스 탭으로 연다 — 어느 탭으로 열지는 push하지 않고 상태에 실어 둔다(today:getState가
   // 읽어 간다). 창을 지금 만드는 중이면 렌더러에 리스너가 아직 없어 push는 조용히 사라진다.

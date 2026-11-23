@@ -17,7 +17,11 @@
   - 추가는 모든 확인을 통과한 뒤 앱의 캡처와 같은 `insertCaptures`로 저장한다.
 - **설정 복사**: 설정 화면이 이 PC의 실제 경로로 Claude Desktop JSON(`mcpServers.whenwork`)과 Claude Code 명령(`claude mcp add whenwork --scope user -e ELECTRON_RUN_AS_NODE=1 -- …`)을 만들어 클립보드에 넣는다.
 - **개인정보**: WHENWORK는 아무것도 보내지 않는다. 다만 연결한 AI 앱은 읽은 할 일을 그 AI 서비스로 보낸다 — 설정 화면에 적는다.
-- **Microsoft Store판**: 다른 프로그램이 패키지 안 실행 파일을 직접 띄울 수 있는지 확인하기 전까지 열지 않는다(`process.windowsStore`면 구역을 숨긴다). 앱 실행 별칭(AppExecutionAlias)으로 풀 수 있을지 나중에 본다.
+- **Microsoft Store판** (2026-11-23): 패키지 안 실행 파일(`WindowsApps`)은 다른 프로그램이 경로로 띄울 수 없고, 설치 폴더 이름에 버전이 들어가 업데이트마다 바뀐다. 그래서
+  - 매니페스트에 **실행 별칭 `whenwork.exe`**(`uap3:AppExecutionAlias`)를 선언하고, 복사되는 설정의 command를 `%LOCALAPPDATA%\Microsoft\WindowsApps\whenwork.exe`로 한다.
+  - 서버 스크립트 경로를 적지 않고 `-e`로 **실행 파일이 자기 위치(`resources/app.asar`)에서 찾게** 한다(`SELF_LOADER`) — 업데이트로 경로가 바뀌어도 끊기지 않는다.
+  - 실측: Store 패키지를 개발자 모드로 등록해 별칭 + Node 모드 환경 변수 + `-e` 로더로 초기화·추가·목록 성공, 확인 뒤 등록 해제. 앱이 복사해 줄 로더와 시험한 로더가 같은 문자열임을 확인.
+  - 이 변경은 첫 심사(0.4.0) 통과 뒤의 Store 업데이트에 담는다. 설치 파일판은 경로를 그대로 적는다(설치 위치가 업데이트에도 같다).
 
 ## 확인
 

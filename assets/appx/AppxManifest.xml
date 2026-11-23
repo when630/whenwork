@@ -17,10 +17,15 @@
 
   3) windows.protocol  whenwork
      package.json build.protocols와 같아야 한다 — test/appx.test.mjs가 대조한다.
+
+  4) windows.appExecutionAlias  whenwork.exe  (docs/10 D-P29)
+     패키지 안의 실행 파일(WindowsApps)은 다른 프로그램이 경로로 직접 띄울 수 없다. AI 앱(MCP)이
+     %LOCALAPPDATA%\Microsoft\WindowsApps\whenwork.exe 별칭으로 앱을 Node 모드로 실행하게 한다.
 -->
 <Package
    xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
    xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
    xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
    xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
    xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
@@ -64,6 +69,11 @@
         <desktop:Extension Category="windows.startupTask" Executable="${executable}" EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="WhenworkStartup" Enabled="true" DisplayName="${displayName}" />
         </desktop:Extension>
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="${executable}" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="whenwork.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
       </Extensions>
     </Application>
   </Applications>

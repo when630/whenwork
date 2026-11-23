@@ -122,17 +122,16 @@ export function registerIpc(ctx) {
   });
 
   // ── AI 연결(MCP, D-P29). 켜고 끄는 것은 settings:set('mcpEnabled'), 여기서는 상태와 붙여 넣을 설정만.
-  // Store(MSIX)판은 다른 프로그램이 앱 실행 파일을 직접 띄울 수 있는지 확인하기 전까지 열지 않는다.
+  // Store(MSIX)판은 실행 별칭(whenwork.exe)으로 띄우고 서버는 실행 파일이 자기 위치에서 찾는다 — main/mcp/config.mjs
   const mcpConfig = () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const script = app.isPackaged
       ? path.join(process.resourcesPath, 'app.asar', 'main', 'mcp', 'server.mjs')
       : path.join(here, 'mcp', 'server.mjs');
-    return buildConfig({ execPath: process.execPath, script });
+    return buildConfig({ execPath: process.execPath, script, store: !!process.windowsStore, localAppData: process.env.LOCALAPPDATA ?? '' });
   };
-  ipcMain.handle('mcp:get', () => ({ available: !process.windowsStore, enabled: ctx.settings.get('mcpEnabled') === true }));
+  ipcMain.handle('mcp:get', () => ({ available: true, enabled: ctx.settings.get('mcpEnabled') === true }));
   ipcMain.handle('mcp:copy', (_e, which) => {
-    if (process.windowsStore) return { ok: false, error: 'Microsoft Store판에서는 아직 쓸 수 없습니다' };
     const c = mcpConfig();
     const value = which === 'code' ? c.code : c.desktop;
     clipboard.writeText(value);

@@ -187,12 +187,12 @@ test('붙여 넣을 설정 — 이 PC의 실행 파일을 Node 모드로, 서버
   assert.equal(c.code, `claude mcp add whenwork --scope user -e ELECTRON_RUN_AS_NODE=1 -- "${exe}" "${script}"`);
 });
 
-test('앱 쪽 — 켜기는 true나 지우기만, Store판은 아직 열지 않고, AI가 바꾸면 화면을 새로 그린다', () => {
+test('앱 쪽 — 켜기는 true나 지우기만, Store판은 별칭 설정으로, AI가 바꾸면 화면을 새로 그린다', () => {
   const ipc = fs.readFileSync(path.join(ROOT, 'main', 'ipc.mjs'), 'utf8');
   const keys = ipc.slice(ipc.indexOf('const SETTING_KEYS'), ipc.indexOf(';', ipc.indexOf('const SETTING_KEYS')));
   assert.ok(keys.includes("'mcpEnabled'"));
   assert.ok(ipc.includes("if (key === 'mcpEnabled' && value != null && value !== true) return { ok: false };"));
-  assert.ok(ipc.includes("ipcMain.handle('mcp:get', () => ({ available: !process.windowsStore"));
+  assert.ok(ipc.includes('store: !!process.windowsStore'), 'Store판이면 별칭 설정을 만든다');
   const life = fs.readFileSync(path.join(ROOT, 'main', 'lifecycle.mjs'), 'utf8');
   assert.ok(life.includes('if (name !== MCP_SIGNAL) return;'));
   assert.ok(life.includes("tw.webContents.send('today:refresh')"));
@@ -232,4 +232,25 @@ test('손상된 저장소를 만나면 MCP 쪽은 격리·새로 만들기를 �
   assert.deepEqual(fs.readFileSync(file), before, '원본을 건드리지 않는다');
   assert.deepEqual(fs.readdirSync(dir).filter((f) => f !== 'store.sqlite' && !f.startsWith('store.sqlite-')), [], '격리 파일을 만들지 않는다');
   s.close?.();
+});
+
+test('Store판 설정 — 실행 별칭으로 띄우고, 서버는 실행 파일 자기 위치에서 찾는다(버전 든 경로를 적지 않는다)', async () => {
+  const { buildConfig, SELF_LOADER } = await import('../main/mcp/config.mjs');
+  const local = ['C:', 'Users', 'u', 'AppData', 'Local'].join(path.win32.sep);
+  const c = buildConfig({ execPath: 'C:/Program Files/WindowsApps/WHENDESK.WHENWORK_0.4.1.0_x64__v6wmc55x8ryje/app/WHENWORK.exe', script: 'unused', store: true, localAppData: local });
+  const e = JSON.parse(c.desktop).mcpServers.whenwork;
+  assert.equal(e.command, [local, 'Microsoft', 'WindowsApps', 'whenwork.exe'].join(path.win32.sep));
+  assert.deepEqual(e.args, ['-e', SELF_LOADER]);
+  assert.deepEqual(e.env, { ELECTRON_RUN_AS_NODE: '1' });
+  assert.ok(!c.desktop.includes('0.4.1.0'), '버전이 든 설치 경로를 적지 않는다');
+  assert.ok(!SELF_LOADER.includes('"'), 'Claude Code 명령의 큰따옴표와 부딪히지 않는다');
+  assert.ok(SELF_LOADER.includes("'app.asar','main','mcp','server.mjs'"), 'resources/app.asar/main/mcp/server.mjs를 찾는다');
+  assert.ok(SELF_LOADER.includes('m.runStdio()'), '-e로는 직접 실행 판정이 없으니 runStdio를 부른다');
+});
+
+test('Store 매니페스트에 실행 별칭 whenwork.exe가 있다', () => {
+  const m = fs.readFileSync(path.join(ROOT, 'assets', 'appx', 'AppxManifest.xml'), 'utf8');
+  assert.ok(m.includes('Category="windows.appExecutionAlias"'));
+  assert.ok(m.includes('<desktop:ExecutionAlias Alias="whenwork.exe" />'));
+  assert.ok(m.includes('xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"'));
 });

@@ -18,7 +18,8 @@ import { platform } from './platform/index.mjs';
 // (electron-builder#7976의 알려진 상호운용 문제).
 const { autoUpdater } = electronUpdater;
 
-const RELEASES_URL = 'https://github.com/when630/whenwork/releases/latest';
+// 코드 리포(when630/whenwork)는 비공개 — 설치 파일과 업데이트는 공개 리포에서(D-P31)
+const RELEASES_URL = 'https://github.com/when630/whenwork-releases/releases/latest';
 
 // 켜자마자 확인하지 않는다 — 부팅이 무거워지고, 첫 캡처가 느려지면 앱의 쓸모가 준다.
 const FIRST_CHECK_MS = 60_000;

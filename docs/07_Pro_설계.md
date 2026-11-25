@@ -163,6 +163,11 @@
   - 스토어 버튼 아래에 "스토어를 쓸 수 없나요? 설치 파일 직접 받기"(GitHub exe)를 둔다 — 회사 PC는 스토어가 정책으로 막힌 경우가 많고, 퀵캡처는 업무 PC에서 쓰일 앱이다.
   - 스토어 등록에는 개인정보처리방침 URL이 필요하다 → 랜딩 페이지가 스토어 제출보다 먼저다.
 - **D-P17:** GitHub Releases는 계속 원본으로 둔다(NSIS exe·dmg). 랜딩 페이지가 `releases/latest/download/<파일명>`으로 늘 최신을 가리키도록 버전 없는 이름의 사본도 함께 올린다. 랜딩 페이지의 "다른 설치 방법"과 macOS 버튼이 여기를 가리킨다. macOS는 Apple Developer 보류 동안 dmg 직접 배포뿐이다(Mac App Store는 Apple Developer가 필요).
+- **D-P31 (2026-11-25) 코드 리포 비공개, 릴리스는 공개 리포로:** 코드 리포 `when630/whenwork`를 비공개로 돌린다. 설치 파일·업데이트는 공개 리포 **`when630/whenwork-releases`**(코드 없음)에서 낸다.
+  - 앱의 업데이트 주소(`build.publish`)와 "새 버전 받기" 페이지(`update.mjs` `RELEASES_URL`), 사이트 받기 버튼(`whendesk-web` `assets/download.js`)이 공개 리포를 본다. `test/feed.test.mjs`가 셋을 맞춰 본다.
+  - CI는 그대로 코드 리포에 드래프트를 만든다. 안내문을 확인해 공개한 뒤 `node tools/mirror-release.mjs vX.Y.Z`로 공개 리포에 옮긴다(gh CLI 로그인 — CI에 토큰을 두지 않는다). 옮긴 파일 목록이 원본과 같은지, `latest.yml`·`latest-mac.yml`이 있는지 스크립트가 확인한다.
+  - **순서**: 공개 리포 생성·0.4.2 복사 → 사이트 링크 변경 → 업데이트 주소를 바꾼 0.4.3을 **두 리포 모두**에 → 일주일 뒤(2026-12-02 무렵) 코드 리포 비공개. 바로 돌리면 아직 0.4.3을 받지 않은 설치본의 자동 업데이트가 영영 끊긴다(옛 주소를 본다). Store판은 Store가 업데이트하므로 상관없다.
+  - 비공개 리포의 Actions는 월 2,000분 무료, macOS는 10배로 센다 — 릴리스 한 번에 100~150분.
 
 ## 판매 시작 (2026-11-13, 0.3.0)
 

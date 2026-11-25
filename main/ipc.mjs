@@ -11,7 +11,7 @@ import { updateLine } from './update.mjs';
 import { NOTIFY_AT_DEFAULT, dayKey } from './brief.mjs';
 import { SALES_OPEN, SHOP_URL, BUY_KINDS, buyUrl, projectGate } from './plan.mjs';
 import { THEMES } from './theme.mjs';
-import { buildConfig } from './mcp/config.mjs';
+import { buildConfig, pickCopy } from './mcp/config.mjs';
 
 // 캡처 저장의 단일 경로(D-01/D-03). capture:save 핸들러와 01-07의 주입 모드가 모두
 // 이 함수를 부른다 — 경로가 하나여야 테스트가 실경로를 밟는다.
@@ -132,8 +132,7 @@ export function registerIpc(ctx) {
   };
   ipcMain.handle('mcp:get', () => ({ available: true, enabled: ctx.settings.get('mcpEnabled') === true }));
   ipcMain.handle('mcp:copy', (_e, which) => {
-    const c = mcpConfig();
-    const value = which === 'code' ? c.code : c.desktop;
+    const value = pickCopy(mcpConfig(), which);
     clipboard.writeText(value);
     return { ok: true, value };
   });

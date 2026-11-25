@@ -96,7 +96,10 @@
       ],
       "icon": "build/icon.png",
       "category": "public.app-category.productivity",
-      "identity": null
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "assets/mac/entitlements.mac.plist",
+      "entitlementsInherit": "assets/mac/entitlements.mac.plist"
     },
     "dmg": {
       "artifactName": "WHENWORK-${version}-mac-${arch}.${ext}"

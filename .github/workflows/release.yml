@@ -1,8 +1,16 @@
 # 태그를 밀면 Windows·macOS 설치 파일을 만들어 Releases에 올린다 (REL-04).
 #
-# 서명하지 않는다. CSC_IDENTITY_AUTO_DISCOVERY=false가 그것을 못 박는다 —
+# Windows는 서명하지 않는다(Store가 서명한다 — D-P16). CSC_IDENTITY_AUTO_DISCOVERY=false가 그것을 못 박는다 —
 # 이 값을 빼면 electron-builder가 러너 키체인에서 아무 인증서나 집어가려다
 # 빌드를 실패시키거나, 더 나쁘게는 의도하지 않은 것으로 서명한다.
+#
+# macOS는 리포 Secrets에 Developer ID 인증서가 있으면 서명·공증하고(D-P30), 없으면 지금처럼 서명 없이 만든다.
+#   MAC_CERT_P12        Developer ID Application 인증서(.p12)를 base64로
+#   MAC_CERT_PASSWORD   .p12를 내보낼 때 정한 암호
+#   APPLE_ID            Apple 개발자 계정 이메일
+#   APPLE_APP_PASSWORD  그 Apple ID의 앱 전용 암호(공증용)
+#   APPLE_TEAM_ID       개발자 계정 Team ID(10자리)
+# 서명·공증한 빌드는 Gatekeeper가 받아들이는지(spctl) 확인하고, 아니면 실패시킨다 — 경고가 뜨는 dmg를 내보내지 않는다.
 name: release
 
 on:
@@ -51,6 +59,9 @@ jobs:
               dist/*.zip
               dist/latest-mac.yml
     runs-on: ${{ matrix.os }}
+    env:
+      # Secrets는 if:에서 바로 읽을 수 없다 — 있는지 여부만 환경 변수로 옮긴다(값은 옮기지 않는다)
+      HAS_MAC_SIGN: ${{ secrets.MAC_CERT_P12 != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -72,10 +83,33 @@ jobs:
       # 빌드 스크립트의 --publish never가 없고 GH_TOKEN까지 있으면 electron-builder가
       # 태그를 보고 스스로 드래프트 릴리스를 하나 더 만들어 태그마다 릴리스가 둘이 된다.
       - name: build
+        if: matrix.os != 'macos-latest' || env.HAS_MAC_SIGN != 'true'
         run: npm run ${{ matrix.script }}
         env:
           # 미서명 배포 — 러너 키체인을 뒤지지 않게 못 박는다
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      # macOS 서명·공증 — electron-builder가 CSC_LINK의 인증서를 임시 키체인에 넣어 서명하고,
+      # APPLE_* 로 공증(notarytool)한 뒤 앱에 공증 표(staple)를 붙인다
+      - name: build (서명·공증)
+        if: matrix.os == 'macos-latest' && env.HAS_MAC_SIGN == 'true'
+        run: npm run ${{ matrix.script }} -- -c.mac.notarize=true
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERT_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: 서명·공증 확인 (Gatekeeper)
+        if: matrix.os == 'macos-latest' && env.HAS_MAC_SIGN == 'true'
+        run: |
+          for app in dist/mac*/WHENWORK.app; do
+            echo "== $app"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+          done
 
       - uses: actions/upload-artifact@v4
         with:

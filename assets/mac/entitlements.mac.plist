@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS 강화된 런타임(hardened runtime) 권한 — 공증(notarization)에 강화된 런타임이 필수라서 둔다(D-P30).
+  Electron(V8)은 JIT로 코드를 만들어 실행하므로 이 두 가지가 없으면 서명된 앱이 켜지자마자 죽는다.
+  그 밖의 권한(카메라·마이크 등)은 쓰지 않으므로 넣지 않는다.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>

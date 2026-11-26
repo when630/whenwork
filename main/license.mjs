@@ -29,7 +29,7 @@ import crypto from 'node:crypto';
 export const PUBLIC_KEYS = { k202611: '9YjijV4BhTlCPBikR7y94fsyteI4xysg2WOcYcF1tsw' };
 
 // 라이선스 서버 주소(D-P18, when630/whendesk-api). null이면 활성화는 "아직 판매 전"이라고 말한다.
-export const API_BASE = 'https://api.whendesk.app';
+export const API_BASE = 'https://api.whendev.com'; // 도메인 통일(2026-11) — 옛 api.whendesk.app은 이전 버전을 위해 잠시 함께 연다
 
 export const APP = 'whenwork';
 
@@ -51,7 +51,7 @@ const ERRORS = {
   code_invalid: '코드가 맞지 않습니다 — 가장 최근에 받은 메일의 6자리를 입력해 주세요',
   code_expired: '코드가 만료됐습니다(10분) — 코드를 다시 받아 주세요',
   too_many: '시도가 너무 많습니다 — 잠시 뒤 다시 해 주세요',
-  mail_unavailable: '지금은 메일을 보낼 수 없습니다 — support@whendesk.app으로 알려 주세요',
+  mail_unavailable: '지금은 메일을 보낼 수 없습니다 — support@whendev.com으로 알려 주세요',
   bad_request: '이메일 주소를 확인해 주세요',
 };
 const MSG_NETWORK = '라이선스 서버에 닿지 못했습니다 — 인터넷 연결을 확인하고 다시 시도해 주세요';

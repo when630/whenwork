@@ -9,8 +9,8 @@ import { API_BASE, PUBLIC_KEYS } from './license.mjs';
 export const SALES_OPEN = !!API_BASE && Object.keys(PUBLIC_KEYS).length > 0;
 
 // 구매 안내 페이지 — 렌더러가 임의 주소를 열지 못하게 여기서만 정한다
-export const SHOP_URL = 'https://whendesk.app/work';
-const BUY_URL = 'https://whendesk.app/buy';
+export const SHOP_URL = 'https://store.whendev.com/whenwork';
+const BUY_URL = 'https://store.whendev.com/whenwork/buy';
 // Lite(한 번)와 Pro(연 구독). Pro는 자동 클라우드 백업이 생기며 열었다(docs/07 D-P19·D-P24)
 export const BUY_KINDS = ['lite', 'pro'];
 

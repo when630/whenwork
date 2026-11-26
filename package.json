@@ -1,6 +1,6 @@
 {
   "name": "whenwork",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "type": "module",
   "description": "누구나 쓰는 퀵캡처 트레이 앱 — 단축키로 던진 할 일을 오늘 한 화면에서",
@@ -61,7 +61,7 @@
     "appx": {
       "identityName": "WHENDESK.WHENWORK",
       "publisher": "CN=36721C0C-F537-46DB-B77F-16A73702E925",
-      "publisherDisplayName": "WHENDESK",
+      "publisherDisplayName": "WHENDEV",
       "applicationId": "WHENWORK",
       "displayName": "WHENWORK",
       "languages": [

@@ -24,9 +24,12 @@ export default {
   defaultInboxHotkey: 'Control+Alt+Shift+Space',
 
   // macOS 자동 업데이트는 **코드 서명이 필수**다(electron-builder 공식 문서 명시).
-  // Squirrel.Mac이 서명을 확인하고 거부하므로, 미서명 배포에서는 내려받아 설치하는
-  // 경로 자체가 없다. 새 버전을 알려 주고 받는 곳으로 보내는 것까지가 할 수 있는 전부다.
-  canAutoUpdate: false,
+  // Squirrel.Mac이 새 버전의 서명을 확인하고 다르면 거부한다. 0.4.4부터 릴리스는 Developer ID로
+  // 서명·공증된다(D-P30, CI가 Secrets로 서명하고 Gatekeeper까지 확인 — 실패하면 올리지 않는다).
+  // 그래서 받아서 종료할 때 설치한다. 0.4.3 이하(미서명)는 이 값이 false라 알림 → 받는 곳으로
+  // 가서 서명판을 한 번 직접 받아야 하고, 그 뒤로는 자동이다.
+  // 서명 없이 직접 빌드한 앱이면 업데이트가 서명 확인에서 실패해 설정에 오류로 남는다(앱은 그대로 쓴다).
+  canAutoUpdate: true,
 
   // Mac App Store 배포는 아직 없다(Apple Developer 보류 — docs/07_Pro_설계.md)
   store: false,

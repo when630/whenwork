@@ -18,3 +18,20 @@ test('업데이트·받기는 공개 릴리스 리포를 본다 — 코드 리�
   assert.equal(TARGET, `${pkg.build.publish[0].owner}/${pkg.build.publish[0].repo}`, '옮기는 곳 = 앱이 보는 곳');
   assert.equal(SOURCE, 'when630/whenwork');
 });
+
+// 도메인 통일(D-P32) — whendesk.app은 정리한다. 앱이 여는 사이트·결제·서버·문의 메일은 모두 whendev.com.
+test('앱이 쓰는 주소에 whendesk.app이 남지 않는다', () => {
+  const files = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== 'fonts') walk(p); } else if (/\.(m?js|html|css|json|xml)$/.test(e.name)) files.push(p);
+    }
+  };
+  for (const d of ['main', 'renderer', path.join('assets', 'appx')]) walk(path.join(ROOT, d));
+  assert.ok(files.length > 20);
+  for (const f of files) {
+    const t = fs.readFileSync(f, 'utf8');
+    assert.ok(!/https?:\/\/[a-z0-9.-]*whendesk\.app|@whendesk\.app/.test(t), `${path.relative(ROOT, f)}에 whendesk.app 주소가 남았다`);
+  }
+});

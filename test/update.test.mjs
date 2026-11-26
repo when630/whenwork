@@ -90,11 +90,18 @@ test('흔한 실패는 사람이 고칠 수 있는 말로 갈린다', () => {
 
 // ── 플랫폼 계약 (자동 업데이트 가능 여부)
 
-test('macOS는 자동 업데이트를 할 수 없다고 선언한다 — 서명이 없기 때문이다', () => {
+test('macOS 자동 업데이트는 서명된 릴리스를 전제로 켠다 — 서명이 빠지면 켜 두지 않는다', () => {
   const darwin = fs.readFileSync(path.join(ROOT, 'main', 'platform', 'darwin.mjs'), 'utf8');
-  assert.match(darwin, /canAutoUpdate: false/);
-  // 왜 false인지가 코드 옆에 남아 있어야 한다 — 나중에 누가 true로 바꾸려 할 때 읽으라고
+  assert.match(darwin, /canAutoUpdate: true/);
+  // 왜 서명이 필요한지가 코드 옆에 남아 있어야 한다
   assert.match(darwin, /코드 서명이 필수/);
+  // 전제: 릴리스 빌드가 서명·공증하고 Gatekeeper로 확인한다(test/release.test.mjs가 자세히 본다)
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.equal(pkg.build.mac.hardenedRuntime, true);
+  assert.ok(!('identity' in pkg.build.mac), 'identity: null이면 서명하지 않는다 — 자동 업데이트가 깨진다');
+  // Squirrel.Mac은 zip으로 갱신한다 — dmg만 내면 받을 것이 없다
+  const targets = JSON.stringify(pkg.build.mac.target ?? []);
+  assert.ok(targets.includes('zip'), 'mac 빌드에 zip이 있어야 한다');
 });
 
 test('Windows는 미서명이어도 자동 업데이트가 된다 — 스토어판만 빼고', () => {

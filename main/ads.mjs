@@ -1,4 +1,4 @@
-// 광고 한 줄·커피 사주기 링크(docs/07 D-P08~D-P10·D-P22) — 서버(api.whendesk.app/v1/ads)가 내려준다.
+// 광고 한 줄·커피 사주기 링크(docs/07 D-P08~D-P10·D-P22) — 서버(api.whendev.com/v1/ads)가 내려준다.
 //
 // Electron 없이 테스트할 수 있게 파일 위치·fetch·서버 주소를 주입받는다.
 //

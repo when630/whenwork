@@ -44,7 +44,7 @@ test('프로젝트 문: 무료 3개 미만만 열리고, 막을 때는 제한 �
 test('구매 주소: Lite와 Pro, 이 기기 번호와 앱 이름을 싣는다', () => {
   assert.deepEqual(BUY_KINDS, ['lite', 'pro']);
   const u = new URL(buyUrl('lite', '1b4e28ba-2fa1-11d2-883f-0016d3cca427'));
-  assert.equal(u.origin + u.pathname, 'https://whendesk.app/buy');
+  assert.equal(u.origin + u.pathname, 'https://store.whendev.com/whenwork/buy');
   assert.equal(u.searchParams.get('plan'), 'lite');
   assert.equal(u.searchParams.get('app'), 'whenwork');
   assert.equal(u.searchParams.get('i'), '1b4e28ba-2fa1-11d2-883f-0016d3cca427');

@@ -168,6 +168,17 @@
   - CI는 그대로 코드 리포에 드래프트를 만든다. 안내문을 확인해 공개한 뒤 `node tools/mirror-release.mjs vX.Y.Z`로 공개 리포에 옮긴다(gh CLI 로그인 — CI에 토큰을 두지 않는다). 옮긴 파일 목록이 원본과 같은지, `latest.yml`·`latest-mac.yml`이 있는지 스크립트가 확인한다.
   - **순서**: 공개 리포 생성·0.4.2 복사 → 사이트 링크 변경 → 업데이트 주소를 바꾼 0.4.3을 **두 리포 모두**에 → 일주일 뒤(2026-12-02 무렵) 코드 리포 비공개. 바로 돌리면 아직 0.4.3을 받지 않은 설치본의 자동 업데이트가 영영 끊긴다(옛 주소를 본다). Store판은 Store가 업데이트하므로 상관없다.
   - 비공개 리포의 Actions는 월 2,000분 무료, macOS는 10배로 센다 — 릴리스 한 번에 100~150분.
+- **D-P32 (2026-11-26) 도메인 통일 — whendesk.app → whendev.com:** D-P18을 바꾼다. 앱 받는 곳을 `store.whendev.com` 하나로 모으면서(사용자 결정) WHENWORK 소개·결제·약관도 그 안으로 옮기고, whendesk.app은 옛 앱이 업데이트될 시간을 둔 뒤 정리한다. 실제 판매 전이라 지금이 가장 싸다. 상호는 그대로 웬데스크(WHENDESK).
+  ```
+  store.whendev.com/whenwork       소개·가격·도움말 (whenstore-web, Lightsail nginx)
+  store.whendev.com/whenwork/buy   Paddle 결제 (nginx가 이 경로에만 Paddle CSP)
+  store.whendev.com/legal/…        이용약관·개인정보처리방침·환불 정책
+  api.whendev.com                  라이선스 서버 (같은 Worker에 api.whendesk.app과 함께)
+  support@ · no-reply@whendev.com  문의·발송 메일
+  ```
+  - 앱: `API_BASE`·`SHOP_URL`·`BUY_URL`·문의 메일. `test/feed.test.mjs`가 앱 코드에 whendesk.app 주소가 남지 않게 막는다.
+  - **순서**: ① 서버에 api.whendev.com 추가(완료) ② 사이트 브랜치 ③ Resend 도메인 인증·메일 받기 → 서버 메일 주소 배포 ④ Paddle에 store.whendev.com 승인·기본 결제 링크 변경 ⑤ 사이트 공개 + 앱 릴리스(설치판·Store) + Store 목록 URL ⑥ whendesk.app → store.whendev.com 301 ⑦ 옛 앱이 업데이트된 뒤 api.whendesk.app 정리. ⑦을 너무 일찍 하면 업데이트하지 않은 0.3.x~0.4.x의 라이선스 확인·백업·동기화가 끊긴다 — Paddle 알림 주소도 그 전에 api.whendev.com으로.
+  - 개인정보처리방침은 내용이 같고 주소만 바뀌어 새 판을 내지 않고 "주소만 바뀜"을 적었다(2026-11-26).
 
 ## 판매 시작 (2026-11-13, 0.3.0)
 

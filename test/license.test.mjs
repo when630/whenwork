@@ -75,7 +75,7 @@ const make = (dir, handler, extra = {}) =>
 test('배포된 앱은 라이선스 서버의 키 하나만 믿는다 — 다른 키로 서명한 토큰은 통과하지 못한다', () => {
   assert.deepEqual(Object.keys(PUBLIC_KEYS), ['k202611']);
   assert.match(PUBLIC_KEYS.k202611, /^[A-Za-z0-9_-]{43}$/, 'Ed25519 공개키(raw 32바이트 base64url)');
-  assert.equal(API_BASE, 'https://api.whendesk.app');
+  assert.equal(API_BASE, 'https://api.whendev.com');
   // 테스트 키(t1)로 서명한 토큰은 배포 공개키 목록으로 검증되지 않는다
   const tok = sign({ kind: 'pro', instance: 'x', expiresAt: iso(NOW + 1e10) });
   assert.equal(verifyToken(tok), null);

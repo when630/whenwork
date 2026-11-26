@@ -781,8 +781,10 @@ function renderMcp() {
   };
   act(m.enabled ? '끄기 (A)' : '켜기 (A)', runMcpToggle);
   if (m.enabled) {
-    act('Claude Desktop 설정 복사 — 설정 → 개발자 → 설정 편집에 붙여 넣기', () => runMcpCopy('desktop'));
+    act('AI 앱 설정 복사 (Claude Desktop·Cursor·Windsurf·Gemini CLI 등) — 그 앱의 MCP 설정 파일에 붙여 넣기', () => runMcpCopy('desktop'));
     act('Claude Code 명령 복사 — 터미널에 붙여 넣기', () => runMcpCopy('code'));
+    act('VS Code 설정 복사 — 명령 팔레트 → MCP: Open User Configuration에 붙여 넣기', () => runMcpCopy('vscode'));
+    act('Codex CLI 설정 복사 — ~/.codex/config.toml 끝에 붙여 넣기', () => runMcpCopy('codex'));
   }
   return sec;
 }
@@ -796,8 +798,15 @@ async function runMcpToggle() {
 
 async function runMcpCopy(which) {
   const r = await window.whenwork.mcpCopy(which);
-  toast(r.ok ? (which === 'code' ? '명령을 복사했습니다 — 터미널에 붙여 넣고 Enter' : '설정을 복사했습니다 — Claude Desktop 설정 파일에 붙여 넣고 Claude를 다시 시작하세요') : (r.error ?? '복사하지 못했습니다'), { holdMs: 6000 });
+  toast(r.ok ? (MCP_COPY_TOAST[which] ?? MCP_COPY_TOAST.desktop) : (r.error ?? '복사하지 못했습니다'), { holdMs: 6000 });
 }
+
+const MCP_COPY_TOAST = {
+  desktop: '설정을 복사했습니다 — AI 앱의 MCP 설정 파일에 붙여 넣고(이미 mcpServers가 있으면 whenwork 항목만) 앱을 다시 시작하세요',
+  code: '명령을 복사했습니다 — 터미널에 붙여 넣고 Enter',
+  vscode: '설정을 복사했습니다 — VS Code mcp.json에 붙여 넣으세요(이미 servers가 있으면 whenwork 항목만)',
+  codex: '설정을 복사했습니다 — ~/.codex/config.toml 끝에 붙여 넣고 Codex를 다시 시작하세요',
+};
 
 function renderSync() {
   const s = cfg.sync;

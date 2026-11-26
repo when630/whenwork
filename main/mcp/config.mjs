@@ -21,5 +21,24 @@ export function buildConfig({ execPath, script, store = false, localAppData = ''
   // Claude Code 명령 — 인자를 큰따옴표로 감싼다(-e 코드 안에는 큰따옴표가 없다)
   const q = (s) => `"${String(s).replace(/"/g, '\\"')}"`;
   const code = `claude mcp add ${SERVER_NAME} --scope user -e ELECTRON_RUN_AS_NODE=1 -- ${[command, ...args].map(q).join(' ')}`;
-  return { entry, desktop, code };
+  // VS Code(Copilot) mcp.json — 최상위가 servers, stdio는 type을 적어야 한다(2026-11 공식 문서)
+  const vscode = JSON.stringify({ servers: { [SERVER_NAME]: { type: 'stdio', ...entry } } }, null, 2);
+  // Codex CLI ~/.codex/config.toml — JSON 문자열은 TOML 기본 문자열로도 맞다(\\·\"·\uXXXX 이스케이프가 같다)
+  const t = (s) => JSON.stringify(String(s));
+  const codex = [
+    `[mcp_servers.${SERVER_NAME}]`,
+    `command = ${t(command)}`,
+    `args = [${args.map(t).join(', ')}]`,
+    '',
+    `[mcp_servers.${SERVER_NAME}.env]`,
+    `ELECTRON_RUN_AS_NODE = "1"`,
+    '',
+  ].join('\n');
+  return { entry, desktop, code, vscode, codex };
+}
+
+// 복사 단추가 고르는 형식 — 모르는 값은 일반 설정(desktop)
+export const COPY_KINDS = ['desktop', 'code', 'vscode', 'codex'];
+export function pickCopy(config, which) {
+  return config[COPY_KINDS.includes(which) ? which : 'desktop'];
 }

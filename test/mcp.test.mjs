@@ -248,6 +248,53 @@ test('Store판 설정 — 실행 별칭으로 띄우고, 서버는 실행 파일
   assert.ok(SELF_LOADER.includes('m.runStdio()'), '-e로는 직접 실행 판정이 없으니 runStdio를 부른다');
 });
 
+// Codex config.toml의 이 모양(한 줄에 key = 값, 값은 TOML 기본 문자열·배열)만 읽는 작은 해석기
+function readToml(text) {
+  const out = {};
+  let cur = null;
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    const h = line.match(/^\[([^\]]+)\]$/);
+    if (h) { cur = h[1]; out[cur] = {}; continue; }
+    const kv = line.match(/^([A-Za-z_]+) = (.+)$/);
+    assert.ok(kv && cur, `TOML 줄: ${line}`);
+    out[cur][kv[1]] = JSON.parse(kv[2]);
+  }
+  return out;
+}
+
+test('다른 AI 앱 형식 — VS Code는 servers + type stdio, Codex는 TOML 표, 설치판·Store판 모두 같은 항목', async () => {
+  const { buildConfig, pickCopy } = await import('../main/mcp/config.mjs');
+  const exe = String.raw`C:\Users\u\AppData\Local\Programs\WHENWORK\WHENWORK.exe`;
+  const script = String.raw`C:\Users\u\AppData\Local\Programs\WHENWORK\resources\app.asar\main\mcp\server.mjs`;
+  const local = String.raw`C:\Users\u\AppData\Local`;
+  for (const c of [buildConfig({ execPath: exe, script }), buildConfig({ execPath: exe, script, store: true, localAppData: local })]) {
+    const v = JSON.parse(c.vscode);
+    assert.deepEqual(Object.keys(v), ['servers'], 'VS Code는 mcpServers가 아니라 servers');
+    assert.deepEqual(v.servers.whenwork, { type: 'stdio', ...c.entry });
+    const t = readToml(c.codex);
+    assert.deepEqual(Object.keys(t), ['mcp_servers.whenwork', 'mcp_servers.whenwork.env']);
+    assert.equal(t['mcp_servers.whenwork'].command, c.entry.command, '역슬래시가 그대로 돌아온다');
+    assert.deepEqual(t['mcp_servers.whenwork'].args, c.entry.args, 'Store판 -e 코드(작은따옴표·괄호)도 그대로');
+    assert.deepEqual(t['mcp_servers.whenwork.env'], { ELECTRON_RUN_AS_NODE: '1' });
+    assert.ok(c.codex.endsWith('\n'), '파일 끝에 붙여도 다음 표와 붙지 않는다');
+    assert.equal(pickCopy(c, 'vscode'), c.vscode);
+    assert.equal(pickCopy(c, 'codex'), c.codex);
+    assert.equal(pickCopy(c, 'code'), c.code);
+    assert.equal(pickCopy(c, 'desktop'), c.desktop);
+    assert.equal(pickCopy(c, 'entry'), c.desktop, '모르는 값은 일반 설정 — 객체를 클립보드로 넘기지 않는다');
+  }
+  assert.ok(buildConfig({ execPath: exe, script }).codex.includes(String.raw`command = "C:\\Users\\u\\`), 'TOML 기본 문자열은 역슬래시를 두 번');
+});
+
+test('화면 — 단추 네 개가 각 형식을 고르고, 일반 설정 단추는 Claude 말고도 쓸 수 있다고 알린다', () => {
+  const ui = fs.readFileSync(path.join(ROOT, 'renderer', 'today.js'), 'utf8');
+  for (const k of ['desktop', 'code', 'vscode', 'codex']) assert.ok(ui.includes(`runMcpCopy('${k}')`), k);
+  assert.ok(ui.includes('AI 앱 설정 복사 (Claude Desktop·Cursor'));
+  const ipc = fs.readFileSync(path.join(ROOT, 'main', 'ipc.mjs'), 'utf8');
+  assert.ok(ipc.includes('pickCopy(mcpConfig(), which)'));
+});
+
 test('Store 매니페스트에 실행 별칭 whenwork.exe가 있다', () => {
   const m = fs.readFileSync(path.join(ROOT, 'assets', 'appx', 'AppxManifest.xml'), 'utf8');
   assert.ok(m.includes('Category="windows.appExecutionAlias"'));

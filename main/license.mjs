@@ -29,7 +29,7 @@ import crypto from 'node:crypto';
 export const PUBLIC_KEYS = { k202611: '9YjijV4BhTlCPBikR7y94fsyteI4xysg2WOcYcF1tsw' };
 
 // 라이선스 서버 주소(D-P18, when630/whendesk-api). null이면 활성화는 "아직 판매 전"이라고 말한다.
-export const API_BASE = 'https://api.whendev.com'; // 도메인 통일(2026-11) — 옛 api.whendesk.app은 이전 버전을 위해 잠시 함께 연다
+export const API_BASE = 'https://api.whendev.com'; // 도메인 통일(2026-11, D-P32). 옛 api.whendesk.app은 2026-11-29에 끊었다
 
 export const APP = 'whenwork';
 

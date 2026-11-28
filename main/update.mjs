@@ -2,10 +2,12 @@
 //
 // **플랫폼에 따라 할 수 있는 일이 다르다.** electron-builder 공식 문서가 못 박은 대로
 // macOS 자동 업데이트는 코드 서명이 필수다 — Squirrel.Mac이 서명을 확인하고 거부하므로
-// 미서명 배포에서는 내려받아 설치하는 경로 자체가 없다. 그래서 여기서 갈린다:
+// 미서명 배포에서는 내려받아 설치하는 경로 자체가 없다. 그래서 platform.canAutoUpdate로 갈린다:
 //
-//   Windows (canAutoUpdate: true)  — 확인 → 내려받기 → 다음 실행에 설치
-//   macOS   (canAutoUpdate: false) — 확인 → 알리고 받는 곳으로 보낸다
+//   canAutoUpdate: true  — 확인 → 내려받기 → 앱을 끌 때 설치
+//                          (Windows 설치 파일판, macOS 0.4.4+ — Developer ID 서명·공증, D-P30)
+//   canAutoUpdate: false — 확인 → 알리고 받는 곳으로 보낸다 (macOS 0.4.3 이하 미서명판이 이 길이었다)
+//   store                — 스토어가 업데이트한다 (Microsoft Store판)
 //
 // 두 경우 모두 **사용자가 모르는 채로 바뀌지 않는다**. 내려받은 뒤에도 바로 재시작하지
 // 않고, 다음에 앱을 끌 때 설치한다(autoInstallOnAppQuit). 퀵캡처 앱이 쓰려는 순간
@@ -114,7 +116,7 @@ export function setupUpdater(ctx) {
     ctx.update.version = info?.version ?? null;
     ctx.update.checkedAt = new Date().toISOString();
     notifyRenderer();
-    // 자동 설치가 불가능한 쪽(미서명 macOS)에서는 여기서 한 번 알린다 —
+    // 자동 설치가 불가능한 쪽(canAutoUpdate: false)에서는 여기서 한 번 알린다 —
     // 알리지 않으면 새 버전이 나온 줄을 영영 모른다.
     if (!platform.canAutoUpdate) {
       ctx.notify?.(`새 버전 ${ctx.update.version}`, '눌러서 받는 곳으로 갑니다', {
@@ -155,7 +157,7 @@ export function setupUpdater(ctx) {
     return ctx.update;
   };
 
-  // macOS(미서명)에서는 "설치"가 받는 곳을 여는 것이다. 없는 기능을 있는 척하지 않는다.
+  // 자동 설치가 불가능한 쪽에서는 "설치"가 받는 곳을 여는 것이다. 없는 기능을 있는 척하지 않는다.
   ctx.installUpdate = () => {
     if (!platform.canAutoUpdate) {
       shell.openExternal(RELEASES_URL);

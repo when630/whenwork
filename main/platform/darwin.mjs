@@ -13,14 +13,17 @@ import { nativeImage } from 'electron';
 export default {
   name: 'darwin',
 
-  // Windows와 같은 조합을 기본으로 쓴다. macOS 관례는 Command+…지만
-  // Command+Alt+Space는 Spotlight 계열과 부딪히는 자리가 많고, 무엇보다
-  // 두 OS를 오가는 사람이 손가락을 다시 배우지 않아도 된다. 어차피 PLAT-02로
-  // 바꿀 수 있고, 등록 실패는 화면에 드러난다.
-  defaultHotkey: 'Control+Alt+Space',
+  // Windows(Ctrl+Alt+Space)와 같은 조합을 쓰지 않는다. macOS에서 ⌃⌥Space는 시스템 기본
+  // "입력 메뉴에서 다음 소스 선택"이고 ⌃Space는 "이전 입력 소스 선택"이다 — 한글·영문을 오가는
+  // 한국어 사용자는 거의 다 켜 두고 있다. 시스템 단축키가 먼저 가져가서 register()는 true인데
+  // 눌러도 입력 소스만 바뀐다(맥 실기기 symbolichotkeys 61번 enabled 확인). 등록 실패로도
+  // 드러나지 않으니 기본값에서 피해야 한다.
+  // ⌘Space(Spotlight)·⌘⌥Space(Finder 검색)·⌃⌘Space(이모지)도 시스템 것이고, ⌥Space는
+  // Raycast·Alfred·ChatGPT 기본값과 겹친다. 그래서 ⌃⇧Space. 설정에서 바꿀 수 있다(PLAT-02).
+  defaultHotkey: 'Control+Shift+Space',
 
-  // 인박스를 바로 여는 조합 — 퀵캡처 조합에 Shift만 더한다. 새 조합을 외우게 하지 않으려는
-  // 것이고, 맨 Space 계열이라 다른 앱의 단축키와 부딪힐 일이 적다. 설정에서 바꿀 수 있다.
+  // 인박스를 바로 여는 조합 — 퀵캡처 조합에 키 하나(⌥)만 더한다. 새 조합을 외우게 하지 않으려는
+  // 것이고, 시스템 입력 소스 단축키(⌃Space·⌃⌥Space)와도 겹치지 않는다. 설정에서 바꿀 수 있다.
   defaultInboxHotkey: 'Control+Alt+Shift+Space',
 
   // macOS 자동 업데이트는 **코드 서명이 필수**다(electron-builder 공식 문서 명시).

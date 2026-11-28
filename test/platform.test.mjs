@@ -137,3 +137,25 @@ test('macOS 구현에는 실기기 미검증 경고가 남아 있다', () => {
   // 검증 전에 조용히 사라지는 것을 막는 게 목적이다.
   assert.match(read('darwin.mjs'), /실기기에서 검증되지 않았다/);
 });
+
+test('macOS 기본 단축키는 시스템 기본 단축키와 겹치지 않는다', () => {
+  // macOS가 기본으로 켜 두는 Space 조합. 시스템이 먼저 가져가므로 globalShortcut.register()는
+  // true를 돌려주고도 눌리지 않는다 — 등록 실패 안내도 뜨지 않아 사용자는 이유를 모른다.
+  //   ⌃Space 이전 입력 소스 · ⌃⌥Space 다음 입력 소스 · ⌘Space Spotlight
+  //   ⌘⌥Space Finder 검색 · ⌃⌘Space 이모지와 기호
+  const SYSTEM = ['Control+Space', 'Alt+Control+Space', 'Command+Space', 'Alt+Command+Space', 'Command+Control+Space'];
+  // 수식키 순서와 별칭(Ctrl·Option·Cmd)이 달라도 같은 조합으로 본다
+  const norm = (accel) =>
+    accel
+      .split('+')
+      .map((k) => ({ Ctrl: 'Control', Option: 'Alt', Cmd: 'Command', CommandOrControl: 'Command', CmdOrCtrl: 'Command' })[k] ?? k)
+      .sort()
+      .join('+');
+  const system = new Set(SYSTEM.map(norm));
+  const mac = read('darwin.mjs');
+  for (const key of ['defaultHotkey', 'defaultInboxHotkey']) {
+    const accel = mac.match(new RegExp(`${key}: '([^']+)'`))?.[1];
+    assert.ok(accel, `darwin.mjs에서 ${key}를 찾지 못했다`);
+    assert.ok(!system.has(norm(accel)), `${key} ${accel}는 macOS 시스템 단축키와 겹친다`);
+  }
+});
